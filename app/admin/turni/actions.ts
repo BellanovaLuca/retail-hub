@@ -1,7 +1,6 @@
 "use server";
 
 import { addDays, format, parseISO } from "date-fns";
-import { it } from "date-fns/locale";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
@@ -11,9 +10,8 @@ import {
   runAction,
   type ActionResult,
 } from "@/lib/auth/guards";
-import { getAdminWeek, getSchedulePeople, getTemplates, toShiftRecord } from "@/lib/data/schedule";
-import { notify, notifyEach } from "@/lib/notifications";
-import { buildSnapshot, type DayChange } from "@/lib/schedule/cells";
+import { getSchedulePeople, getTemplates, toShiftRecord } from "@/lib/data/schedule";
+import { publishSnapshot } from "@/lib/schedule/publish";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import type { createClient } from "@/lib/supabase/server";
 import type { TablesInsert } from "@/lib/supabase/types";
@@ -264,11 +262,6 @@ export async function saveShiftDay(input: z.input<typeof daySchema>): Promise<Ac
   });
 }
 
-function shortDay(date: string) {
-  const s = format(parseISO(date), "EEE d", { locale: it });
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 /** Pubblica o ripubblica: istantanea, registro delle modifiche, notifiche (§5, §10). */
 export async function publishWeek(
   weekId: string,
@@ -277,80 +270,17 @@ export async function publishWeek(
   return runAction(async () => {
     const { supabase, profile } = await adminAction();
     const week = await loadWeek(supabase, z.uuid().parse(weekId));
-    const data = await getAdminWeek(supabase, week.week_start);
-    const [templates, people] = await Promise.all([
-      getTemplates(supabase),
-      getSchedulePeople(supabase),
-    ]);
-    const { snapshot, changes } = buildSnapshot(
-      data.shifts,
-      new Map(templates.map((t) => [t.id, t])),
-      new Map(people.map((p) => [p.id, p])),
-      data.week.publishedShifts,
-    );
-    const firstPublish = week.status !== "published";
-
-    const { error } = await supabase
-      .from("schedule_weeks")
-      .update({
-        status: "published",
-        version: week.version + 1,
-        published_at: new Date().toISOString(),
-        published_by: profile.id,
-        published_shifts: snapshot,
-      })
-      .eq("id", week.id);
-    if (error) return { ok: false, message: dbErrorMessage(error, "Pubblicazione non riuscita.") };
-
-    if (!firstPublish && changes.length) {
-      await supabase.from("shift_changes").insert(
-        changes.map((c) => ({
-          profile_id: c.profileId,
-          date: c.date,
-          before: { text: c.before },
-          after: { text: c.after },
-          changed_by: profile.id,
-          notified_at: new Date().toISOString(),
-        })),
-      );
-    }
-
-    const weekLabel = `settimana del ${format(parseISO(week.week_start), "d MMMM", { locale: it })}`;
-    const link = `/orari?settimana=${week.week_start}`;
-    const withShifts = [...new Set(snapshot.map((s) => s.profile_id))];
-
-    if (firstPublish || mode === "all") {
-      await notify(withShifts, {
-        kind: "week_published",
-        title: firstPublish ? "Orari pubblicati" : "Orari aggiornati",
-        body: `Sono disponibili i tuoi orari della ${weekLabel}.`,
-        link,
-      });
-    } else {
-      const byPerson = new Map<string, DayChange[]>();
-      for (const c of changes) byPerson.set(c.profileId, [...(byPerson.get(c.profileId) ?? []), c]);
-      await notifyEach(
-        [...byPerson].map(([profileId, list]) => ({
-          profileId,
-          notification: {
-            kind: "shift_changed" as const,
-            title: "Il tuo orario è cambiato",
-            body: list.map((c) => `${shortDay(c.date)}: ${c.before} → ${c.after}`).join("\n"),
-            link,
-          },
-        })),
-      );
-    }
-
+    const res = await publishSnapshot(supabase, week.week_start, profile.id, { mode });
+    if (!res.ok) return { ok: false, message: res.message };
     revalidateWeek(week.week_start);
     revalidatePath("/orari", "layout");
     revalidatePath("/");
     return {
       ok: true,
-      message: firstPublish
+      message: res.firstPublish
         ? "Settimana pubblicata."
-        : `Settimana ripubblicata (${changes.length} giornate cambiate).`,
-      data: { changes: changes.length },
+        : `Settimana ripubblicata (${res.changes} giornate cambiate).`,
+      data: { changes: res.changes },
     };
   });
 }
