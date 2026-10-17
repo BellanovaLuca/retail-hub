@@ -22,6 +22,8 @@ const csp = [
   .replace(/\s+/g, " ");
 
 const nextConfig: NextConfig = {
+  // Cartella di output separabile (es. build di verifica mentre gira `pnpm dev`).
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   poweredByHeader: false,
   // react-pdf (export PDF dei turni) va caricato da node_modules, non impacchettato.
   serverExternalPackages: ["@react-pdf/renderer"],
