@@ -254,8 +254,8 @@ export function RuleForm({
         </p>
         {preview && typeof preview !== "string" && preview.samples.length ? (
           <ul className="mt-2 list-disc pl-4 text-xs text-muted">
-            {preview.samples.map((s) => (
-              <li key={s}>{s}</li>
+            {preview.samples.map((s, i) => (
+              <li key={`${i}-${s}`}>{s}</li>
             ))}
           </ul>
         ) : null}

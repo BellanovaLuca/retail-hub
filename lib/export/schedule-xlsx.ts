@@ -113,7 +113,8 @@ function addGridSheet(wb: ExcelJS.Workbook, grid: ScheduleGridModel) {
     xr.getCell(1).font = { bold: true };
     f.cells.forEach((v, i) => {
       const xc = xr.getCell(2 + i);
-      xc.value = /^\d+$/.test(v) ? Number(v) : v;
+      // Conteggi e ore ("45,5") come numeri, così la riga non mescola testi e numeri.
+      xc.value = /^\d+(,\d+)?$/.test(v) ? Number(v.replace(",", ".")) : v;
       xc.alignment = { horizontal: "center" };
       xc.font = { bold: true };
     });

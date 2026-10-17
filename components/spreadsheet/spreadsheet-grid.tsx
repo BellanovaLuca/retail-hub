@@ -138,7 +138,6 @@ export function SpreadsheetGrid({
 }: SpreadsheetGridProps) {
   const editable = !!onChange && !readOnly;
   const mobile = useIsMobile();
-  const gridId = React.useId();
 
   /* zoom: il prop è il valore iniziale; se cambia, si riallinea */
   const [density, setDensity] = React.useState<Density>(densityProp);
@@ -792,7 +791,6 @@ export function SpreadsheetGrid({
       <div
         ref={scrollRef}
         role="grid"
-        id={gridId}
         aria-label={ariaLabel}
         aria-rowcount={ariaRowCount}
         aria-colcount={columns.length + 1}

@@ -263,231 +263,235 @@ function WeekDocument({ model }: { model: TimesheetModel }) {
 
   return (
     <Document title={`Week ${model.weekNumber}`} author="Portale Staff Cordusio">
-      <Page size="A4" orientation="portrait" style={w.page} wrap={false}>
-        {/* Intestazione: numero settimana, aree, sigle, ore di contratto. */}
-        <View style={w.row}>
-          <View style={[w.center, { width: DATE_W + HOUR_W, height: 18 }]}>
-            <Text style={[w.bold, { fontSize: 12 }]}>{model.weekNumber}</Text>
-          </View>
-          <View>
-            <View style={w.row}>
-              {model.groups.map((grp) => (
-                <View
-                  key={grp.zone}
-                  style={[
-                    w.center,
-                    { width: grp.span * personW, height: 6, backgroundColor: zoneBg(grp.zone) },
-                  ]}
-                >
-                  <Text style={[w.cellText, w.bold]}>{grp.label.toUpperCase()}</Text>
-                </View>
-              ))}
+      <Page size="A4" orientation="portrait" style={w.page}>
+        {/* `wrap={false}` va sul contenitore, non sul Page: un Page non paginato prende
+            l'altezza del contenuto invece dei 841,89 pt dell'A4. */}
+        <View wrap={false}>
+          {/* Intestazione: numero settimana, aree, sigle, ore di contratto. */}
+          <View style={w.row}>
+            <View style={[w.center, { width: DATE_W + HOUR_W, height: 18 }]}>
+              <Text style={[w.bold, { fontSize: 12 }]}>{model.weekNumber}</Text>
             </View>
-            <View style={w.row}>
-              {model.columns.map((col) => (
-                <View
-                  key={col.id}
-                  style={[
-                    w.center,
-                    border,
-                    { width: personW, height: 7, backgroundColor: zoneBg(col.zone) },
-                  ]}
-                >
-                  <Text style={[w.cellText, w.bold, { fontSize: 4.6 }]}>{col.shortLabel}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={w.row}>
-              {model.columns.map((col, i) => (
-                <View key={col.id} style={[w.center, { width: personW, height: 5 }]}>
-                  <Text style={[w.cellText, { color: C.muted, fontSize: 4.5 }]}>
-                    {model.contract[i] ?? ""}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-          <View style={{ width: indicatorsW }}>
-            <View style={[w.center, { height: 6 }]}>
-              <Text style={[w.cellText, w.bold]}>{formatHours(model.contractTotal)} h</Text>
-            </View>
-            <View style={w.row}>
-              {["COP. OTT.", "DELTA", "TESTE", "VISTA", "SOLE"].map((label, i) => (
-                <View
-                  key={label}
-                  style={[
-                    w.center,
-                    border,
-                    {
-                      width: IND_W,
-                      height: 7,
-                      backgroundColor: i === 3 ? C.vista : i === 4 ? C.sole : C.white,
-                    },
-                  ]}
-                >
-                  <Text style={[w.cellText, w.bold, { fontSize: i === 0 ? 3.2 : 3.8 }]}>
-                    {label}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </View>
-
-        {model.days.map((day) => (
-          <View
-            key={day.date}
-            style={[
-              w.row,
-              {
-                marginTop: 2.2,
-                borderTopWidth: 0.6,
-                borderTopColor: C.black,
-                opacity: day.closed ? 0.45 : 1,
-              },
-            ]}
-          >
-            {/* Data in verticale. */}
-            <View
-              style={[
-                w.center,
-                { width: DATE_W, borderRightWidth: 0.6, borderRightColor: C.black },
-              ]}
-            >
-              {/* Rotazione di -90°: la data si legge dal basso verso l'alto, come nei fogli. */}
-              <Text
-                style={[
-                  w.bold,
-                  { fontSize: 5.5, width: 100, textAlign: "center", transform: "rotate(-90deg)" },
-                ]}
-              >
-                {day.label.toUpperCase()}
-                {day.closed ? " · CHIUSO" : ""}
-              </Text>
-            </View>
-
             <View>
-              {/* ORARIO */}
-              <View style={[w.row, { height: LABEL_ROW_H, borderBottomWidth: 0.4 }]}>
-                <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
-                  <Text style={[w.cellText, w.bold, { fontSize: 4.4 }]}>ORARIO</Text>
-                </View>
-                {day.residual.map((v, i) => (
-                  <View key={i} style={[w.center, border, { width: personW }]}>
-                    <Text
-                      style={[
-                        w.cellText,
-                        w.bold,
-                        {
-                          color: v !== null && v < 0 ? C.danger : v === 0 ? C.muted : C.black,
-                        },
-                      ]}
-                    >
-                      {v === null ? "" : formatHours(v)}
+              <View style={w.row}>
+                {model.groups.map((grp) => (
+                  <View
+                    key={grp.zone}
+                    style={[
+                      w.center,
+                      { width: grp.span * personW, height: 6, backgroundColor: zoneBg(grp.zone) },
+                    ]}
+                  >
+                    <Text style={[w.cellText, w.bold]}>{grp.label.toUpperCase()}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={w.row}>
+                {model.columns.map((col) => (
+                  <View
+                    key={col.id}
+                    style={[
+                      w.center,
+                      border,
+                      { width: personW, height: 7, backgroundColor: zoneBg(col.zone) },
+                    ]}
+                  >
+                    <Text style={[w.cellText, w.bold, { fontSize: 4.6 }]}>{col.shortLabel}</Text>
+                  </View>
+                ))}
+              </View>
+              <View style={w.row}>
+                {model.columns.map((col, i) => (
+                  <View key={col.id} style={[w.center, { width: personW, height: 5 }]}>
+                    <Text style={[w.cellText, { color: C.muted, fontSize: 4.5 }]}>
+                      {model.contract[i] ?? ""}
                     </Text>
                   </View>
                 ))}
-                <View style={{ width: indicatorsW }} />
+              </View>
+            </View>
+            <View style={{ width: indicatorsW }}>
+              <View style={[w.center, { height: 6 }]}>
+                <Text style={[w.cellText, w.bold]}>{formatHours(model.contractTotal)} h</Text>
+              </View>
+              <View style={w.row}>
+                {["COP. OTT.", "DELTA", "TESTE", "VISTA", "SOLE"].map((label, i) => (
+                  <View
+                    key={label}
+                    style={[
+                      w.center,
+                      border,
+                      {
+                        width: IND_W,
+                        height: 7,
+                        backgroundColor: i === 3 ? C.vista : i === 4 ? C.sole : C.white,
+                      },
+                    ]}
+                  >
+                    <Text style={[w.cellText, w.bold, { fontSize: i === 0 ? 3.2 : 3.8 }]}>
+                      {label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          {model.days.map((day) => (
+            <View
+              key={day.date}
+              style={[
+                w.row,
+                {
+                  marginTop: 2.2,
+                  borderTopWidth: 0.6,
+                  borderTopColor: C.black,
+                  opacity: day.closed ? 0.45 : 1,
+                },
+              ]}
+            >
+              {/* Data in verticale. */}
+              <View
+                style={[
+                  w.center,
+                  { width: DATE_W, borderRightWidth: 0.6, borderRightColor: C.black },
+                ]}
+              >
+                {/* Rotazione di -90°: la data si legge dal basso verso l'alto, come nei fogli. */}
+                <Text
+                  style={[
+                    w.bold,
+                    { fontSize: 5.5, width: 100, textAlign: "center", transform: "rotate(-90deg)" },
+                  ]}
+                >
+                  {day.label.toUpperCase()}
+                  {day.closed ? " · CHIUSO" : ""}
+                </Text>
               </View>
 
-              {/* Ore 07–22 */}
-              {TIMESHEET_HOURS.map((hour, h) => {
-                const ind = day.indicators[h];
-                const outside =
-                  isSlotOutsideOpening(h * 2, day.opening) &&
-                  isSlotOutsideOpening(h * 2 + 1, day.opening);
-                return (
-                  <View key={hour} style={w.row}>
-                    <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
-                      <Text style={[w.cellText, { color: C.muted, fontSize: 4.4 }]}>
-                        {String(hour).padStart(2, "0")}-{String(hour + 1).padStart(2, "0")}
+              <View>
+                {/* ORARIO */}
+                <View style={[w.row, { height: LABEL_ROW_H, borderBottomWidth: 0.4 }]}>
+                  <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
+                    <Text style={[w.cellText, w.bold, { fontSize: 4.4 }]}>ORARIO</Text>
+                  </View>
+                  {day.residual.map((v, i) => (
+                    <View key={i} style={[w.center, border, { width: personW }]}>
+                      <Text
+                        style={[
+                          w.cellText,
+                          w.bold,
+                          {
+                            color: v !== null && v < 0 ? C.danger : v === 0 ? C.muted : C.black,
+                          },
+                        ]}
+                      >
+                        {v === null ? "" : formatHours(v)}
                       </Text>
                     </View>
-                    {day.cells[h].map((cell, i) => {
-                      const leave = day.leaves[i];
-                      const bgFor = (slot: number) =>
-                        leave
-                          ? LEAVE_BG[leave.fill]
-                          : isSlotOutsideOpening(slot, day.opening)
-                            ? C.surface
-                            : C.white;
-                      return (
-                        <View key={i} style={[border, { width: personW }]}>
-                          <HalfCell
-                            mark={leave ? null : cell.marks[0]}
-                            width={personW - 0.3}
-                            bg={bgFor(h * 2)}
-                            bottom={false}
-                          />
-                          <HalfCell
-                            mark={leave ? null : cell.marks[1]}
-                            width={personW - 0.3}
-                            bg={bgFor(h * 2 + 1)}
-                            bottom
-                          />
+                  ))}
+                  <View style={{ width: indicatorsW }} />
+                </View>
+
+                {/* Ore 07–22 */}
+                {TIMESHEET_HOURS.map((hour, h) => {
+                  const ind = day.indicators[h];
+                  const outside =
+                    isSlotOutsideOpening(h * 2, day.opening) &&
+                    isSlotOutsideOpening(h * 2 + 1, day.opening);
+                  return (
+                    <View key={hour} style={w.row}>
+                      <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
+                        <Text style={[w.cellText, { color: C.muted, fontSize: 4.4 }]}>
+                          {String(hour).padStart(2, "0")}-{String(hour + 1).padStart(2, "0")}
+                        </Text>
+                      </View>
+                      {day.cells[h].map((cell, i) => {
+                        const leave = day.leaves[i];
+                        const bgFor = (slot: number) =>
+                          leave
+                            ? LEAVE_BG[leave.fill]
+                            : isSlotOutsideOpening(slot, day.opening)
+                              ? C.surface
+                              : C.white;
+                        return (
+                          <View key={i} style={[border, { width: personW }]}>
+                            <HalfCell
+                              mark={leave ? null : cell.marks[0]}
+                              width={personW - 0.3}
+                              bg={bgFor(h * 2)}
+                              bottom={false}
+                            />
+                            <HalfCell
+                              mark={leave ? null : cell.marks[1]}
+                              width={personW - 0.3}
+                              bg={bgFor(h * 2 + 1)}
+                              bottom
+                            />
+                          </View>
+                        );
+                      })}
+                      {[null, ind.delta, ind.teste, ind.vista, ind.sole].map((v, i) => (
+                        <View
+                          key={i}
+                          style={[
+                            w.center,
+                            border,
+                            {
+                              width: IND_W,
+                              height: HALF_H * 2,
+                              borderBottomWidth: 0.3,
+                              borderBottomColor: C.line,
+                            },
+                          ]}
+                        >
+                          {i === 0 ? (
+                            <Tick ok={ind.copOtt} muted={outside} />
+                          ) : (
+                            <Text style={[w.cellText, { fontSize: 4.6 }]}>{v}</Text>
+                          )}
                         </View>
-                      );
-                    })}
-                    {[null, ind.delta, ind.teste, ind.vista, ind.sole].map((v, i) => (
+                      ))}
+                    </View>
+                  );
+                })}
+
+                {/* TOT */}
+                <View
+                  style={[
+                    w.row,
+                    { height: LABEL_ROW_H, borderTopWidth: 0.4, borderTopColor: C.black },
+                  ]}
+                >
+                  <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
+                    <Text style={[w.cellText, w.bold, { fontSize: 4.4 }]}>TOT</Text>
+                  </View>
+                  {day.tot.map((v, i) => {
+                    const leave = day.leaves[i];
+                    return (
                       <View
                         key={i}
                         style={[
                           w.center,
                           border,
-                          {
-                            width: IND_W,
-                            height: HALF_H * 2,
-                            borderBottomWidth: 0.3,
-                            borderBottomColor: C.line,
-                          },
+                          { width: personW },
+                          leave ? { backgroundColor: LEAVE_BG[leave.fill] } : {},
                         ]}
                       >
-                        {i === 0 ? (
-                          <Tick ok={ind.copOtt} muted={outside} />
-                        ) : (
-                          <Text style={[w.cellText, { fontSize: 4.6 }]}>{v}</Text>
-                        )}
+                        <Text style={[w.cellText, w.bold, { fontSize: leave ? 3.8 : 5 }]}>
+                          {leave ? leave.label.toUpperCase() : v ? formatHours(v) : ""}
+                        </Text>
                       </View>
-                    ))}
+                    );
+                  })}
+                  <View style={[w.center, { width: indicatorsW }]}>
+                    <Text style={[w.cellText, w.bold]}>{formatHours(day.total)}</Text>
                   </View>
-                );
-              })}
-
-              {/* TOT */}
-              <View
-                style={[
-                  w.row,
-                  { height: LABEL_ROW_H, borderTopWidth: 0.4, borderTopColor: C.black },
-                ]}
-              >
-                <View style={[{ width: HOUR_W, justifyContent: "center", paddingLeft: 1 }]}>
-                  <Text style={[w.cellText, w.bold, { fontSize: 4.4 }]}>TOT</Text>
-                </View>
-                {day.tot.map((v, i) => {
-                  const leave = day.leaves[i];
-                  return (
-                    <View
-                      key={i}
-                      style={[
-                        w.center,
-                        border,
-                        { width: personW },
-                        leave ? { backgroundColor: LEAVE_BG[leave.fill] } : {},
-                      ]}
-                    >
-                      <Text style={[w.cellText, w.bold, { fontSize: leave ? 3.8 : 5 }]}>
-                        {leave ? leave.label.toUpperCase() : v ? formatHours(v) : ""}
-                      </Text>
-                    </View>
-                  );
-                })}
-                <View style={[w.center, { width: indicatorsW }]}>
-                  <Text style={[w.cellText, w.bold]}>{formatHours(day.total)}</Text>
                 </View>
               </View>
             </View>
-          </View>
-        ))}
+          ))}
+        </View>
       </Page>
     </Document>
   );

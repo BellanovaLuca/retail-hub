@@ -62,7 +62,11 @@ export function resolveZone(shift: Pick<ShiftRecord, "zone">, person?: ScheduleP
   return null;
 }
 
-/** Costruisce l'istantanea da pubblicare e segna le giornate cambiate rispetto alla precedente. */
+/**
+ * Costruisce l'istantanea da pubblicare e segna le giornate cambiate rispetto alla precedente.
+ * Il badge "Modificato" resta anche sulle giornate già segnate nella versione precedente e
+ * rimaste uguali: una ripubblicazione senza modifiche (o parziale) non lo azzera.
+ */
 export function buildSnapshot(
   shifts: ShiftRecord[],
   templates: Map<string, TemplateRecord>,
@@ -92,6 +96,7 @@ export function buildSnapshot(
 
   const changes = diffSnapshots(previous, snapshot);
   const changedKeys = new Set(changes.map((c) => `${c.profileId}|${c.date}`));
+  for (const s of previous) if (s.changed) changedKeys.add(`${s.profile_id}|${s.date}`);
   for (const s of snapshot) s.changed = changedKeys.has(`${s.profile_id}|${s.date}`);
   return { snapshot, changes };
 }

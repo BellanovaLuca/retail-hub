@@ -20,14 +20,22 @@ import {
   type FooterRow,
   type GridColumn,
   type GridRow,
+  type MobileEditorContext,
   type SaveState,
 } from "@/components/spreadsheet";
+import { DefaultMobileEditor } from "@/components/spreadsheet/mobile-sheet";
 import { Timesheet, type TimesheetSaveInput } from "@/components/schedule/timesheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { weekNumber } from "@/lib/dates";
 import type { StoreCalendar } from "@/lib/data/schedule";
-import { buildSnapshot, cellText, resolveBackOffice, resolveZone } from "@/lib/schedule/cells";
+import {
+  buildSnapshot,
+  cellText,
+  resolveBackOffice,
+  resolveZone,
+  sortShifts,
+} from "@/lib/schedule/cells";
 import type {
   LeaveRecord,
   PublishedShift,
@@ -95,30 +103,35 @@ export function ShiftEditor(props: EditorProps) {
   const [mode, setMode] = useState<"grid" | "timesheet">("grid");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Map<string, string>>(new Map());
   const [dialog, setDialog] = useState<{ profileId: string; date: string } | null>(null);
   const [, startTransition] = useTransition();
   const presence = useWeekRealtime(week.id, props.me);
 
-  // Salvataggi in corso: "Salvato" solo quando sono finiti tutti (incolla e scritture in fila
-  // partono in parallelo).
+  // Le celle modificate si accumulano in una coda e partono in un solo lotto dopo una breve
+  // pausa (digitazione in fila, incolla, riempimento): una chiamata per lotto, non per cella.
+  const queue = useRef(new Map<string, { profileId: string; date: string; value: string }>());
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Salvataggi in corso: "Salvato" solo quando la coda è vuota e sono finiti tutti.
   const inflight = useRef(0);
   const failed = useRef<string | null>(null);
+  const busy = () => inflight.current > 0 || queue.current.size > 0;
 
   // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati,
-  // e comunque finché ci sono salvataggi in corso.
+  // e comunque finché ci sono salvataggi in coda o in corso.
   const lastShifts = useRef(shifts);
   useEffect(() => {
     if (lastShifts.current !== shifts) {
       lastShifts.current = shifts;
-      if (inflight.current === 0) setPending(new Map());
+      if (!busy()) setPending(new Map());
     }
   }, [shifts]);
 
-  // Chiudere la pagina con salvataggi in corso farebbe perdere le ultime celle.
+  // Chiudere la pagina con salvataggi in coda o in corso farebbe perdere le ultime celle.
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (inflight.current > 0) e.preventDefault();
+      if (busy()) e.preventDefault();
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
@@ -300,6 +313,37 @@ export function ShiftEditor(props: EditorProps) {
     [templates],
   );
 
+  const FLUSH_DELAY_MS = 300;
+  const MAX_BATCH = 2000;
+
+  // Invia la coda in lotti (al massimo 2000 celle per chiamata, il limite dell'azione).
+  // Un lotto alla volta: così due modifiche alla stessa cella arrivano nell'ordine giusto.
+  const flush = useCallback(() => {
+    flushTimer.current = null;
+    if (inflight.current > 0 || queue.current.size === 0) return;
+    const batch = [...queue.current.values()].slice(0, MAX_BATCH);
+    for (const c of batch) queue.current.delete(key(c.profileId, c.date));
+    inflight.current += 1;
+    startTransition(async () => {
+      try {
+        const res = await saveShiftCells(week.id, batch);
+        if (!res.ok) failed.current = res.message ?? "Salvataggio non riuscito.";
+      } catch {
+        failed.current = "Salvataggio non riuscito: controlla la connessione e riprova.";
+      } finally {
+        inflight.current -= 1;
+      }
+      if (queue.current.size > 0) {
+        flush();
+        return;
+      }
+      setSaveState(failed.current ? "error" : "saved");
+      setMessage(failed.current);
+      failed.current = null;
+      router.refresh();
+    });
+  }, [week.id, router]);
+
   const onChange = useCallback(
     (changes: CellChange[]) => {
       setPending((prev) => {
@@ -307,28 +351,88 @@ export function ShiftEditor(props: EditorProps) {
         for (const c of changes) next.set(key(c.rowId, c.colId), c.value);
         return next;
       });
-      inflight.current += 1;
+      for (const c of changes) {
+        queue.current.set(key(c.rowId, c.colId), {
+          profileId: c.rowId,
+          date: c.colId,
+          value: c.value,
+        });
+      }
       setSaveState("saving");
-      startTransition(async () => {
-        try {
-          const res = await saveShiftCells(
-            week.id,
-            changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
-          );
-          if (!res.ok) failed.current = res.message ?? "Salvataggio non riuscito.";
-        } catch {
-          failed.current = "Salvataggio non riuscito: controlla la connessione e riprova.";
-        } finally {
-          inflight.current -= 1;
-        }
-        if (inflight.current > 0) return;
-        setSaveState(failed.current ? "error" : "saved");
-        setMessage(failed.current);
-        failed.current = null;
-        router.refresh();
-      });
+      if (flushTimer.current) clearTimeout(flushTimer.current);
+      flushTimer.current = setTimeout(flush, FLUSH_DELAY_MS);
     },
-    [week.id, router],
+    [flush],
+  );
+
+  // Smontando l'editor (cambio vista) la coda parte subito.
+  useEffect(
+    () => () => {
+      if (flushTimer.current) {
+        clearTimeout(flushTimer.current);
+        flush();
+      }
+    },
+    [flush],
+  );
+
+  // Da telefono o tablet (puntatore grossolano) il foglio dal basso offre, oltre al valore,
+  // il dettaglio della giornata e, per i jolly senza area, la scelta rapida Vista/Sole.
+  const renderMobileEditor = useCallback(
+    (ctx: MobileEditorContext) => {
+      const person = peopleById.get(ctx.rowId);
+      const dayShifts = byDay.get(key(ctx.rowId, ctx.colId)) ?? [];
+      const first = sortShifts(dayShifts)[0];
+      const needsZone =
+        person?.homeZone === "jolly" &&
+        dayShifts.some((s) => s.start) &&
+        !resolveZone(first, person);
+      const openDetail = () => {
+        ctx.close();
+        setDialog({ profileId: ctx.rowId, date: ctx.colId });
+      };
+      const chooseZone = (zone: "vista" | "sole") => {
+        ctx.close();
+        setSaveState("saving");
+        startTransition(async () => {
+          const res = await saveShiftDay({
+            weekId: week.id,
+            profileId: ctx.rowId,
+            date: ctx.colId,
+            templateId: first?.templateId ?? null,
+            segments: sortShifts(dayShifts)
+              .filter((s) => s.start && s.end)
+              .map((s) => ({ start: s.start!, end: s.end!, isBackOffice: s.isBackOffice })),
+            breakMinutes: first?.breakMinutes ?? 0,
+            departmentId: first?.departmentId ?? person?.primaryDepartmentId ?? null,
+            zone,
+            note: first?.note ?? null,
+          });
+          setSaveState(res.ok ? "saved" : "error");
+          setMessage(res.ok ? null : res.message);
+          router.refresh();
+        });
+      };
+      return (
+        <div className="flex flex-col gap-3">
+          <DefaultMobileEditor value={ctx.value} commit={ctx.commit} close={ctx.close} />
+          {needsZone ? (
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Area della giornata">
+              <Button type="button" variant="secondary" onClick={() => chooseZone("vista")}>
+                <span aria-hidden className="size-2 rounded-full bg-vista" /> Vista
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => chooseZone("sole")}>
+                <span aria-hidden className="size-2 rounded-full bg-sole" /> Sole
+              </Button>
+            </div>
+          ) : null}
+          <Button type="button" variant="ghost" onClick={openDetail}>
+            Dettaglio della giornata
+          </Button>
+        </div>
+      );
+    },
+    [peopleById, byDay, week.id, router],
   );
 
   // Foglio orario: ogni giornata dipinta sostituisce i turni del giorno, poi si ricaricano i dati.
@@ -411,7 +515,11 @@ export function ShiftEditor(props: EditorProps) {
               <Badge tone="solid">Pubblicata · v{week.version}</Badge>
             )}
             {week.status === "published" && unpublished.length > 0 ? (
-              <Badge tone="warning">{unpublished.length} modifiche da pubblicare</Badge>
+              <Badge tone="warning">
+                {unpublished.length === 1
+                  ? "1 modifica da pubblicare"
+                  : `${unpublished.length} modifiche da pubblicare`}
+              </Badge>
             ) : null}
             <span className="nums">
               {formatHoursIt(plannedTotal)} / {formatHoursIt(contractTotal)} h di contratto
@@ -485,6 +593,11 @@ export function ShiftEditor(props: EditorProps) {
           {message}
         </p>
       ) : null}
+      {notice ? (
+        <p role="status" className="border-l-2 border-line-strong pl-3 text-sm text-muted">
+          {notice}
+        </p>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_17rem]">
         <div className="min-w-0">
@@ -500,6 +613,7 @@ export function ShiftEditor(props: EditorProps) {
               normalize={normalize}
               onChange={onChange}
               onCellActivate={(profileId, date) => setDialog({ profileId, date })}
+              renderMobileEditor={renderMobileEditor}
               footerRows={footerRows}
               rowHeaderLabel="Persona"
               saveState={saveState}
@@ -573,7 +687,10 @@ export function ShiftEditor(props: EditorProps) {
           templates={templates}
           departments={departments}
           published={publishedByDay.get(key(dialog.profileId, dialog.date)) ?? []}
-          onSaved={() => router.refresh()}
+          onSaved={(text) => {
+            setNotice(text ?? null);
+            router.refresh();
+          }}
         />
       ) : null}
     </div>

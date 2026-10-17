@@ -2,7 +2,7 @@
 
 import { Copy, LayoutTemplate, NotebookPen, Scale } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Field, FormMessage, Select, Textarea } from "@/components/ui/form";
@@ -39,6 +39,13 @@ export function WeekMenu({
   const [templateId, setTemplateId] = useState(weekTemplates[0]?.id ?? "");
   const [noteValue, setNoteValue] = useState(note ?? "");
   const [pending, startTransition] = useTransition();
+
+  // Dopo "Elimina modello" (o un salvataggio) la select si riallinea all'elenco aggiornato.
+  useEffect(() => {
+    setTemplateId((cur) =>
+      weekTemplates.some((t) => t.id === cur) ? cur : (weekTemplates[0]?.id ?? ""),
+    );
+  }, [weekTemplates]);
 
   function run(fn: () => Promise<{ ok: boolean; message?: string }>) {
     startTransition(async () => {
@@ -107,9 +114,12 @@ export function WeekMenu({
                 <Button
                   variant="ghost"
                   disabled={pending || !templateId}
-                  onClick={() =>
-                    confirm("Eliminare il modello?") && run(() => deleteWeekTemplate(templateId))
-                  }
+                  onClick={() => {
+                    if (!confirm("Eliminare il modello?")) return;
+                    const id = templateId;
+                    setTemplateId("");
+                    run(() => deleteWeekTemplate(id));
+                  }}
                 >
                   Elimina
                 </Button>

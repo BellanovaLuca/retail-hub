@@ -37,8 +37,13 @@ export async function publishSnapshot(
     .single();
   if (!week) return { ok: false, message: "Settimana non trovata." };
   const [templates, people] = await Promise.all([getTemplates(db), getSchedulePeople(db)]);
-  const previous = data.week.publishedShifts;
   const firstPublish = week.status !== "published";
+  // Il badge "Modificato" si riporta dalla versione precedente; nella versione 1 non ha senso
+  // (ogni giornata risulterebbe "nuova"), quindi si parte da zero.
+  const previous =
+    week.version > 1
+      ? data.week.publishedShifts
+      : data.week.publishedShifts.map((s) => ({ ...s, changed: false }));
 
   const full = buildSnapshot(
     data.shifts,
@@ -46,16 +51,16 @@ export async function publishSnapshot(
     new Map(people.map((p) => [p.id, p])),
     previous,
   );
-  let snapshot: PublishedShift[] = full.snapshot;
+  let snapshot: PublishedShift[] = firstPublish
+    ? full.snapshot.map((s) => ({ ...s, changed: false }))
+    : full.snapshot;
   let changes: DayChange[] = full.changes;
   if (opts.onlyDays && !firstPublish) {
     const only = opts.onlyDays;
     const inOnly = (s: { profile_id: string; date: string }) =>
       only.has(`${s.profile_id}|${s.date}`);
-    snapshot = [
-      ...previous.filter((s) => !inOnly(s)).map((s) => ({ ...s, changed: false })),
-      ...full.snapshot.filter(inOnly),
-    ];
+    // Le giornate non toccate restano com'erano, badge "Modificato" compreso.
+    snapshot = [...previous.filter((s) => !inOnly(s)), ...full.snapshot.filter(inOnly)];
     changes = full.changes.filter((c) => only.has(`${c.profileId}|${c.date}`));
   }
 

@@ -46,7 +46,7 @@ test.describe("Foglio turni (§8.1, §16)", () => {
       await page.locator("[data-cell]").nth(3).click();
       await page.keyboard.type("12-20");
       await page.keyboard.press("Enter");
-      await expect(page.getByText(/modifiche da pubblicare/i)).toBeVisible();
+      await expect(page.getByText(/modific(a|he) da pubblicare/i)).toBeVisible();
     });
   });
 

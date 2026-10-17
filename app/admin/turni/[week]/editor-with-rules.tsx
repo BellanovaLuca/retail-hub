@@ -108,7 +108,7 @@ export function EditorWithRules({
       slotWarning={slotWarning}
       footerExtra={footerExtra}
       warningsCount={warnings.length}
-      warningsList={<ViolationList violations={warnings.slice(0, 8)} />}
+      warningsList={<ViolationList violations={warnings} />}
       sidePanelExtra={
         <ViolationsPanel
           weekId={props.week.id}
@@ -121,12 +121,20 @@ export function EditorWithRules({
   );
 }
 
+const VIOLATION_PREVIEW = 8;
+
+/** Elenco degli avvisi nella finestra di pubblicazione: i primi 8, poi "… e altri N". */
 function ViolationList({ violations }: { violations: Violation[] }) {
+  const shown = violations.slice(0, VIOLATION_PREVIEW);
+  const rest = violations.length - shown.length;
   return (
     <ul className="flex flex-col gap-1 text-sm text-muted">
-      {violations.map((v, i) => (
+      {shown.map((v, i) => (
         <li key={i}>{v.message}</li>
       ))}
+      {rest > 0 ? (
+        <li className="text-xs">… e {rest === 1 ? "un altro avviso" : `altri ${rest} avvisi`}</li>
+      ) : null}
     </ul>
   );
 }

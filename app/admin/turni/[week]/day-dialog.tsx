@@ -45,7 +45,8 @@ export function DayDialog({
   templates: TemplateRecord[];
   departments: { id: string; name: string }[];
   published: PublishedShift[];
-  onSaved: () => void;
+  /** Chiamato dopo una scrittura; con un testo, l'editor mostra una conferma. */
+  onSaved: (notice?: string) => void;
 }) {
   const sorted = sortShifts(shifts);
   const first = sorted[0];
@@ -129,10 +130,16 @@ export function DayDialog({
               disabled={pending}
               onClick={() =>
                 startTransition(async () => {
-                  await Promise.all(
+                  const results = await Promise.all(
                     shifts.filter((s) => s.conflict).map((s) => clearShiftConflict(s.id)),
                   );
-                  onSaved();
+                  const ko = results.find((r) => !r.ok);
+                  if (ko) {
+                    setResult({ ok: false, message: ko.message });
+                    return;
+                  }
+                  onSaved("Turno mantenuto: il conflitto è stato risolto.");
+                  onClose();
                 })
               }
             >

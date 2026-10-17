@@ -239,6 +239,10 @@ describe("export Excel", () => {
     expect(find("Marco")[2]).toBe("R");
     expect(find("Francy")[8]).toBe("8 / 40");
     expect(find("Presenti").slice(1, 3)).toEqual(["4", "0"]);
+    // La riga "Ore totali" è tutta numerica (anche "45,5" diventa 45.5).
+    const oreRow = turni.getRow(rowNumbers.get("Ore totali")!);
+    expect(oreRow.getCell(2).value).toBe(27);
+    expect(typeof oreRow.getCell(3).value).toBe("number");
     // Le assenze sono in grigio.
     const fraRow = turni.getRow(rowNumbers.get("Francy")!);
     expect((fraRow.getCell(4).fill as ExcelJS.FillPattern).fgColor?.argb).toBe("FFE7E5E4");
@@ -263,6 +267,21 @@ describe("export Excel", () => {
     expect(week.getCell(20, 2).value).toBe("TOT");
     expect(week.getCell(20, 4).value).toBe(8);
     expect(week.getCell(20, 7).value).toBe(27);
+  });
+
+  it("converte in numero le ore con la virgola nel piè di pagina", async () => {
+    const g = grid();
+    const ore = g.footer.find((f) => f.label === "Ore totali")!;
+    ore.cells = ore.cells.map((v, i) => (i === 0 ? "45,5" : v));
+    const buf = await buildScheduleXlsx({ grid: g, timesheet: timesheet() });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const turni = wb.getWorksheet("Turni")!;
+    let value: unknown;
+    turni.eachRow((row) => {
+      if (row.getCell(1).value === "Ore totali") value = row.getCell(2).value;
+    });
+    expect(value).toBe(45.5);
   });
 });
 
