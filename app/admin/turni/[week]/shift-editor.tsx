@@ -79,6 +79,8 @@ export type EditorProps = {
   sidePanelExtra?: React.ReactNode;
   footerExtra?: FooterRow[];
   cellWarning?: (profileId: string, date: string) => string | undefined;
+  warningsCount?: number;
+  warningsList?: React.ReactNode;
 };
 
 export function ShiftEditor(props: EditorProps) {
@@ -416,7 +418,8 @@ export function ShiftEditor(props: EditorProps) {
             firstPublish={week.status === "draft"}
             changes={unpublished}
             people={peopleById}
-            warnings={props.sidePanelExtra ? undefined : 0}
+            warnings={props.warningsCount}
+            warningsList={props.warningsList}
             trigger={
               <Button size="sm">
                 <Send aria-hidden /> {week.status === "draft" ? "Pubblica" : "Ripubblica"}
