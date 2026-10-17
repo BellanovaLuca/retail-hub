@@ -78,16 +78,9 @@ export function AppShell({
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line px-5 py-8 md:flex">
-        <div className="mb-12 flex items-start justify-between gap-2">
-          <Link href="/" className="block">
-            <Wordmark />
-          </Link>
-          <NotificationBell
-            profileId={profileId}
-            initialCount={unreadCount}
-            className="-mt-3 -mr-3"
-          />
-        </div>
+        <Link href="/" className="mb-12 block">
+          <Wordmark />
+        </Link>
         <nav aria-label="Principale" className="flex flex-1 flex-col gap-0.5">
           {sidebar.map((item) => (
             <SidebarLink key={item.href} item={item} active={isActive(pathname, item.href)} />
