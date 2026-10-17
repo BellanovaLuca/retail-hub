@@ -9,8 +9,8 @@ export default async function AccessoPage({
   searchParams: Promise<{ da?: string; disattivato?: string }>;
 }) {
   const { da, disattivato } = await searchParams;
-  // Solo percorsi interni: niente redirect verso altri siti.
-  const next = da?.startsWith("/") && !da.startsWith("//") ? da : "/";
+  // Solo percorsi interni: niente "//host" né "/\\host" (che i browser leggono come esterni).
+  const next = da && /^\/(?![/\\])/.test(da) ? da : "/";
 
   return (
     <>

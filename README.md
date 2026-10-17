@@ -65,7 +65,8 @@ per esempio con `openssl rand -hex 24`.
    | `CRON_SECRET`                            | il segreto del passo 2                                                  |
    | `RESEND_API_KEY`, `EMAIL_FROM`           | facoltative, solo se volete le email ([resend.com](https://resend.com)) |
 
-3. _Deploy_. Ogni branch ha la sua anteprima; `main` è la produzione.
+3. _Deploy_. Ogni branch ha la sua anteprima; il branch di produzione è quello impostato in
+   _Settings → Git_ (per questo repository `claude/new-repo-spec-cwmad4`).
 4. Torna su Supabase → **Authentication → URL Configuration** e imposta _Site URL_ con l'indirizzo
    del sito.
 
@@ -79,14 +80,20 @@ parte una sola volta.
 - `vercel.json` lo chiama già **due volte al giorno** (mattina e sera), il massimo del piano
   gratuito di Vercel.
 - Per gli orari precisi (consigliato) attivalo ogni 15 minuti da Supabase: **Database →
-  Extensions** abilita `pg_cron` e `pg_net`, poi nello **SQL Editor**:
+  Extensions** abilita `pg_cron` e `pg_net`, salva il segreto nel Vault e pianifica la chiamata
+  nello **SQL Editor** (il segreto resta cifrato, mai in chiaro nel job):
   ```sql
+  select vault.create_secret('<CRON_SECRET>', 'cron_secret', 'Bearer per /api/cron/run');
   select cron.schedule(
     'portale-staff-promemoria',
     '*/15 * * * *',
     $$ select net.http_get(
          url := 'https://<indirizzo-del-sito>/api/cron/run',
-         headers := jsonb_build_object('Authorization', 'Bearer <CRON_SECRET>')
+         headers := jsonb_build_object(
+           'Authorization',
+           'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret')
+         ),
+         timeout_milliseconds := 30000
        ) $$
   );
   ```
