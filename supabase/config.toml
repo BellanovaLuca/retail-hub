@@ -1,0 +1,25 @@
+# Configurazione per la Supabase CLI (supabase start / link / db push).
+project_id = "retail-hub"
+
+[api]
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+
+[db]
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[auth]
+site_url = "http://localhost:3000"
+# Niente registrazione pubblica: gli account li crea un admin (§4).
+enable_signup = false
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+
+[auth.email]
+# Provider email/password usato internamente per codice + PIN (email sintetiche).
+enable_signup = false
+enable_confirmations = false
