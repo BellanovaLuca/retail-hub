@@ -22,6 +22,7 @@ import {
   type GridRow,
   type SaveState,
 } from "@/components/spreadsheet";
+import { Timesheet, type TimesheetSaveInput } from "@/components/schedule/timesheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { weekNumber } from "@/lib/dates";
@@ -47,7 +48,7 @@ import {
 } from "@/lib/schedule/view";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import { cn } from "@/lib/utils";
-import { saveShiftCells } from "../actions";
+import { saveShiftCells, saveShiftDay } from "../actions";
 import { DayDialog } from "./day-dialog";
 import { PublishDialog } from "./publish-dialog";
 import { WeekMenu } from "./week-menu";
@@ -288,6 +289,16 @@ export function ShiftEditor(props: EditorProps) {
     [week.id, router],
   );
 
+  // Foglio orario: ogni giornata dipinta sostituisce i turni del giorno, poi si ricaricano i dati.
+  const onSaveDay = useCallback(
+    async (input: TimesheetSaveInput) => {
+      const res = await saveShiftDay(input);
+      router.refresh();
+      return res;
+    },
+    [router],
+  );
+
   const footerRows: FooterRow[] = useMemo(() => {
     const presentBy = (date: string, deptId?: string) =>
       people.filter((p) => {
@@ -453,9 +464,20 @@ export function ShiftEditor(props: EditorProps) {
               showDensityToggle
             />
           ) : (
-            <TimesheetPlaceholder />
+            <Timesheet
+              weekId={week.id}
+              weekNumber={weekNumber(parseISO(week.weekStart))}
+              days={days}
+              today={today}
+              shifts={shifts}
+              leaves={leaves}
+              people={people}
+              departments={departments}
+              calendar={calendar}
+              onSaveDay={onSaveDay}
+            />
           )}
-          <p className="mt-3 text-xs text-muted">
+          <p className={cn("mt-3 text-xs text-muted", mode === "timesheet" && "hidden")}>
             Digita un codice (
             {templates
               .slice(0, 4)
@@ -510,13 +532,5 @@ export function ShiftEditor(props: EditorProps) {
         />
       ) : null}
     </div>
-  );
-}
-
-function TimesheetPlaceholder() {
-  return (
-    <p className="py-16 font-display text-2xl font-light text-subtle">
-      Il foglio orario si sta preparando.
-    </p>
   );
 }

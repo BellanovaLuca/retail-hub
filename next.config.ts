@@ -23,6 +23,8 @@ const csp = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // react-pdf (export PDF dei turni) va caricato da node_modules, non impacchettato.
+  serverExternalPackages: ["@react-pdf/renderer"],
   async headers() {
     return [
       {
