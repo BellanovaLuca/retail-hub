@@ -1,12 +1,7 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/layout/coming-soon";
+import { redirect } from "next/navigation";
+import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 
-export const metadata: Metadata = { title: "Obiettivi individuali" };
-
-export default function Page() {
-  return (
-    <ComingSoon eyebrow="Settimana" title="Obiettivi individuali" milestone={9}>
-      <p>Assegnazione, fogli per persona, monitoraggio e voci.</p>
-    </ComingSoon>
-  );
+/** /admin/obiettivi → la settimana corrente. */
+export default function ObiettiviIndexPage() {
+  redirect(`/admin/obiettivi/${toISODate(weekStart(nowInRome()))}`);
 }
