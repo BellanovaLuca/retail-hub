@@ -252,4 +252,74 @@ begin
 end;
 $$;
 
+-- ---- trigger delle richieste: casi dalla verifica QA ----------------------
+-- Scambio a senso unico verso chi ha già un turno quel giorno: rifiutato.
+insert into public.requests (id, profile_id, type, start_date, end_date, target_profile_id, status)
+values ('00000000-0000-0000-0000-000000000d04', '00000000-0000-0000-0000-0000000000e1', 'scambio_turno',
+        '2026-10-14', '2026-10-14', '00000000-0000-0000-0000-0000000000e2', 'peer_accepted');
+do $$
+begin
+  begin
+    update public.requests set status = 'approved' where id = '00000000-0000-0000-0000-000000000d04';
+    raise exception 'FALLITO: scambio approvato sopra un turno già esistente del collega';
+  exception when others then
+    if sqlerrm not like 'Il collega ha già un turno%' then raise; end if;
+  end;
+end;
+$$;
+
+-- Ferie approvate su un turno → conflitto; revoca → niente ferie e niente conflitto.
+insert into public.requests (id, profile_id, type, start_date, end_date)
+values ('00000000-0000-0000-0000-000000000d05', '00000000-0000-0000-0000-0000000000e1', 'ferie',
+        '2026-10-20', '2026-10-20');
+update public.requests set status = 'approved' where id = '00000000-0000-0000-0000-000000000d05';
+do $$
+begin
+  if not (select conflict from public.shifts where id = '00000000-0000-0000-0000-000000000c03') then
+    raise exception 'FALLITO: il turno nel giorno di ferie approvate non è in conflitto';
+  end if;
+end;
+$$;
+update public.requests set status = 'rejected' where id = '00000000-0000-0000-0000-000000000d05';
+do $$
+begin
+  if exists (select 1 from public.leaves where request_id = '00000000-0000-0000-0000-000000000d05') then
+    raise exception 'FALLITO: ferie della richiesta revocata ancora presenti';
+  end if;
+  if (select conflict from public.shifts where id = '00000000-0000-0000-0000-000000000c03') then
+    raise exception 'FALLITO: il conflitto resta dopo la revoca';
+  end if;
+end;
+$$;
+
+-- Indisponibilità ricorrente in una fascia oraria: ore valorizzate, giornata non bloccata.
+insert into public.requests (id, profile_id, type, start_date, end_date, start_time, end_time, recurring_weekdays)
+values ('00000000-0000-0000-0000-000000000d06', '00000000-0000-0000-0000-0000000000e1', 'indisponibilita',
+        '2026-10-19', '2026-10-25', '16:00', '20:00', '{3}');
+update public.requests set status = 'approved' where id = '00000000-0000-0000-0000-000000000d06';
+do $$
+declare
+  l public.leaves;
+begin
+  select * into l from public.leaves where request_id = '00000000-0000-0000-0000-000000000d06';
+  if l.date <> '2026-10-21' or l.hours <> 4 or l.note <> '16:00–20:00' then
+    raise exception 'FALLITO: indisponibilità in fascia oraria salvata male (% % %)', l.date, l.hours, l.note;
+  end if;
+end;
+$$;
+
+-- Ferie confermate a planning non vengono sovrascritte da una richiesta approvata.
+insert into public.requests (id, profile_id, type, start_date, end_date)
+values ('00000000-0000-0000-0000-000000000d07', '00000000-0000-0000-0000-0000000000e2', 'malattia',
+        '2026-10-16', '2026-10-16');
+update public.requests set status = 'approved' where id = '00000000-0000-0000-0000-000000000d07';
+do $$
+begin
+  if (select type || '/' || source from public.leaves
+      where profile_id = '00000000-0000-0000-0000-0000000000e2' and date = '2026-10-16') <> 'ferie/planning' then
+    raise exception 'FALLITO: la ferie a planning è stata sovrascritta dalla richiesta';
+  end if;
+end;
+$$;
+
 rollback;
