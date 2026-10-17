@@ -13,7 +13,7 @@ import {
 import { Card, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/feedback";
 import { requireAdmin } from "@/lib/auth/session";
-import { requestCoverageImpact } from "@/lib/data/request-impact";
+import { requestCoverageImpact, swapContext } from "@/lib/data/request-impact";
 import { getRequestDetail, namesById } from "@/lib/data/requests";
 import { awaitsAdmin, type RequestStatus } from "@/lib/requests";
 import { leaveLabelAdmin } from "@/lib/schedule/view";
@@ -36,7 +36,8 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
     r.end_date > format(addDays(parseISO(r.start_date), 31), "yyyy-MM-dd")
       ? format(addDays(parseISO(r.start_date), 31), "yyyy-MM-dd")
       : r.end_date;
-  const [{ data: shifts }, { data: others }, names, impact] = await Promise.all([
+  const names = await namesById(supabase);
+  const [{ data: shifts }, { data: others }, impact, swap] = await Promise.all([
     supabase
       .from("shifts")
       .select("date, start_time, end_time")
@@ -51,8 +52,8 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
       .lte("date", to)
       .neq("profile_id", r.profile_id)
       .order("date"),
-    namesById(supabase),
     requestCoverageImpact(supabase, r),
+    r.type === "scambio_turno" ? swapContext(supabase, r, names) : null,
   ]);
   const othersByPerson = new Map<string, { days: string[]; label: string }>();
   for (const l of others ?? []) {
@@ -61,6 +62,7 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
     othersByPerson.set(l.profile_id, cur);
   }
   const fmt = (d: string) => format(parseISO(d), "EEE d", { locale: it });
+  const fmtLong = (d: string) => format(parseISO(d), "EEE d MMM", { locale: it });
 
   return (
     <>
@@ -103,6 +105,42 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
           </Card>
           <Card>
             <CardTitle>Contesto</CardTitle>
+            {swap ? (
+              <>
+                {swap.warnings.length ? (
+                  <ul
+                    role="alert"
+                    className="mb-6 flex flex-col gap-1 border-l-2 border-warning pl-3 text-sm text-warning"
+                  >
+                    {swap.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <h3 className="mb-2 eyebrow">Agenda dei due colleghi nei giorni dello scambio</h3>
+                <ul className="mb-6 flex flex-col gap-3 text-sm">
+                  {swap.dates.map((date) => (
+                    <li key={date}>
+                      <span className="block capitalize nums">{fmtLong(date)}</span>
+                      <ul className="mt-1 flex flex-col gap-0.5 pl-3">
+                        {swap.byDayAndPerson
+                          .filter((x) => x.date === date)
+                          .map((x) => (
+                            <li key={x.profileId}>
+                              {names.get(x.profileId)} ·{" "}
+                              {x.items.length ? (
+                                <span className="nums">{x.items.join(", ")}</span>
+                              ) : (
+                                <span className="text-muted">niente in agenda</span>
+                              )}
+                            </li>
+                          ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
             <h3 className="mb-2 eyebrow">Turni di {r.requesterName} in quei giorni</h3>
             {(shifts ?? []).length ? (
               <ul className="mb-6 text-sm nums">

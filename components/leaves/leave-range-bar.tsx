@@ -136,13 +136,18 @@ function AdminRange({
       setResult({ ok: false, text: "Scegli una persona." });
       return;
     }
+    const hours = choiceHours(choice);
+    if (!hours.ok) {
+      setResult({ ok: false, text: hours.error });
+      return;
+    }
     const payload = {
       profileIds: [profileId],
       from: range.from,
       to: range.to,
       type: choice.type,
       status: choice.status,
-      hours: choiceHours(choice),
+      hours: hours.hours,
     };
     run(
       () => applyLeaveRange(payload),

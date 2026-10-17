@@ -116,7 +116,10 @@ export function RequestsTable({
             recurring_weekdays: r.recurring,
           });
           return (
-            <li key={r.id} className="flex flex-wrap items-center gap-3 border-b border-line py-3">
+            <li
+              key={r.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line py-3"
+            >
               {selectable ? (
                 <input
                   type="checkbox"
@@ -132,7 +135,11 @@ export function RequestsTable({
                   }}
                 />
               ) : null}
-              <Link href={`/admin/richieste/${r.id}`} className="min-w-0 flex-1">
+              {/* Sul telefono stato e azioni vanno a capo sotto al testo, invece di schiacciarlo. */}
+              <Link
+                href={`/admin/richieste/${r.id}`}
+                className="min-w-0 flex-1 basis-[calc(100%-2rem)] sm:basis-0"
+              >
                 <span className="block font-medium">
                   {r.person} · {s.title}
                   {r.target ? ` con ${r.target}` : ""}
@@ -146,29 +153,31 @@ export function RequestsTable({
                 </span>
                 {r.message ? <span className="block truncate text-sm">{r.message}</span> : null}
               </Link>
-              <StatusBadge status={r.status} />
-              {r.decidable ? (
-                <span className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Rifiuta la richiesta di ${r.person}`}
-                    disabled={pending}
-                    onClick={() => decide([r.id], "rejected")}
-                  >
-                    <X />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Approva la richiesta di ${r.person}`}
-                    disabled={pending}
-                    onClick={() => decide([r.id], "approved")}
-                  >
-                    <Check />
-                  </Button>
-                </span>
-              ) : null}
+              <span className="flex w-full items-center justify-between gap-2 sm:w-auto">
+                <StatusBadge status={r.status} />
+                {r.decidable ? (
+                  <span className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Rifiuta la richiesta di ${r.person}`}
+                      disabled={pending}
+                      onClick={() => decide([r.id], "rejected")}
+                    >
+                      <X />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Approva la richiesta di ${r.person}`}
+                      disabled={pending}
+                      onClick={() => decide([r.id], "approved")}
+                    >
+                      <Check />
+                    </Button>
+                  </span>
+                ) : null}
+              </span>
             </li>
           );
         })}

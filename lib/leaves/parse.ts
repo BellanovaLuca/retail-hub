@@ -2,7 +2,8 @@
  * Codici delle celle del foglio ferie (§8.2), senza distinzione maiuscole/minuscole:
  * `F` ferie, `F?` ferie da confermare, `PE` permesso, `PE4` / `PE 4` / `PE4,5` permesso di N ore,
  * `MA` malattia, `A` / `AL` altro. Il `?` finale (da confermare) è ammesso su ogni codice.
- * Le ore sono ammesse solo sul permesso, tra 0,5 e 24 a passi di mezz'ora.
+ * Le ore sono ammesse solo sul permesso, tra 0,5 e 12 a passi di mezz'ora.
+ * `X` (o `x`) svuota la cella, come negli Excel del negozio.
  */
 import type { LeaveInput, LeaveStatus, LeaveType } from "@/lib/domain/types";
 
@@ -10,6 +11,9 @@ export type ParsedLeaveCell =
   | { kind: "empty" }
   | { kind: "leave"; type: LeaveType; status: LeaveStatus; hours: number | null }
   | { kind: "error"; message: string };
+
+/** Massimo di ore di un permesso (stesso limite nelle richieste e nel planning). */
+export const LEAVE_HOURS_MAX = 12;
 
 const CODES: Record<string, LeaveType> = {
   F: "ferie",
@@ -22,7 +26,7 @@ const CODES: Record<string, LeaveType> = {
 /** Interpreta il testo di una cella del foglio ferie. */
 export function parseLeaveCell(text: string): ParsedLeaveCell {
   const raw = text.trim().toUpperCase().replace(/\s+/g, " ");
-  if (raw === "") return { kind: "empty" };
+  if (raw === "" || raw === "X") return { kind: "empty" };
 
   const m = /^([A-Z]+)\s?(\d+(?:[.,]\d+)?)?\s?(\?)?$/.exec(raw);
   const type = m ? CODES[m[1]] : undefined;
@@ -39,8 +43,11 @@ export function parseLeaveCell(text: string): ParsedLeaveCell {
     return { kind: "error", message: "Le ore si indicano solo sul permesso (es. PE4)" };
   }
   const hours = Number(m[2].replace(",", "."));
-  if (!(hours > 0 && hours <= 24) || (hours * 2) % 1 !== 0) {
-    return { kind: "error", message: "Ore del permesso non valide: da 0,5 a 24, a mezz'ore" };
+  if (!(hours > 0 && hours <= LEAVE_HOURS_MAX) || (hours * 2) % 1 !== 0) {
+    return {
+      kind: "error",
+      message: `Ore del permesso non valide: da 0,5 a ${LEAVE_HOURS_MAX}, a mezz'ore`,
+    };
   }
   return { kind: "leave", type, status, hours };
 }

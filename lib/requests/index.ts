@@ -69,8 +69,23 @@ export type RequestWarningInput = {
   noticeDays: number;
   type: RequestType;
   myOpenRequests: { id?: string; type: string; startDate: string; endDate: string }[];
-  /** Colleghi dello stesso reparto in ferie/assenti per giorno (escluso me). */
+  /** Colleghi dello stesso reparto in ferie confermate per giorno (escluso me). */
   colleaguesAwayByDate: Record<string, number>;
+  /** Le mie assenze già a planning (anche inserite dall'admin), nel periodo richiesto. */
+  myPlannedLeaves?: {
+    date: string;
+    type: string;
+    status: string;
+    /** Nata da una richiesta approvata: è già tra le richieste, non si segnala due volte. */
+    fromRequest: boolean;
+  }[];
+};
+
+const LEAVE_WORDS: Record<string, string> = {
+  ferie: "in ferie",
+  permesso: "in permesso",
+  malattia: "in malattia",
+  altro: "assente",
 };
 
 /** Avvisi NON bloccanti mostrati prima dell'invio (§6.1). */
@@ -92,6 +107,18 @@ export function requestWarnings(i: RequestWarningInput): string[] {
       `Si sovrappone a ${clash.length === 1 ? "un'altra tua richiesta" : `${clash.length} tue richieste`} (${clash
         .map((c) => requestTypeLabel(c.type).toLowerCase())
         .join(", ")}).`,
+    );
+  }
+  const planned = (i.myPlannedLeaves ?? []).filter((l) => !l.fromRequest);
+  if (planned.length) {
+    const days = [...new Set(planned.map((l) => l.date))].sort();
+    const kinds = [...new Set(planned.map((l) => LEAVE_WORDS[l.type] ?? "assente"))];
+    const tentative = planned.every((l) => l.status === "tentative");
+    out.push(
+      `Nel planning risulti già ${kinds.join(" o ")}${tentative ? " (da confermare)" : ""} il ${days
+        .slice(0, 5)
+        .map((d) => formatRange(d, d))
+        .join(", ")}${days.length > 5 ? ` e altri ${days.length - 5} giorni` : ""}.`,
     );
   }
   if (i.type === "ferie" || i.type === "giorno_libero" || i.type === "permesso") {
@@ -131,3 +158,66 @@ export function formatRange(start: string, end: string) {
 }
 
 export const WEEKDAY_NAMES = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"];
+
+/** Cosa ha già una persona in un giorno: un turno o un'assenza (ferie, permesso…). */
+export type DayOccupation = {
+  profileId: string;
+  date: string;
+  kind: "turno" | "assenza";
+  /** "10:00–14:00" per un turno; "in ferie", "assente"… per un'assenza. */
+  text: string;
+};
+
+/**
+ * Avvisi di uno scambio turno (§6.2): chi riceve un turno ha già un turno o un'assenza
+ * quel giorno? Con `targetDate` = giorno del turno del collega preso in cambio (null se il
+ * collega prende solo il turno di chi chiede).
+ */
+export function swapConflicts(i: {
+  requester: { id: string; name: string };
+  target: { id: string; name: string };
+  shiftDate: string;
+  targetDate: string | null;
+  occupations: DayOccupation[];
+  formatDay?: (date: string) => string;
+}): string[] {
+  const day = i.formatDay ?? ((d) => formatRange(d, d));
+  const out: string[] = [];
+  const check = (who: { id: string; name: string }, date: string, givesShiftThatDay: boolean) => {
+    for (const o of i.occupations) {
+      if (o.profileId !== who.id || o.date !== date) continue;
+      // Il turno che cede quel giorno non è un conflitto: è proprio quello scambiato.
+      if (o.kind === "turno" && givesShiftThatDay) continue;
+      out.push(
+        o.kind === "turno"
+          ? `Attenzione: ${who.name} ha già un turno il ${day(date)} (${o.text}).`
+          : `Attenzione: ${who.name} è ${o.text} il ${day(date)}.`,
+      );
+    }
+  };
+  // Il collega riceve il turno di chi chiede.
+  check(i.target, i.shiftDate, i.targetDate === i.shiftDate);
+  // Chi chiede riceve il turno del collega (se c'è).
+  if (i.targetDate) check(i.requester, i.targetDate, i.targetDate === i.shiftDate);
+  return [...new Set(out)];
+}
+
+export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+export const ATTACHMENT_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/heic",
+  "image/webp",
+];
+
+/**
+ * Controllo dell'allegato di una richiesta: usato sul telefono prima dell'invio (un file troppo
+ * grande farebbe fallire la Server Action ancora prima del controllo) e di nuovo sul server.
+ */
+export function attachmentError(file: { size: number; type: string }): string | null {
+  if (file.size === 0) return "Scegli un file.";
+  if (file.size > ATTACHMENT_MAX_BYTES) return "L'allegato deve pesare meno di 10 MB.";
+  if (!ATTACHMENT_TYPES.includes(file.type)) return "Formati ammessi: PDF, JPG, PNG, HEIC, WebP.";
+  return null;
+}

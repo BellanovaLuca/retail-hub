@@ -71,13 +71,19 @@ export function LeaveDayDialog({
     });
 
   const add = (profileId: string) => {
+    const hours = choiceHours(choice);
+    if (!hours.ok) {
+      setMessage({ ok: false, text: hours.error });
+      setRetry(null);
+      return;
+    }
     const payload = {
       profileIds: [profileId],
       from: date,
       to: date,
       type: choice.type,
       status: choice.status,
-      hours: choiceHours(choice),
+      hours: hours.hours,
     };
     run(
       () => applyLeaveRange(payload),

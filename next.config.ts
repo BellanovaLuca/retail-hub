@@ -27,6 +27,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // react-pdf (export PDF dei turni) va caricato da node_modules, non impacchettato.
   serverExternalPackages: ["@react-pdf/renderer"],
+  // Allegati delle richieste (fino a 10 MB) caricati con una Server Action: il limite
+  // predefinito di 1 MB manderebbe l'utente su una pagina di errore.
+  experimental: { serverActions: { bodySizeLimit: "11mb" } },
   async headers() {
     return [
       {

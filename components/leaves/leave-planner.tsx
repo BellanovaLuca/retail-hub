@@ -569,8 +569,9 @@ function Legend({ admin, calendar }: { admin: boolean; calendar?: boolean }) {
             <b className="font-medium text-foreground">PE</b> permesso (
             <span className="nums">PE4</span> = 4 ore),{" "}
             <b className="font-medium text-foreground">MA</b> malattia,{" "}
-            <b className="font-medium text-foreground">A</b> altra assenza. Canc svuota; trascina la
-            maniglia per riempire.
+            <b className="font-medium text-foreground">A</b> altra assenza. Canc o{" "}
+            <b className="font-medium text-foreground">X</b> svuota; trascina la maniglia per
+            riempire.
           </span>
         </>
       ) : null}

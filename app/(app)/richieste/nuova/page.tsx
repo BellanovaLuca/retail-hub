@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/ui/feedback";
 import { requireProfile } from "@/lib/auth/session";
 import { getPublicPeople, getPublishedShifts } from "@/lib/data/schedule";
 import { nowInRome, toISODate } from "@/lib/dates";
-import { REQUEST_TYPES, type RequestType } from "@/lib/requests";
+import { REQUEST_TYPES, type DayOccupation, type RequestType } from "@/lib/requests";
 import { publishedDayText } from "@/lib/schedule/cells";
 import { createClient } from "@/lib/supabase/server";
 import { RequestWizard, type ShiftOption } from "./request-wizard";
@@ -21,11 +21,34 @@ export default async function NuovaRichiestaPage({
   const q = await searchParams;
   const supabase = await createClient();
   const today = toISODate(nowInRome());
-  const horizon = format(addDays(nowInRome(), 70), "yyyy-MM-dd");
-  const [published, people] = await Promise.all([
+  // Cambio e scambio si chiedono sui turni già pubblicati: circa 4 mesi in avanti.
+  const horizon = format(addDays(nowInRome(), 120), "yyyy-MM-dd");
+  const [published, people, { data: leaves }] = await Promise.all([
     getPublishedShifts(supabase, today, horizon),
     getPublicPeople(supabase),
+    supabase
+      .from("leaves_public")
+      .select("profile_id, date, kind, status")
+      .gte("date", today)
+      .lte("date", horizon),
   ]);
+
+  // Agenda di tutti (turni pubblicati e assenze) per avvisare se chi riceve un turno in uno
+  // scambio è già occupato quel giorno. Delle assenze altrui si vede solo "ferie"/"assente".
+  const occupations: DayOccupation[] = [
+    ...published.map((s) => ({
+      profileId: s.profile_id,
+      date: s.date,
+      kind: s.is_absence || !s.start_time ? ("assenza" as const) : ("turno" as const),
+      text: s.is_absence || !s.start_time ? "assente" : `${s.start_time}–${s.end_time ?? ""}`,
+    })),
+    ...(leaves ?? []).map((l) => ({
+      profileId: l.profile_id!,
+      date: l.date!,
+      kind: "assenza" as const,
+      text: `${l.kind === "ferie" ? "in ferie" : "assente"}${l.status === "tentative" ? " (da confermare)" : ""}`,
+    })),
+  ];
 
   const toOption = (s: (typeof published)[number]): ShiftOption => ({
     id: s.id,
@@ -70,6 +93,7 @@ export default async function NuovaRichiestaPage({
         }}
         myShifts={options.filter((o) => o.profileId === profile.id)}
         colleagueShifts={options.filter((o) => o.profileId !== profile.id)}
+        occupations={occupations}
         colleagues={people
           .filter((p) => p.id !== profile.id)
           .map((p) => ({ id: p.id, name: p.displayName }))}

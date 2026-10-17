@@ -16,7 +16,7 @@ const EFFECTS: Record<string, string> = {
   indisponibilita: "Approvando, i giorni indicati compaiono come assenza nel foglio turni.",
   malattia: 'Approvando, i giorni compaiono come assenza (i colleghi vedono solo "Assente").',
   scambio_turno:
-    "Approvando, i due turni vengono scambiati subito; ricorda di ripubblicare la settimana.",
+    "Approvando, i due turni vengono scambiati subito e, se la settimana è pubblicata, le due giornate vengono ripubblicate e i colleghi avvisati.",
   cambio_turno: "Il cambio va poi fatto a mano nel foglio turni.",
   altro: "",
 };

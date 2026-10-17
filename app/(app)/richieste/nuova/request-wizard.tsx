@@ -8,7 +8,15 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FormMessage, Select, Textarea } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { REQUEST_TYPES, WEEKDAY_NAMES, formatRange, type RequestType } from "@/lib/requests";
+import {
+  REQUEST_TYPES,
+  WEEKDAY_NAMES,
+  attachmentError,
+  formatRange,
+  swapConflicts,
+  type DayOccupation,
+  type RequestType,
+} from "@/lib/requests";
 import { cn } from "@/lib/utils";
 import { checkRequest, createRequest, uploadRequestAttachment } from "../actions";
 
@@ -24,6 +32,7 @@ export function RequestWizard({
   myShifts,
   colleagueShifts,
   colleagues,
+  occupations = [],
 }: {
   me: string;
   today: string;
@@ -31,6 +40,8 @@ export function RequestWizard({
   myShifts: ShiftOption[];
   colleagueShifts: ShiftOption[];
   colleagues: { id: string; name: string }[];
+  /** Turni pubblicati e assenze di tutti: per gli avvisi dello scambio. */
+  occupations?: DayOccupation[];
 }) {
   const router = useRouter();
   const [step, setStep] = useState(initial.type ? 1 : 0);
@@ -90,6 +101,31 @@ export function RequestWizard({
       ),
     [colleagueShifts, targetProfileId, startDate, today],
   );
+
+  // Scambio: chi riceve un turno ha già un turno o un'assenza quel giorno?
+  const swapWarnings = useMemo(() => {
+    if (!isSwap || !targetProfileId || !startDate) return [];
+    const target = colleagues.find((c) => c.id === targetProfileId);
+    if (!target) return [];
+    const targetDate = colleagueShifts.find((s) => s.id === targetShiftId)?.date ?? null;
+    return swapConflicts({
+      requester: { id: me, name: "tu" },
+      target,
+      shiftDate: startDate,
+      targetDate,
+      occupations,
+      formatDay: dayLabel,
+    }).map((w) => w.replace("tu ha già", "hai già").replace("tu è", "sei"));
+  }, [
+    isSwap,
+    targetProfileId,
+    targetShiftId,
+    startDate,
+    colleagues,
+    colleagueShifts,
+    occupations,
+    me,
+  ]);
 
   function canAdvance() {
     if (step === 0) return true;
@@ -186,9 +222,7 @@ export function RequestWizard({
               label="Il tuo turno"
               htmlFor="rq-shift"
               hint={
-                myShifts.length === 0
-                  ? "Non hai turni pubblicati nelle prossime settimane."
-                  : undefined
+                myShifts.length === 0 ? "Non hai turni pubblicati nei prossimi 4 mesi." : undefined
               }
             >
               <Select id="rq-shift" value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
@@ -346,6 +380,21 @@ export function RequestWizard({
               </Select>
             </Field>
           ) : null}
+          {swapWarnings.length ? (
+            <ul
+              role="alert"
+              className="flex flex-col gap-1 border-l-2 border-warning pl-3 text-sm text-warning"
+            >
+              {swapWarnings.map((w) => (
+                <li key={w} className="flex gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 stroke-[1.5]" aria-hidden /> {w}
+                </li>
+              ))}
+              <li className="text-xs text-muted">
+                Puoi inviare comunque: il responsabile vedrà lo stesso avviso.
+              </li>
+            </ul>
+          ) : null}
         </div>
       ) : null}
 
@@ -379,7 +428,15 @@ export function RequestWizard({
                 accept="application/pdf,image/*"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
+                  e.target.value = "";
                   if (!file) return;
+                  // Stesse regole del server, ma senza inviare nulla: un file troppo grande
+                  // farebbe fallire la Server Action prima ancora di arrivare al controllo.
+                  const check = attachmentError(file);
+                  if (check) {
+                    setResult({ ok: false, message: check });
+                    return;
+                  }
                   const fd = new FormData();
                   fd.set("file", file);
                   startTransition(async () => {

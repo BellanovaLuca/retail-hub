@@ -1,3 +1,5 @@
+import { format, parseISO } from "date-fns";
+import { it } from "date-fns/locale";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -29,6 +31,7 @@ export default async function RichiestaPage({ params }: { params: Promise<{ id: 
   const s = requestSummary(r);
   const mine = r.profile_id === profile.id;
   const proposedToMe = r.target_profile_id === profile.id && r.status === "pending";
+  const fmt = (d: string) => format(parseISO(d), "EEE d MMM", { locale: it });
 
   return (
     <>
@@ -49,15 +52,19 @@ export default async function RichiestaPage({ params }: { params: Promise<{ id: 
                 <>
                   <Row label="Collega">{r.targetName}</Row>
                   {r.shift ? (
-                    <Row label="Turno di chi chiede">{`${r.shift.date} · ${r.shift.text}`}</Row>
+                    <Row label={mine ? "Il tuo turno" : "Turno di chi chiede"}>
+                      {`${fmt(r.shift.date)} · ${r.shift.text}`}
+                    </Row>
                   ) : null}
                   {r.targetShift ? (
-                    <Row label="Turno del collega">{`${r.targetShift.date} · ${r.targetShift.text}`}</Row>
+                    <Row label={mine ? "Turno del collega" : "Il tuo turno"}>
+                      {`${fmt(r.targetShift.date)} · ${r.targetShift.text}`}
+                    </Row>
                   ) : null}
                 </>
               ) : null}
               {r.type === "cambio_turno" && r.shift ? (
-                <Row label="Turno attuale">{`${r.shift.date} · ${r.shift.text}`}</Row>
+                <Row label="Turno attuale">{`${fmt(r.shift.date)} · ${r.shift.text}`}</Row>
               ) : null}
               {r.message ? <Row label="Messaggio">{r.message}</Row> : null}
               {r.attachmentUrl ? (

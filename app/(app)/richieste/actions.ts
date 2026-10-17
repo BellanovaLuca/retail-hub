@@ -5,10 +5,16 @@ import { z } from "zod";
 import { authedAction, dbErrorMessage, runAction, type ActionResult } from "@/lib/auth/guards";
 import { nowInRome, toISODate } from "@/lib/dates";
 import { adminIds, notify } from "@/lib/notifications";
-import { formatRange, requestTypeLabel, requestWarnings, type RequestType } from "@/lib/requests";
+import {
+  attachmentError,
+  formatRange,
+  requestTypeLabel,
+  requestWarnings,
+  type RequestType,
+} from "@/lib/requests";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Orario non valido (es. 10:30).");
 
 const requestSchema = z
   .object({
@@ -26,14 +32,25 @@ const requestSchema = z
     endDate: z.iso.date("Indica la data di fine."),
     startTime: time.nullable(),
     endTime: time.nullable(),
-    hours: z.number().min(0.5).max(12).multipleOf(0.5).nullable(),
-    recurringWeekdays: z.array(z.number().int().min(1).max(7)).max(7).nullable(),
-    shiftId: z.uuid().nullable(),
-    targetProfileId: z.uuid().nullable(),
-    targetShiftId: z.uuid().nullable(),
-    targetDate: z.iso.date().nullable(),
-    message: z.string().trim().max(2000),
-    attachmentPath: z.string().max(300).nullable(),
+    hours: z
+      .number("Indica le ore (es. 4 o 4,5).")
+      .min(0.5, "Indica le ore (es. 4 o 4,5).")
+      .max(12, "Massimo 12 ore.")
+      .multipleOf(0.5, "A mezz'ore.")
+      .nullable(),
+    recurringWeekdays: z
+      .array(
+        z.number().int().min(1).max(7, "Giorno della settimana non valido."),
+        "Scegli i giorni della settimana.",
+      )
+      .max(7, "Scegli i giorni della settimana.")
+      .nullable(),
+    shiftId: z.uuid("Scegli un turno.").nullable(),
+    targetProfileId: z.uuid("Scegli il collega.").nullable(),
+    targetShiftId: z.uuid("Scegli il turno del collega.").nullable(),
+    targetDate: z.iso.date("Data del turno del collega non valida.").nullable(),
+    message: z.string().trim().max(2000, "Il messaggio può avere al massimo 2000 caratteri."),
+    attachmentPath: z.string().max(300, "Allegato non valido.").nullable(),
   })
   .superRefine((v, ctx) => {
     if (v.endDate < v.startDate)
@@ -86,6 +103,7 @@ export async function checkRequest(input: {
       { data: myDeps },
       { data: away },
       { data: profiles },
+      { data: myLeaves },
     ] = await Promise.all([
       supabase.from("store_settings").select("request_notice_days").eq("id", true).single(),
       supabase
@@ -94,12 +112,24 @@ export async function checkRequest(input: {
         .eq("profile_id", profile.id)
         .in("status", ["pending", "peer_accepted", "approved"]),
       supabase.from("profile_departments").select("department_id").eq("profile_id", profile.id),
+      // Solo ferie confermate: permessi, malattie e "da confermare" non contano come colleghi
+      // in ferie.
       supabase
         .from("leaves_public")
         .select("profile_id, date")
+        .eq("kind", "ferie")
+        .eq("status", "confirmed")
         .gte("date", input.startDate)
         .lte("date", input.endDate),
       supabase.from("public_profiles").select("id, department_ids"),
+      // Le proprie assenze a planning (anche inserite dall'admin): la propria riga è leggibile.
+      supabase
+        .from("leaves")
+        .select("date, type, status, source, request_id")
+        .eq("profile_id", profile.id)
+        .gte("date", input.startDate)
+        .lte("date", input.endDate)
+        .order("date"),
     ]);
     const deps = new Set((myDeps ?? []).map((d) => d.department_id));
     const sameDept = new Set(
@@ -125,6 +155,12 @@ export async function checkRequest(input: {
           endDate: r.end_date,
         })),
         colleaguesAwayByDate: byDate,
+        myPlannedLeaves: (myLeaves ?? []).map((l) => ({
+          date: l.date,
+          type: l.type,
+          status: l.status,
+          fromRequest: l.source === "request" || Boolean(l.request_id),
+        })),
       }),
     };
   });
@@ -189,9 +225,38 @@ export async function createRequest(input: RequestInput): Promise<ActionResult<{
 
 export async function cancelRequest(id: string): Promise<ActionResult> {
   return runAction(async () => {
-    const { supabase } = await authedAction();
-    const { error } = await supabase.rpc("cancel_request", { p_request_id: z.uuid().parse(id) });
+    const { supabase, profile } = await authedAction();
+    const requestId = z.uuid().parse(id);
+    // Stato prima dell'annullamento: serve per sapere se il collega aveva già accettato.
+    const { data: before } = await supabase
+      .from("requests")
+      .select("type, status, start_date, end_date, target_profile_id")
+      .eq("id", requestId)
+      .maybeSingle();
+    const { error } = await supabase.rpc("cancel_request", { p_request_id: requestId });
     if (error) return { ok: false, message: "La richiesta non si può più annullare." };
+    if (before) {
+      const what = `${requestTypeLabel(before.type)} · ${formatRange(before.start_date, before.end_date)}`;
+      await notify(await adminIds(), {
+        kind: "request_decided",
+        title: `Richiesta annullata da ${profile.display_name}`,
+        body: what,
+        link: `/admin/richieste/${requestId}`,
+      });
+      // Il collega di uno scambio già accettato contava su quel turno: va avvisato.
+      if (
+        before.type === "scambio_turno" &&
+        before.target_profile_id &&
+        ["peer_accepted", "approved"].includes(before.status)
+      ) {
+        await notify([before.target_profile_id], {
+          kind: "request_decided",
+          title: `${profile.display_name} ha annullato lo scambio`,
+          body: what,
+          link: `/richieste/${requestId}`,
+        });
+      }
+    }
     revalidatePath("/richieste");
     revalidatePath("/admin/richieste");
     return { ok: true, message: "Richiesta annullata." };
@@ -238,7 +303,12 @@ export async function respondToSwap(id: string, accept: boolean): Promise<Action
 export async function addRequestComment(requestId: string, body: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase, profile } = await authedAction();
-    const text = z.string().trim().min(1, "Scrivi un commento.").max(4000).parse(body);
+    const text = z
+      .string()
+      .trim()
+      .min(1, "Scrivi un commento.")
+      .max(4000, "Al massimo 4000 caratteri.")
+      .parse(body);
     const id = z.uuid().parse(requestId);
     const { data: r } = await supabase
       .from("requests")
@@ -251,19 +321,21 @@ export async function addRequestComment(requestId: string, body: string): Promis
       .insert({ request_id: id, author_id: profile.id, body: text });
     if (error) return { ok: false, message: dbErrorMessage(error, "Commento non salvato.") };
 
-    const recipients =
-      profile.role === "admin" && r.profile_id !== profile.id
-        ? [r.profile_id]
-        : (await adminIds()).filter((a) => a !== profile.id);
-    await notify(recipients, {
-      kind: "request_decided",
+    // Destinatari: chi ha chiesto (se non è l'autore), il collega dello scambio e gli admin,
+    // ciascuno con il collegamento alla propria pagina.
+    const admins = (await adminIds()).filter((a) => a !== profile.id);
+    const people = [r.profile_id, r.target_profile_id].filter(
+      (p): p is string => Boolean(p) && p !== profile.id && !admins.includes(p!),
+    );
+    const notification = {
+      kind: "request_decided" as const,
       title: `Nuovo commento di ${profile.display_name}`,
       body: text.slice(0, 140),
-      link:
-        profile.role === "admin" && r.profile_id !== profile.id
-          ? `/richieste/${id}`
-          : `/admin/richieste/${id}`,
-    });
+    };
+    await Promise.all([
+      notify(people, { ...notification, link: `/richieste/${id}` }),
+      notify(admins, { ...notification, link: `/admin/richieste/${id}` }),
+    ]);
     revalidatePath(`/richieste/${id}`);
     revalidatePath(`/admin/richieste/${id}`);
     return { ok: true };
@@ -277,13 +349,9 @@ export async function uploadRequestAttachment(
   return runAction(async () => {
     const { profile } = await authedAction();
     const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0)
-      return { ok: false, message: "Scegli un file." };
-    if (file.size > 10 * 1024 * 1024)
-      return { ok: false, message: "L'allegato deve pesare meno di 10 MB." };
-    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/heic", "image/webp"];
-    if (!allowed.includes(file.type))
-      return { ok: false, message: "Formati ammessi: PDF, JPG, PNG, HEIC, WebP." };
+    if (!(file instanceof File)) return { ok: false, message: "Scegli un file." };
+    const invalid = attachmentError(file);
+    if (invalid) return { ok: false, message: invalid };
     const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-80);
     const path = `${profile.id}/${crypto.randomUUID()}-${safe}`;
     // Upload con la service role nella cartella dell'utente: lo Storage resta privato.

@@ -17,8 +17,8 @@ import type { TablesInsert } from "@/lib/supabase/types";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
-const isoDate = z.iso.date();
-const uuid = z.uuid();
+const isoDate = z.iso.date("Data non valida.");
+const uuid = z.uuid("Persona non valida.");
 
 const cellSchema = z.object({
   profileId: uuid,
@@ -139,9 +139,15 @@ const rangeSchema = z
     profileIds: z.array(uuid).min(1, "Scegli almeno una persona.").max(100),
     from: isoDate,
     to: isoDate,
-    type: z.enum(["ferie", "permesso", "malattia", "altro"]),
-    status: z.enum(["confirmed", "tentative"]),
-    hours: z.number().min(0.5).max(24).multipleOf(0.5).nullable().default(null),
+    type: z.enum(["ferie", "permesso", "malattia", "altro"], "Tipo di assenza non valido."),
+    status: z.enum(["confirmed", "tentative"], "Stato non valido."),
+    hours: z
+      .number("Indica le ore (es. 4 o 4,5).")
+      .min(0.5, "Indica le ore (es. 4 o 4,5).")
+      .max(12, "Massimo 12 ore.")
+      .multipleOf(0.5, "A mezz'ore.")
+      .nullable()
+      .default(null),
     overrideRequests: z.boolean().default(false),
   })
   .refine((v) => dateRange(v.from, v.to).length <= 366, {

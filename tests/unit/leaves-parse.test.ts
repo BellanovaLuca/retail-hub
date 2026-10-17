@@ -6,6 +6,26 @@ describe("parseLeaveCell", () => {
     expect(parseLeaveCell("  ")).toEqual({ kind: "empty" });
   });
 
+  it("X svuota la cella, come negli Excel del negozio", () => {
+    expect(parseLeaveCell("X")).toEqual({ kind: "empty" });
+    expect(parseLeaveCell("x")).toEqual({ kind: "empty" });
+    expect(parseLeaveCell(" x ")).toEqual({ kind: "empty" });
+    expect(parseLeaveCell("XX")).toMatchObject({ kind: "error" });
+  });
+
+  it("ore del permesso fino a 12", () => {
+    expect(parseLeaveCell("PE12")).toEqual({
+      kind: "leave",
+      type: "permesso",
+      status: "confirmed",
+      hours: 12,
+    });
+    expect(parseLeaveCell("PE12,5")).toMatchObject({
+      kind: "error",
+      message: expect.stringMatching(/da 0,5 a 12/),
+    });
+  });
+
   it.each([
     ["F", "ferie", "confirmed", null],
     ["f", "ferie", "confirmed", null],
@@ -25,7 +45,7 @@ describe("parseLeaveCell", () => {
   });
 
   it("errori in italiano", () => {
-    expect(parseLeaveCell("X")).toMatchObject({
+    expect(parseLeaveCell("Z")).toMatchObject({
       kind: "error",
       message: expect.stringMatching(/non è un codice valido/),
     });
@@ -34,7 +54,7 @@ describe("parseLeaveCell", () => {
       message: expect.stringMatching(/solo sul permesso/),
     });
     expect(parseLeaveCell("PE0")).toMatchObject({ kind: "error" });
-    expect(parseLeaveCell("PE25")).toMatchObject({ kind: "error" });
+    expect(parseLeaveCell("PE13")).toMatchObject({ kind: "error" });
     expect(parseLeaveCell("PE4,3")).toMatchObject({ kind: "error" });
   });
 });

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { awaitsAdmin, formatRange, overlaps, requestWarnings } from "@/lib/requests";
+import {
+  attachmentError,
+  awaitsAdmin,
+  formatRange,
+  overlaps,
+  requestWarnings,
+  swapConflicts,
+} from "@/lib/requests";
 
 const base = {
   today: "2026-10-17",
@@ -72,5 +79,110 @@ describe("utilità", () => {
     expect(formatRange("2026-10-14", "2026-10-14")).toBe("14 ott");
     expect(formatRange("2026-10-14", "2026-10-16")).toBe("14–16 ott");
     expect(formatRange("2026-10-30", "2026-11-02")).toBe("30 ott – 2 nov");
+  });
+});
+
+describe("avviso sulle assenze già a planning", () => {
+  it("segnala le ferie inserite dall'admin, non quelle nate da una richiesta", () => {
+    const w = requestWarnings({
+      ...base,
+      myPlannedLeaves: [
+        { date: "2026-11-03", type: "ferie", status: "confirmed", fromRequest: false },
+        { date: "2026-11-04", type: "ferie", status: "confirmed", fromRequest: true },
+      ],
+    });
+    expect(w).toEqual(["Nel planning risulti già in ferie il 3 nov."]);
+    expect(
+      requestWarnings({
+        ...base,
+        myPlannedLeaves: [
+          { date: "2026-11-04", type: "ferie", status: "confirmed", fromRequest: true },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("da confermare e altri tipi", () => {
+    const w = requestWarnings({
+      ...base,
+      myPlannedLeaves: [
+        { date: "2026-11-02", type: "permesso", status: "tentative", fromRequest: false },
+      ],
+    });
+    expect(w).toEqual(["Nel planning risulti già in permesso (da confermare) il 2 nov."]);
+  });
+});
+
+describe("avvisi dello scambio turno", () => {
+  const requester = { id: "a", name: "Anna" };
+  const target = { id: "b", name: "Bruno" };
+
+  it("nessun avviso se i due giorni sono liberi", () => {
+    expect(
+      swapConflicts({
+        requester,
+        target,
+        shiftDate: "2026-11-02",
+        targetDate: "2026-11-03",
+        occupations: [
+          { profileId: "a", date: "2026-11-02", kind: "turno", text: "10:00–14:00" },
+          { profileId: "b", date: "2026-11-03", kind: "turno", text: "14:00–20:00" },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it("il collega ha già un turno o è in ferie il giorno che riceve", () => {
+    const occupations = [
+      { profileId: "b", date: "2026-11-02", kind: "turno" as const, text: "14:00–20:00" },
+      { profileId: "b", date: "2026-11-02", kind: "assenza" as const, text: "in ferie" },
+    ];
+    expect(
+      swapConflicts({ requester, target, shiftDate: "2026-11-02", targetDate: null, occupations }),
+    ).toEqual([
+      "Attenzione: Bruno ha già un turno il 2 nov (14:00–20:00).",
+      "Attenzione: Bruno è in ferie il 2 nov.",
+    ]);
+  });
+
+  it("stesso giorno: il turno ceduto non è un conflitto, l'assenza sì", () => {
+    const occupations = [
+      { profileId: "a", date: "2026-11-02", kind: "turno" as const, text: "10:00–14:00" },
+      { profileId: "b", date: "2026-11-02", kind: "turno" as const, text: "14:00–20:00" },
+      { profileId: "a", date: "2026-11-02", kind: "assenza" as const, text: "in permesso" },
+    ];
+    expect(
+      swapConflicts({
+        requester,
+        target,
+        shiftDate: "2026-11-02",
+        targetDate: "2026-11-02",
+        occupations,
+      }),
+    ).toEqual(["Attenzione: Anna è in permesso il 2 nov."]);
+  });
+
+  it("chi chiede ha già un turno il giorno del turno del collega", () => {
+    expect(
+      swapConflicts({
+        requester,
+        target,
+        shiftDate: "2026-11-02",
+        targetDate: "2026-11-05",
+        occupations: [{ profileId: "a", date: "2026-11-05", kind: "turno", text: "09:00–13:00" }],
+        formatDay: (d) => d,
+      }),
+    ).toEqual(["Attenzione: Anna ha già un turno il 2026-11-05 (09:00–13:00)."]);
+  });
+});
+
+describe("controllo dell'allegato prima dell'invio", () => {
+  it("peso e formato", () => {
+    expect(attachmentError({ size: 2 * 1024 * 1024, type: "image/png" })).toBeNull();
+    expect(attachmentError({ size: 11 * 1024 * 1024, type: "image/png" })).toBe(
+      "L'allegato deve pesare meno di 10 MB.",
+    );
+    expect(attachmentError({ size: 10, type: "text/plain" })).toMatch(/Formati ammessi/);
+    expect(attachmentError({ size: 0, type: "image/png" })).toBe("Scegli un file.");
   });
 });
