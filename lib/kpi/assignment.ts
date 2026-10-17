@@ -71,17 +71,25 @@ export function buildAssignmentPreview(input: {
   kpis: (KpiDefinitionRef & { kpiId: string })[];
   overrides: Record<string, number | null>;
 }): AssignmentPreview {
-  const assignment = assignWeeklyTargets(
-    input.store,
-    input.people.map((p) => ({
-      profileId: p.profileId,
-      zone: p.zone,
-      plannedHours: p.plannedHours,
-      kpiCodes: p.kpis.map((k) => k.code),
-    })),
-    input.kpis,
-  );
+  const targetPeople = input.people.map((p) => ({
+    profileId: p.profileId,
+    zone: p.zone,
+    plannedHours: p.plannedHours,
+    kpiCodes: p.kpis.map((k) => k.code),
+  }));
+  // Proposta "pulita" (per mostrare da dove si parte) e proposta effettiva, in cui le voci
+  // "% di …" seguono i valori scritti a mano della voce base.
+  const assignment = assignWeeklyTargets(input.store, targetPeople, input.kpis);
+  const byCode: Record<string, Record<string, number>> = {};
+  for (const p of input.people) {
+    for (const k of p.kpis) {
+      const v = input.overrides[cellKey(p.profileId, k.kpiId)];
+      if (typeof v === "number") (byCode[p.profileId] ??= {})[k.code] = v;
+    }
+  }
+  const effective = assignWeeklyTargets(input.store, targetPeople, input.kpis, byCode);
   const byPerson = new Map(assignment.people.map((p) => [p.profileId, p]));
+  const effectiveByPerson = new Map(effective.people.map((p) => [p.profileId, p]));
   const cells = new Map<string, PreviewCell>();
   const assignedByKpi: Record<string, number> = {};
   let woAssigned = 0;
@@ -89,11 +97,16 @@ export function buildAssignmentPreview(input: {
 
   for (const person of input.people) {
     const computedTargets = byPerson.get(person.profileId)?.targets ?? {};
+    const effectiveTargets = effectiveByPerson.get(person.profileId)?.targets ?? {};
     for (const k of person.kpis) {
       const key = cellKey(person.profileId, k.kpiId);
       const computed = k.code in computedTargets ? computedTargets[k.code] : null;
       const hasOverride = key in input.overrides && input.overrides[key] !== computed;
-      const value = hasOverride ? input.overrides[key] : computed;
+      const value = hasOverride
+        ? input.overrides[key]
+        : k.code in effectiveTargets
+          ? effectiveTargets[k.code]
+          : computed;
       cells.set(key, { computed, value, overridden: hasOverride });
       if (value !== null) {
         assignedByKpi[k.kpiId] = (assignedByKpi[k.kpiId] ?? 0) + value;

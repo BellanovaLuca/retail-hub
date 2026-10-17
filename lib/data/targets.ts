@@ -311,7 +311,7 @@ export async function getMyWeek(
   // Voci con un obiettivo assegnato ma tolte dal foglio della persona: restano visibili.
   for (const t of targets) {
     if (kpis.some((k) => k.kpiId === t.kpiId)) continue;
-    const d = defs.find((x) => x.id === t.kpiId);
+    const d = defs.find((x) => x.id === t.kpiId && x.active);
     if (d)
       kpis.push({
         kpiId: d.id,

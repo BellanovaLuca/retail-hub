@@ -10,9 +10,18 @@ export const ruleSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pct_of"),
     kpi: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
-    pct: z.number().positive().max(10),
+    pct: z
+      .number()
+      .positive("La percentuale deve essere maggiore di zero.")
+      .max(10, "Al massimo 1000%."),
   }),
-  z.object({ type: z.literal("fixed"), value: z.number().min(0).max(100_000) }),
+  z.object({
+    type: z.literal("fixed"),
+    value: z
+      .number()
+      .min(0, "Il valore non può essere negativo.")
+      .max(100_000, "Al massimo 100.000."),
+  }),
 ]);
 
 /** Il jsonb del database come regola tipizzata; valori non validi o assenti → nessuna regola. */

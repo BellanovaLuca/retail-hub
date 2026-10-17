@@ -5,7 +5,7 @@ import { StoreCard } from "@/components/targets/store-card";
 import { Card, CardTitle } from "@/components/ui/card";
 import { PersonDot, Table, Td, Th } from "@/components/ui/table";
 import { requireAdmin } from "@/lib/auth/session";
-import { normalizeWeekParam } from "@/lib/data/schedule";
+import { normalizeWeekParam, weekDates } from "@/lib/data/schedule";
 import { getAdminTargetsWeek, getMissingCompilers, targetsByPerson } from "@/lib/data/targets";
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import {
@@ -16,7 +16,7 @@ import {
   zoneTable,
   type ZoneTable,
 } from "@/lib/kpi/monitoring";
-import { formatCount, shiftDate } from "@/lib/kpi/sheet";
+import { formatCount } from "@/lib/kpi/sheet";
 import { createClient } from "@/lib/supabase/server";
 import { bestPerformer } from "@/lib/targets";
 import { cn } from "@/lib/utils";
@@ -38,10 +38,14 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
   const weekStart = normalizeWeekParam(param, nowInRome());
   const db = await createClient();
   const today = toISODate(nowInRome());
-  const yesterday = shiftDate(today, -1);
+  // "Chi non ha compilato": gli ultimi due giorni della settimana scelta già trascorsi
+  // (ieri e oggi nella settimana corrente; nulla nelle settimane future).
+  const checkDays = weekDates(weekStart)
+    .filter((d) => d <= today)
+    .slice(-2);
   const [data, missing] = await Promise.all([
     getAdminTargetsWeek(db, weekStart),
-    getMissingCompilers(db, [yesterday, today]),
+    checkDays.length ? getMissingCompilers(db, checkDays) : Promise.resolve([]),
   ]);
 
   const names = new Map(data.people.map((p) => [p.profileId, p]));
@@ -92,7 +96,13 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
     .sort((a, b) => b.avg - a.avg)
     .slice(0, 5);
   const confirmedId = data.store?.bestPerformerConfirmed ? data.store.bestPerformerId : null;
-  const confirmedName = confirmedId ? (names.get(confirmedId)?.name ?? null) : null;
+  // Il best performer confermato può essere una persona poi disattivata: il nome si legge comunque.
+  const confirmedName = confirmedId
+    ? (names.get(confirmedId)?.name ??
+      (await db.from("public_profiles").select("display_name").eq("id", confirmedId).maybeSingle())
+        .data?.display_name ??
+      null)
+    : null;
   const candidateId = confirmedId ?? suggested?.profileId ?? null;
   const candidateName = candidateId ? (names.get(candidateId)?.name ?? "—") : null;
 

@@ -27,7 +27,15 @@ as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid;
 $$;
 
-grant execute on function auth.uid() to anon, authenticated, service_role;
+create or replace function auth.role()
+returns text
+language sql
+stable
+as $$
+  select nullif(current_setting('request.jwt.claim.role', true), '');
+$$;
+
+grant execute on function auth.uid(), auth.role() to anon, authenticated, service_role;
 
 -- Privilegi di default che Supabase concede sulle tabelle di public.
 alter default privileges in schema public grant all on tables to anon, authenticated, service_role;

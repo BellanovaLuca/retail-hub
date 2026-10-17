@@ -13,7 +13,7 @@ import {
 import { setNameForZone } from "@/lib/data/targets";
 import { weekNumber } from "@/lib/dates";
 import { createsCycle, parseRule, ruleSchema } from "@/lib/kpi/rules";
-import { notify } from "@/lib/notifications";
+import { notify, notifyEach } from "@/lib/notifications";
 import type { createClient } from "@/lib/supabase/server";
 import type { DefaultTargetRule } from "@/lib/targets";
 
@@ -121,6 +121,25 @@ export async function confirmAssignment(
       throw new ActionError(dbErrorMessage(storeError, "Obiettivi del negozio non salvati."));
 
     const profileIds = [...new Set(cells.map((c) => c.profileId))];
+    const keep = new Set(cells.map((c) => `${c.profileId}|${c.kpiId}`));
+    // Obiettivi già salvati: servono per avvisare solo chi riceve obiettivi nuovi o diversi.
+    const { data: existing } = profileIds.length
+      ? await supabase
+          .from("weekly_targets")
+          .select("id, profile_id, kpi_id, target")
+          .eq("week_start", weekStart)
+          .in("profile_id", profileIds)
+      : { data: [] as { id: string; profile_id: string; kpi_id: string; target: number }[] };
+    const previous = new Map(
+      (existing ?? []).map((e) => [`${e.profile_id}|${e.kpi_id}`, e.target]),
+    );
+    const changed = new Set<string>();
+    for (const c of cells) {
+      if (previous.get(`${c.profileId}|${c.kpiId}`) !== c.target) changed.add(c.profileId);
+    }
+    for (const e of existing ?? []) {
+      if (!keep.has(`${e.profile_id}|${e.kpi_id}`)) changed.add(e.profile_id);
+    }
     if (cells.length) {
       const { error } = await supabase.from("weekly_targets").upsert(
         cells.map((c) => ({
@@ -137,12 +156,6 @@ export async function confirmAssignment(
 
     // Celle svuotate (voce senza obiettivo): si tolgono le righe salvate in precedenza.
     if (profileIds.length) {
-      const { data: existing } = await supabase
-        .from("weekly_targets")
-        .select("id, profile_id, kpi_id")
-        .eq("week_start", weekStart)
-        .in("profile_id", profileIds);
-      const keep = new Set(cells.map((c) => `${c.profileId}|${c.kpiId}`));
       const stale = (existing ?? []).filter((e) => !keep.has(`${e.profile_id}|${e.kpi_id}`));
       if (stale.length) {
         const { error } = await supabase
@@ -158,18 +171,37 @@ export async function confirmAssignment(
 
     await ensureProfileKpis(supabase, profileIds);
 
-    if (parsed.data.notify && profileIds.length) {
-      await notify(profileIds, {
-        kind: "targets_assigned",
-        title: `Obiettivi della ${weekLabel(weekStart)}`,
-        body: "Sono pronti i tuoi obiettivi della settimana: compila i numeri ogni giorno.",
-        link: `/obiettivi?settimana=${weekStart}`,
-      });
+    // Si avvisa solo chi ha obiettivi nuovi o cambiati (chi li aveva già uguali non riceve nulla).
+    const toNotify = parsed.data.notify ? [...changed] : [];
+    if (toNotify.length) {
+      const firstTime = toNotify.filter(
+        (id) => ![...previous.keys()].some((k) => k.startsWith(`${id}|`)),
+      );
+      await notifyEach(
+        toNotify.map((id) => ({
+          profileId: id,
+          notification: {
+            kind: "targets_assigned" as const,
+            title: firstTime.includes(id)
+              ? `Obiettivi della ${weekLabel(weekStart)}`
+              : `Obiettivi aggiornati · ${weekLabel(weekStart)}`,
+            body: firstTime.includes(id)
+              ? "Sono pronti i tuoi obiettivi della settimana: compila i numeri ogni giorno."
+              : "I tuoi obiettivi della settimana sono stati aggiornati.",
+            link: `/obiettivi?settimana=${weekStart}`,
+          },
+        })),
+      );
     }
     revalidateWeek(weekStart);
+    const people = `${profileIds.length} ${profileIds.length === 1 ? "persona" : "persone"}`;
     return {
       ok: true,
-      message: `Obiettivi confermati per ${profileIds.length} ${profileIds.length === 1 ? "persona" : "persone"}.`,
+      message: parsed.data.notify
+        ? toNotify.length
+          ? `Obiettivi confermati per ${people}: ${toNotify.length === profileIds.length ? "tutte avvisate" : `avvisate ${toNotify.length}, per le altre niente di nuovo`}.`
+          : `Obiettivi confermati per ${people}: nessuna modifica da comunicare.`
+        : `Obiettivi confermati per ${people}.`,
       data: { people: profileIds.length },
     };
   });
@@ -514,11 +546,24 @@ export async function saveKpi(
       active: v.active,
     };
     if (v.id) {
+      const before = (all ?? []).find((k) => k.id === v.id);
       const { error } = await supabase.from("kpi_definitions").update(row).eq("id", v.id);
       if (error)
         return error.code === "23505"
           ? { ok: false, message: "Codice già usato.", fieldErrors: { code: "Codice già usato." } }
           : { ok: false, message: dbErrorMessage(error, "Voce non salvata.") };
+      // Le regole "% di <codice>" delle altre voci seguono la rinomina.
+      if (before && before.code !== v.code) {
+        for (const k of all ?? []) {
+          const rule = parseRule(k.default_target_rule);
+          if (k.id !== v.id && rule?.type === "pct_of" && rule.kpi === before.code) {
+            await supabase
+              .from("kpi_definitions")
+              .update({ default_target_rule: { ...rule, kpi: v.code } })
+              .eq("id", k.id);
+          }
+        }
+      }
       revalidatePath("/admin/obiettivi", "layout");
       return { ok: true, message: "Voce salvata.", data: { id: v.id } };
     }

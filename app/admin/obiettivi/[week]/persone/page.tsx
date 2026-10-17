@@ -60,7 +60,7 @@ export default async function PersonePage({
     ...data.entries.filter((e) => e.profileId === selected.profileId).map((e) => e.kpiId),
   ])) {
     if (kpis.some((k) => k.kpiId === kpiId)) continue;
-    const d = data.definitions.find((x) => x.id === kpiId);
+    const d = data.definitions.find((x) => x.id === kpiId && x.active);
     if (d) kpis.push({ kpiId: d.id, code: d.code, label: d.label });
   }
 

@@ -48,7 +48,7 @@ function useRun() {
       }),
     [router],
   );
-  return { pending, result, run };
+  return { pending, result, run, setResult };
 }
 
 const move = <T,>(list: T[], index: number, delta: number) => {
@@ -70,7 +70,7 @@ export function KpiManager({
   people: Person[];
   initialPersonId: string | null;
 }) {
-  const { pending, result, run } = useRun();
+  const { pending, result, run, setResult } = useRun();
   const [editing, setEditing] = React.useState<KpiDefinition | "new" | null>(null);
   const labelOf = React.useCallback(
     (code: string) => definitions.find((d) => d.code === code)?.label ?? code,
@@ -213,7 +213,11 @@ export function KpiManager({
             <KpiForm
               kpi={editing === "new" ? null : editing}
               definitions={definitions}
-              onDone={() => setEditing(null)}
+              onDone={(message) => {
+                setEditing(null);
+                // La finestra si chiude: il messaggio di esito resta nell'elenco.
+                if (message) setResult({ ok: true, message });
+              }}
             />
           </DialogContent>
         ) : null}
@@ -233,7 +237,7 @@ function KpiForm({
 }: {
   kpi: KpiDefinition | null;
   definitions: KpiDefinition[];
-  onDone: () => void;
+  onDone: (message?: string) => void;
 }) {
   const router = useRouter();
   const [pending, start] = React.useTransition();
@@ -292,7 +296,7 @@ function KpiForm({
       setResult(res);
       if (res.ok) {
         router.refresh();
-        onDone();
+        onDone(res.message);
       }
     });
   };
@@ -372,7 +376,7 @@ function KpiForm({
       ) : null}
       <FormMessage result={result} />
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onDone}>
+        <Button type="button" variant="ghost" onClick={() => onDone()}>
           Annulla
         </Button>
         <Button type="submit" disabled={pending}>

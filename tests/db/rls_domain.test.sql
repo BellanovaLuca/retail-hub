@@ -57,6 +57,42 @@ insert into public.responsibility_assignees (responsibility_id, profile_id, role
 insert into public.kpi_definitions (id, code, label) values
   ('00000000-0000-0000-0000-000000000801', 'TEST_KPI', 'Voce di prova');
 
+-- ---- service role (cron e server): le viste pubbliche rispondono senza auth.uid() ----
+set local role service_role;
+select set_config('request.jwt.claim.role', 'service_role', true);
+select set_config('request.jwt.claim.sub', '', true);
+do $$
+declare
+  n int;
+begin
+  select count(*) into n from public.published_shifts;
+  if n <> 2 then raise exception 'FALLITO: il service role vede % turni pubblicati (attesi 2)', n; end if;
+  select count(*) into n from public.public_profiles;
+  if n <> 3 then raise exception 'FALLITO: il service role vede % profili pubblici (attesi 3)', n; end if;
+  -- Al service role il dettaglio delle assenze non è mascherato (serve ai promemoria).
+  if not exists (select 1 from public.published_shifts where template_label = 'Malattia') then
+    raise exception 'FALLITO: il service role non vede il motivo delle assenze';
+  end if;
+end;
+$$;
+reset role;
+
+-- ---- utente auth senza profilo: niente viste pubbliche ----
+set local role authenticated;
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000ff', true);
+do $$
+declare
+  n int;
+begin
+  select count(*) into n from public.published_shifts;
+  if n <> 0 then raise exception 'FALLITO: un utente senza profilo vede % turni pubblicati', n; end if;
+  select count(*) into n from public.public_profiles;
+  if n <> 0 then raise exception 'FALLITO: un utente senza profilo vede % profili', n; end if;
+end;
+$$;
+reset role;
+
 -- ---- dipendente e1 ---------------------------------------------------------
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);

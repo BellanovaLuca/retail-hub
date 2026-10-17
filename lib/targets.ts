@@ -74,6 +74,8 @@ export function assignWeeklyTargets(
   store: StoreWeeklyTargets,
   people: TargetPerson[],
   kpis: KpiDefinitionRef[],
+  /** Valori scritti a mano (profileId → codice voce → valore): base per le voci "% di …". */
+  overrides: Record<string, Record<string, number>> = {},
 ): TargetAssignment {
   const eurPerHourVista = safeDiv(store.vistaValueEur, store.totalHours);
   const eurPerHourSole = safeDiv(store.soleValueEur, store.totalHours);
@@ -88,9 +90,14 @@ export function assignWeeklyTargets(
     const soleTarget = Math.round(safeDiv(valueSole, store.soleAvgPrice));
 
     const cache = new Map<string, number | null>();
+    const manual = overrides[p.profileId] ?? {};
     const compute = (code: string, visiting: Set<string>): number | null => {
       if (cache.has(code)) return cache.get(code)!;
       if (visiting.has(code)) return null; // ciclo tra regole pct_of
+      if (code in manual) {
+        cache.set(code, manual[code]);
+        return manual[code];
+      }
       const rule = rules.get(code);
       let value: number | null = null;
       if (rule?.type === "fixed") value = rule.value;

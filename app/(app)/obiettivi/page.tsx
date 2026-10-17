@@ -26,15 +26,18 @@ export default async function ObiettiviPage({
   const params = await searchParams;
   const now = nowInRome();
   const current = normalizeWeekParam(undefined, now);
-  // Si guarda la settimana corrente e quelle precedenti, mai il futuro.
+  // Si guardano la settimana corrente, le precedenti e la prossima: gli obiettivi arrivano
+  // prima del lunedì e la notifica porta qui.
+  const nextWeek = toISODate(addDays(parseISO(current), 7));
   const requested = normalizeWeekParam(params.settimana, now);
-  const weekStart = requested > current ? current : requested;
+  const weekStart = requested > nextWeek ? nextWeek : requested;
 
   const supabase = await createClient();
   const week = await getMyWeek(supabase, profile, weekStart);
   const prev = toISODate(addDays(parseISO(weekStart), -7));
   const next = toISODate(addDays(parseISO(weekStart), 7));
   const isCurrent = weekStart === current;
+  const canGoNext = weekStart < nextWeek;
 
   const initialValues: Record<string, number | null> = {};
   for (const row of week.rows)
@@ -61,7 +64,7 @@ export default async function ObiettiviPage({
           <h1 className="font-display text-4xl font-light tracking-tight nums sm:text-[2.75rem]">
             Week {week.weekNumber}
           </h1>
-          {!isCurrent ? (
+          {canGoNext ? (
             <Button asChild variant="ghost" size="icon" aria-label="Settimana successiva">
               <Link href={`/obiettivi?settimana=${next}`}>
                 <ChevronRight />
