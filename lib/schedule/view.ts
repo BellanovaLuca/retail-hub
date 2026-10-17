@@ -1,7 +1,7 @@
 import { format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
 import { shiftNetHours } from "@/lib/hours";
-import type { LeaveRecord, SchedulePerson, ShiftRecord } from "./types";
+import type { LeaveRecord, SchedulePerson, ShiftRecord, TemplateRecord } from "./types";
 
 export const key = (profileId: string, date: string) => `${profileId}|${date}`;
 
@@ -80,4 +80,45 @@ export function groupPeopleByDepartment(
   const orphans = people.filter((p) => !p.primaryDepartmentId || !known.has(p.primaryDepartmentId));
   if (orphans.length) groups.push({ id: "senza-reparto", label: "Senza reparto", people: orphans });
   return groups;
+}
+
+/** Tipo di assenza di un turno rapido, dal codice (F, PE, MA) o dall'etichetta. */
+export function absenceTypeOf(tpl: Pick<TemplateRecord, "code" | "label">): LeaveRecord["type"] {
+  const code = tpl.code.toUpperCase();
+  const label = tpl.label.toLowerCase();
+  if (code === "F" || label.startsWith("ferie")) return "ferie";
+  if (code === "PE" || label.startsWith("permess")) return "permesso";
+  if (code === "MA" || label.startsWith("malatti")) return "malattia";
+  return "altro";
+}
+
+/**
+ * Assenze del foglio orario: quelle del planning più i turni rapidi di assenza scritti nella
+ * griglia (es. "F" su una persona), così anche il foglio orario e il PDF mostrano il riempimento.
+ * Le assenze del planning hanno la precedenza.
+ */
+export function withAbsenceShifts(
+  leaves: LeaveRecord[],
+  shifts: ShiftRecord[],
+  templates: Map<string, TemplateRecord>,
+): LeaveRecord[] {
+  const taken = new Set(leaves.map((l) => key(l.profileId, l.date)));
+  const extra: LeaveRecord[] = [];
+  for (const s of shifts) {
+    const tpl = s.templateId ? templates.get(s.templateId) : undefined;
+    if (!tpl?.isAbsence || s.start) continue;
+    const k = key(s.profileId, s.date);
+    if (taken.has(k)) continue;
+    taken.add(k);
+    extra.push({
+      profileId: s.profileId,
+      date: s.date,
+      type: absenceTypeOf(tpl),
+      hours: null,
+      status: "confirmed",
+      source: "planning",
+      fromShift: true,
+    });
+  }
+  return [...leaves, ...extra];
 }

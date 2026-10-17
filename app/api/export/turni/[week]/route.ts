@@ -15,6 +15,7 @@ import { buildAdminGridModel } from "@/lib/export/schedule-grid";
 import { renderGridPdf, renderWeekPdf } from "@/lib/export/schedule-pdf";
 import { buildScheduleXlsx } from "@/lib/export/schedule-xlsx";
 import { buildTimesheetModel } from "@/lib/export/timesheet-model";
+import { withAbsenceShifts } from "@/lib/schedule/view";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const timesheet = buildTimesheetModel({
     days: data.days,
     shifts: data.shifts,
-    leaves: data.leaves,
+    leaves: withAbsenceShifts(data.leaves, data.shifts, new Map(templates.map((t) => [t.id, t]))),
     people,
     departments: deps,
     calendar,

@@ -62,6 +62,14 @@ async function replaceDay(
     .eq("date", date)
     .order("start_time");
   const prev = existing?.[0];
+  // Un turno di lavoro in un giorno di assenza a giornata intera resta segnalato come conflitto.
+  const { data: leave } = await db
+    .from("leaves")
+    .select("hours")
+    .eq("profile_id", profileId)
+    .eq("date", date)
+    .maybeSingle();
+  const conflict = Boolean(leave && !leave.hours && segments.length > 0);
 
   const { error: delError } = await db
     .from("shifts")
@@ -85,6 +93,7 @@ async function replaceDay(
         : (prev?.working_as_department_id ?? null),
     zone,
     note: opts.note !== undefined ? opts.note : (prev?.note ?? null),
+    conflict,
   };
 
   const rows: TablesInsert<"shifts">[] =
@@ -151,10 +160,26 @@ export async function saveShiftCells(
     const tplByCode = new Map(templates.map((t) => [t.code, t]));
     const zoneOf = new Map(people.map((p) => [p.id, p.homeZone]));
     const errors: { profileId: string; date: string; message: string }[] = [];
+    const { data: leaveRows } = await supabase
+      .from("leaves")
+      .select("profile_id, date, hours")
+      .gte("date", week.week_start)
+      .lte("date", format(addDays(parseISO(week.week_start), 6), "yyyy-MM-dd"));
+    const absentDays = new Set(
+      (leaveRows ?? []).filter((l) => !l.hours).map((l) => `${l.profile_id}|${l.date}`),
+    );
 
     for (const change of list) {
       if (!days.has(change.date)) {
         errors.push({ ...change, message: "Giorno fuori dalla settimana." });
+        continue;
+      }
+      // Giorno di assenza: dal foglio si può solo svuotare; il resto passa dal dettaglio.
+      if (absentDays.has(`${change.profileId}|${change.date}`) && change.value.trim() !== "") {
+        errors.push({
+          ...change,
+          message: "Giornata di assenza: modifica il turno dal dettaglio del giorno.",
+        });
         continue;
       }
       const parsed = parseShiftCell(change.value, tplInput);

@@ -9,6 +9,14 @@ export function nowInRome(): TZDate {
   return TZDate.tz(TIME_ZONE);
 }
 
+/**
+ * Formatta un istante (timestamptz ISO) nel fuso del negozio: sul server (Vercel, UTC)
+ * `format(parseISO(…))` darebbe l'ora UTC e un errore di hydration.
+ */
+export function formatInRome(iso: string, pattern: string): string {
+  return format(new TZDate(iso, TIME_ZONE), pattern, { locale: it });
+}
+
 /** Lunedì della settimana che contiene `date` (le settimane vanno da lunedì a domenica). */
 export function weekStart(date: Date): Date {
   return startOfWeek(date, { weekStartsOn: 1 });

@@ -3,6 +3,7 @@
 import { format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
 import { MessageSquareText } from "lucide-react";
+import { useRouter } from "next/navigation";
 import * as React from "react";
 import {
   SpreadsheetGrid,
@@ -57,8 +58,16 @@ export function MyWeek({ days, today, kpis, targets, comments, initialValues }: 
   const [selected, setSelected] = React.useState(defaultDay);
   const [message, setMessage] = React.useState<string | null>(null);
 
-  const { values, get, update, status, error } = useEntryAutosave(initialValues, (changes) =>
-    saveMyEntries(changes),
+  const router = useRouter();
+  // Dopo ogni salvataggio si ricarica la card "Negozio" (i valori della pagina restano quelli
+  // ottimistici: l'hook ignora i nuovi valori iniziali).
+  const { values, get, update, status, error } = useEntryAutosave(
+    initialValues,
+    async (changes) => {
+      const res = await saveMyEntries(changes);
+      if (res.ok) router.refresh();
+      return res;
+    },
   );
 
   const rows: SheetRow[] = React.useMemo(

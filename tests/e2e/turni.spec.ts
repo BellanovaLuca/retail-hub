@@ -2,8 +2,15 @@ import { expect, test } from "@playwright/test";
 import { addDays, format, startOfWeek } from "date-fns";
 import { ADMIN, expectNoServerErrors, login } from "./helpers";
 
-// Una settimana lontana, così il test non tocca i dati di lavoro.
-const week = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 7 * 20), "yyyy-MM-dd");
+// Una settimana lontana e diversa a ogni esecuzione: il test non tocca i dati di lavoro e
+// trova sempre una settimana mai pubblicata.
+const week = format(
+  addDays(
+    startOfWeek(new Date(), { weekStartsOn: 1 }),
+    7 * (100 + (Math.floor(Date.now() / 1000) % 2000)),
+  ),
+  "yyyy-MM-dd",
+);
 
 test.describe("Foglio turni (§8.1, §16)", () => {
   test("compilazione da tastiera, cella non valida, pubblicazione e modifiche da ripubblicare", async ({

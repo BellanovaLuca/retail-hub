@@ -1,5 +1,4 @@
-import { format, parseISO } from "date-fns";
-import { it } from "date-fns/locale";
+import { formatInRome } from "@/lib/dates";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -81,7 +80,7 @@ export default async function RegistroPage({
                 className="grid gap-2 border-b border-line py-3 sm:grid-cols-[10rem_1fr]"
               >
                 <div className="text-xs text-muted nums">
-                  {format(parseISO(r.at), "d MMM yyyy · HH:mm", { locale: it })}
+                  {formatInRome(r.at, "d MMM yyyy · HH:mm")}
                   <p className="text-sm text-foreground">
                     {r.actor_id ? (names.get(r.actor_id) ?? "—") : "Sistema"}
                   </p>

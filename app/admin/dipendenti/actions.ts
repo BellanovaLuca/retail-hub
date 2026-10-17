@@ -26,7 +26,7 @@ function profileRow(v: EmployeeValues) {
     first_name: v.firstName,
     last_name: v.lastName,
     display_name: v.displayName,
-    short_label: v.shortLabel ?? v.displayName.toUpperCase().slice(0, 12),
+    short_label: shortLabelOf(v),
     employee_code: v.employeeCode,
     role: v.role,
     weekly_hours: v.weeklyHours,
@@ -39,16 +39,26 @@ function profileRow(v: EmployeeValues) {
   };
 }
 
-async function ensureUniqueDisplayName(db: Db, displayName: string, exceptId?: string) {
-  let query = db
-    .from("profiles")
-    .select("id")
-    .ilike("display_name", displayName.replace(/[%_]/g, "\\$&"));
-  if (exceptId) query = query.neq("id", exceptId);
-  const { data } = await query.limit(1);
-  if (data && data.length > 0) {
+const shortLabelOf = (v: EmployeeValues) =>
+  v.shortLabel ?? v.displayName.toUpperCase().slice(0, 12);
+
+/** Nome visualizzato e sigla di colonna devono distinguere le persone (§3: omonimi). */
+async function ensureUniqueNames(db: Db, v: EmployeeValues, exceptId?: string) {
+  const escape = (s: string) => s.replace(/[%_\\]/g, "\\$&");
+  const exists = async (column: "display_name" | "short_label", value: string) => {
+    let query = db.from("profiles").select("id").ilike(column, escape(value));
+    if (exceptId) query = query.neq("id", exceptId);
+    const { data } = await query.limit(1);
+    return Boolean(data && data.length > 0);
+  };
+  if (await exists("display_name", v.displayName)) {
     throw new FieldError({
       displayName: "Questo nome visualizzato è già usato da un'altra persona.",
+    });
+  }
+  if (await exists("short_label", shortLabelOf(v))) {
+    throw new FieldError({
+      shortLabel: `La sigla "${shortLabelOf(v)}" è già usata da un'altra persona: scegline una diversa.`,
     });
   }
 }
@@ -123,7 +133,7 @@ export async function createEmployee(
       };
     }
     const v = parsed.data;
-    await ensureUniqueDisplayName(supabase, v.displayName);
+    await ensureUniqueNames(supabase, v);
 
     const { data: codeTaken } = await supabase
       .from("profiles")
@@ -190,7 +200,7 @@ export async function updateEmployee(id: string, input: EmployeeInput): Promise<
     if (id === me.id && v.role !== "admin") {
       return { ok: false, message: "Non puoi togliere a te stesso il ruolo di amministratore." };
     }
-    await ensureUniqueDisplayName(supabase, v.displayName, id);
+    await ensureUniqueNames(supabase, v, id);
 
     const { data: current } = await supabase
       .from("profiles")

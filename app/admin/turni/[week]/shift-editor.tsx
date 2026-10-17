@@ -45,6 +45,7 @@ import {
   key,
   leaveLabelAdmin,
   weekHoursByPerson,
+  withAbsenceShifts,
 } from "@/lib/schedule/view";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import { cn } from "@/lib/utils";
@@ -99,14 +100,29 @@ export function ShiftEditor(props: EditorProps) {
   const [, startTransition] = useTransition();
   const presence = useWeekRealtime(week.id, props.me);
 
-  // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati.
+  // Salvataggi in corso: "Salvato" solo quando sono finiti tutti (incolla e scritture in fila
+  // partono in parallelo).
+  const inflight = useRef(0);
+  const failed = useRef<string | null>(null);
+
+  // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati,
+  // e comunque finché ci sono salvataggi in corso.
   const lastShifts = useRef(shifts);
   useEffect(() => {
     if (lastShifts.current !== shifts) {
       lastShifts.current = shifts;
-      setPending(new Map());
+      if (inflight.current === 0) setPending(new Map());
     }
   }, [shifts]);
+
+  // Chiudere la pagina con salvataggi in corso farebbe perdere le ultime celle.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (inflight.current > 0) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
 
   const tplById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
   const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
@@ -120,6 +136,10 @@ export function ShiftEditor(props: EditorProps) {
     [calendar.holidays],
   );
   const hours = useMemo(() => weekHoursByPerson(shifts), [shifts]);
+  const timesheetLeaves = useMemo(
+    () => withAbsenceShifts(leaves, shifts, tplById),
+    [leaves, shifts, tplById],
+  );
 
   const publishedByDay = useMemo(() => {
     const grouped = new Map<string, PublishedShift[]>();
@@ -186,7 +206,9 @@ export function ShiftEditor(props: EditorProps) {
       if (pending.has(k)) return pending.get(k)!;
       const leave = leaveByDay.get(k);
       const text = cellText(byDay.get(k) ?? [], tplById);
-      if (leave && isFullDayLeave(leave) && !text) return leaveLabelAdmin(leave);
+      if (leave && isFullDayLeave(leave)) {
+        return text ? `${leaveLabelAdmin(leave)} · ${text}` : leaveLabelAdmin(leave);
+      }
       return text;
     },
     [pending, leaveByDay, byDay, tplById],
@@ -198,13 +220,17 @@ export function ShiftEditor(props: EditorProps) {
       const leave = leaveByDay.get(k);
       const dayShifts = byDay.get(k) ?? [];
       const warning = props.cellWarning?.(profileId, date);
+      // Nei giorni di assenza la cella non si scrive: turni e conflitti si gestiscono dal dettaglio.
+      const locked = Boolean(leave && isFullDayLeave(leave));
       if (dayShifts.some((s) => s.conflict)) {
         return {
+          readOnly: locked,
           tone: "danger",
-          title: "In conflitto con un'assenza approvata: apri il dettaglio per risolvere.",
+          title:
+            "In conflitto con un'assenza approvata: doppio clic per aprire il dettaglio e risolvere.",
         };
       }
-      if (leave && isFullDayLeave(leave) && dayShifts.length === 0) {
+      if (leave && locked) {
         return {
           readOnly: true,
           tone: leave.status === "tentative" ? "dashed" : "hatched",
@@ -281,14 +307,24 @@ export function ShiftEditor(props: EditorProps) {
         for (const c of changes) next.set(key(c.rowId, c.colId), c.value);
         return next;
       });
+      inflight.current += 1;
       setSaveState("saving");
       startTransition(async () => {
-        const res = await saveShiftCells(
-          week.id,
-          changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
-        );
-        setSaveState(res.ok ? "saved" : "error");
-        setMessage(res.ok ? null : res.message);
+        try {
+          const res = await saveShiftCells(
+            week.id,
+            changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
+          );
+          if (!res.ok) failed.current = res.message ?? "Salvataggio non riuscito.";
+        } catch {
+          failed.current = "Salvataggio non riuscito: controlla la connessione e riprova.";
+        } finally {
+          inflight.current -= 1;
+        }
+        if (inflight.current > 0) return;
+        setSaveState(failed.current ? "error" : "saved");
+        setMessage(failed.current);
+        failed.current = null;
         router.refresh();
       });
     },
@@ -477,7 +513,7 @@ export function ShiftEditor(props: EditorProps) {
               days={days}
               today={today}
               shifts={shifts}
-              leaves={leaves}
+              leaves={timesheetLeaves}
               people={people}
               departments={departments}
               calendar={calendar}

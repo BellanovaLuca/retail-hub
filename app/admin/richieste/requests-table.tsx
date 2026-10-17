@@ -1,7 +1,6 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
-import { it } from "date-fns/locale";
+import { formatInRome } from "@/lib/dates";
 import { Check, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -142,7 +141,7 @@ export function RequestsTable({
                   {s.detail}
                   <span className="text-subtle">
                     {" "}
-                    · inviata {format(parseISO(r.createdAt), "d MMM", { locale: it })}
+                    · inviata {formatInRome(r.createdAt, "d MMM")}
                   </span>
                 </span>
                 {r.message ? <span className="block truncate text-sm">{r.message}</span> : null}

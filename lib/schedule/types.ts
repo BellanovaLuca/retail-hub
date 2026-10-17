@@ -46,6 +46,8 @@ export type LeaveRecord = {
   hours: number | null;
   status: "tentative" | "confirmed";
   source: "planning" | "request";
+  /** Nata da un turno rapido di assenza scritto nel foglio (F, PE, MA…), non dal planning. */
+  fromShift?: boolean;
 };
 
 /** Voce dell'istantanea pubblicata (schedule_weeks.published_shifts). */

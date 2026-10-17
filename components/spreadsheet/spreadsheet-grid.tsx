@@ -1097,11 +1097,17 @@ const RowHeader = React.memo(function RowHeader({
 }) {
   const content = (
     <>
-      <span className={cn("truncate", highlighted ? "font-semibold" : "font-medium")}>
+      {/* Il nome ha la precedenza: si accorcia prima il secondo reparto. */}
+      <span
+        className={cn(
+          "max-w-full shrink-0 truncate",
+          highlighted ? "font-semibold" : "font-medium",
+        )}
+      >
         {row.label}
       </span>
       {row.sublabel ? (
-        <span className="truncate text-xs font-normal text-muted">{row.sublabel}</span>
+        <span className="min-w-0 truncate text-xs font-normal text-muted">{row.sublabel}</span>
       ) : null}
     </>
   );

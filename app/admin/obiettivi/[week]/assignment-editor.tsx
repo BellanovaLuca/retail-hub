@@ -1,7 +1,6 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
-import { it } from "date-fns/locale";
+import { formatInRome } from "@/lib/dates";
 import { Copy, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -396,8 +395,7 @@ export function AssignmentEditor(props: {
           <div className="flex flex-wrap items-center gap-2">
             {props.store?.confirmedAt && !dirty ? (
               <Badge tone="success">
-                Confermati il{" "}
-                {format(parseISO(props.store.confirmedAt), "d MMM 'alle' HH:mm", { locale: it })}
+                Confermati il {formatInRome(props.store.confirmedAt, "d MMM 'alle' HH:mm")}
               </Badge>
             ) : dirty ? (
               <Badge tone="warning">Modifiche da confermare</Badge>

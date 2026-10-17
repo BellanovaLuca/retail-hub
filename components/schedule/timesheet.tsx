@@ -216,7 +216,8 @@ export function Timesheet({
           return {
             fill: leaveFill(leave),
             label: `${leaveLabelAdmin(leave)}${leave.source === "request" ? " · richiesta approvata" : ""}`,
-            locked: true,
+            // Un turno rapido di assenza si può ridipingere: sostituisce la giornata.
+            locked: !leave.fromShift,
           };
         }
         if (pendingSet.has(k(c.id, date)))

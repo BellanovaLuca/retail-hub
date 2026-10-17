@@ -1,5 +1,4 @@
-import { format, parseISO } from "date-fns";
-import { it } from "date-fns/locale";
+import { formatInRome } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import {
   STATUS_LABELS,
@@ -36,7 +35,7 @@ export function requestSummary(r: {
   return { title: requestTypeLabel(r.type), detail: parts.join(" · ") };
 }
 
-const when = (iso: string) => format(parseISO(iso), "d MMM, HH:mm", { locale: it });
+const when = (iso: string) => formatInRome(iso, "d MMM, HH:mm");
 
 export function RequestTimeline({ r }: { r: RequestDetail }) {
   const items: { label: string; at?: string | null; tone?: "success" | "danger" }[] = [

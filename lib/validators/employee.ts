@@ -17,6 +17,8 @@ export const PERSON_COLORS = [
   "#77657a",
 ] as const;
 
+const collapseSpaces = (v: string) => v.replace(/\s+/g, " ");
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -34,8 +36,10 @@ export const employeeSchema = z
       .string()
       .trim()
       .min(2, "Almeno 2 caratteri.")
-      .max(24, "Al massimo 24 caratteri."),
-    shortLabel: optionalText(12),
+      .max(24, "Al massimo 24 caratteri.")
+      // "Fra  R." e "Fra R." sono lo stesso nome a schermo.
+      .transform(collapseSpaces),
+    shortLabel: optionalText(12).transform((v) => (v ? collapseSpaces(v).toUpperCase() : v)),
     employeeCode: z
       .string()
       .transform(normalizeEmployeeCode)
