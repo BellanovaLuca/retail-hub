@@ -15,9 +15,15 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-0000000000e2', 'Francesca', 'Due', 'Francy', 'CRD-002', 'employee');
 
 -- Dati preparati come service role (nessun utente).
-insert into public.schedule_weeks (id, week_start, status) values
-  ('00000000-0000-0000-0000-000000000b01', '2026-10-12', 'published'),
-  ('00000000-0000-0000-0000-000000000b02', '2026-10-19', 'draft');
+insert into public.schedule_weeks (id, week_start, status, published_shifts) values
+  ('00000000-0000-0000-0000-000000000b01', '2026-10-12', 'published',
+   '[{"id": "00000000-0000-0000-0000-000000000c01", "profile_id": "00000000-0000-0000-0000-0000000000e1",
+      "date": "2026-10-14", "start_time": "10:00", "end_time": "14:00", "break_minutes": 0,
+      "is_absence": false, "is_back_office": false, "changed": false}]'),
+  ('00000000-0000-0000-0000-000000000b02', '2026-10-19', 'draft',
+   '[{"id": "00000000-0000-0000-0000-000000000c03", "profile_id": "00000000-0000-0000-0000-0000000000e1",
+      "date": "2026-10-20", "start_time": "10:00", "end_time": "20:00", "break_minutes": 0,
+      "is_absence": false, "is_back_office": false, "changed": false}]');
 
 insert into public.shifts (id, week_id, profile_id, date, start_time, end_time) values
   ('00000000-0000-0000-0000-000000000c01', '00000000-0000-0000-0000-000000000b01', '00000000-0000-0000-0000-0000000000e1', '2026-10-14', '10:00', '14:00'),
@@ -56,9 +62,11 @@ do $$
 declare
   n int;
 begin
-  -- Turni: solo settimane pubblicate (anche quelli dei colleghi), mai le bozze.
+  -- Turni: la tabella di lavoro è solo admin; si legge l'istantanea pubblicata.
   select count(*) into n from public.shifts;
-  if n <> 2 then raise exception 'FALLITO: il dipendente vede % turni (attesi 2 pubblicati)', n; end if;
+  if n <> 0 then raise exception 'FALLITO: il dipendente legge la tabella di lavoro dei turni (% righe)', n; end if;
+  select count(*) into n from public.published_shifts;
+  if n <> 1 then raise exception 'FALLITO: il dipendente vede % turni pubblicati (atteso 1)', n; end if;
   select count(*) into n from public.schedule_weeks;
   if n <> 1 then raise exception 'FALLITO: il dipendente vede settimane in bozza'; end if;
 

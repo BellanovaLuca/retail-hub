@@ -98,6 +98,11 @@ create table public.schedule_weeks (
   version int not null default 0,
   note text,
   rule_set_id uuid references public.planning_rule_sets (id) on delete set null,
+  -- Istantanea dell'ultima pubblicazione: è quello che vedono i dipendenti. Le modifiche
+  -- successive dell'admin restano invisibili finché non si ripubblica.
+  -- [{ id, profile_id, date, start_time, end_time, break_minutes, template_code, template_label,
+  --    is_absence, zone, is_back_office, department_id, note, changed }]
+  published_shifts jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -116,8 +121,6 @@ create table public.shifts (
   is_back_office boolean,               -- null = valore predefinito del profilo
   note text,
   conflict boolean not null default false, -- in conflitto con ferie/assenze approvate
-  -- Ultima versione pubblicata del turno, per mostrare "Modificato" e il prima/dopo.
-  published_snapshot jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check ((start_time is null) = (end_time is null)),
@@ -600,13 +603,8 @@ create policy "schedule_weeks: pubblicate o admin" on public.schedule_weeks
 create policy "schedule_weeks: scrittura admin" on public.schedule_weeks
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
-create policy "shifts: settimana pubblicata o admin" on public.shifts
-  for select to authenticated using (
-    public.is_admin() or exists (
-      select 1 from public.schedule_weeks w where w.id = week_id and w.status = 'published'
-    )
-  );
-create policy "shifts: scrittura admin" on public.shifts
+-- La tabella dei turni "di lavoro" è solo degli admin; i dipendenti leggono published_shifts.
+create policy "shifts: solo admin" on public.shifts
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- Ferie: la tabella completa solo all'interessato e agli admin; gli altri usano leaves_public.
@@ -738,6 +736,23 @@ select
 from public.performance_goals g
 where g.profile_id = auth.uid() and g.published;
 
+-- Turni pubblicati (istantanea dell'ultima pubblicazione), per tutti.
+create view public.published_shifts
+with (security_barrier = true)
+as
+select
+  w.id as week_id,
+  w.week_start,
+  w.version,
+  s.*
+from public.schedule_weeks w
+cross join lateral jsonb_to_recordset(w.published_shifts) as s (
+  id uuid, profile_id uuid, date date, start_time time, end_time time, break_minutes int,
+  template_code text, template_label text, is_absence boolean, zone text,
+  is_back_office boolean, department_id uuid, note text, changed boolean
+)
+where w.status = 'published';
+
 -- Totali del negozio per settimana e voce (visibili a tutti, §8.3).
 create view public.store_weekly_totals
 with (security_barrier = true)
@@ -764,6 +779,8 @@ where public.is_admin()
    or (select s.share_individual_monitoring from public.store_settings s limit 1)
 group by 1, 2, 3;
 
+revoke all on public.published_shifts from anon, public;
+grant select on public.published_shifts to authenticated;
 revoke all on public.leaves_public, public.my_performance_goals, public.store_weekly_totals,
   public.monitoring_weekly_by_person from anon, public;
 grant select on public.leaves_public, public.my_performance_goals, public.store_weekly_totals,

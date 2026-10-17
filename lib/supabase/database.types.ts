@@ -1427,6 +1427,7 @@ export type Database = {
           version: number;
           note: string | null;
           rule_set_id: string | null;
+          published_shifts: Json;
           created_at: string;
           updated_at: string;
         };
@@ -1439,6 +1440,7 @@ export type Database = {
           version?: number;
           note?: string | null;
           rule_set_id?: string | null;
+          published_shifts?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -1451,6 +1453,7 @@ export type Database = {
           version?: number;
           note?: string | null;
           rule_set_id?: string | null;
+          published_shifts?: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -1582,7 +1585,6 @@ export type Database = {
           is_back_office: boolean | null;
           note: string | null;
           conflict: boolean;
-          published_snapshot: Json | null;
           created_at: string;
           updated_at: string;
         };
@@ -1600,7 +1602,6 @@ export type Database = {
           is_back_office?: boolean | null;
           note?: string | null;
           conflict?: boolean;
-          published_snapshot?: Json | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1618,7 +1619,6 @@ export type Database = {
           is_back_office?: boolean | null;
           note?: string | null;
           conflict?: boolean;
-          published_snapshot?: Json | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1907,6 +1907,28 @@ export type Database = {
           sort_order: number | null;
           primary_department_id: string | null;
           department_ids: string[] | null;
+        };
+        Relationships: [];
+      };
+      published_shifts: {
+        Row: {
+          week_id: string | null;
+          week_start: string | null;
+          version: number | null;
+          id: string | null;
+          profile_id: string | null;
+          date: string | null;
+          start_time: string | null;
+          end_time: string | null;
+          break_minutes: number | null;
+          template_code: string | null;
+          template_label: string | null;
+          is_absence: boolean | null;
+          zone: string | null;
+          is_back_office: boolean | null;
+          department_id: string | null;
+          note: string | null;
+          changed: boolean | null;
         };
         Relationships: [];
       };

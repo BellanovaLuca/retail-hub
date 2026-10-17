@@ -4,12 +4,12 @@ Per far girare l'app e i test end-to-end su un Postgres locale, senza la CLI di 
 Componenti: Postgres 16 su `localhost:5432` (già installato), PostgREST v12, Supabase Auth
 (GoTrue) e un piccolo gateway Node che fa le veci di Kong.
 
-| Servizio  | Porta | Note                                                       |
-| --------- | ----- | ---------------------------------------------------------- |
+| Servizio  | Porta | Note                                                        |
+| --------- | ----- | ----------------------------------------------------------- |
 | Gateway   | 54321 | `/rest/v1` → PostgREST, `/auth/v1` → GoTrue, CORS per :3000 |
-| PostgREST | 3001  | admin/health su 3002                                       |
-| GoTrue    | 9999  | signup disabilitato, utenti via admin API                  |
-| Postgres  | 5432  | database `retail_dev` (i test usano `retail_test`)         |
+| PostgREST | 3001  | admin/health su 3002                                        |
+| GoTrue    | 9999  | signup disabilitato, utenti via admin API                   |
+| Postgres  | 5432  | database `retail_dev` (i test usano `retail_test`)          |
 
 ## Uso
 
