@@ -126,7 +126,7 @@ export default async function OrariPage({
       .gte("date", days[0])
       .lte("date", days[6]),
     supabase
-      .from("schedule_weeks")
+      .from("published_weeks")
       .select("note, status, published_at")
       .eq("week_start", weekStart)
       .maybeSingle(),

@@ -33,7 +33,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ wee
   const db = await createClient();
 
   const { data: week } = await db
-    .from("schedule_weeks")
+    .from("published_weeks")
     .select("version, status")
     .eq("week_start", weekStart)
     .eq("status", "published")

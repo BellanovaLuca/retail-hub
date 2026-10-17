@@ -108,6 +108,16 @@ SQL
 
 # --- Migrazioni e seed del progetto ---------------------------------------------
 
+# Privilegi di default come Supabase, PRIMA delle migrazioni: così i `revoke` delle migrazioni
+# (viste, login_attempts, funzioni) valgono anche in locale. RLS resta la difesa principale.
+log "Privilegi di default su public"
+su_psql "$DB_NAME" <<'SQL'
+grant usage on schema public to anon, authenticated, service_role;
+alter default privileges for role postgres in schema public grant all on tables to anon, authenticated, service_role;
+alter default privileges for role postgres in schema public grant all on sequences to anon, authenticated, service_role;
+alter default privileges for role postgres in schema public grant all on functions to anon, authenticated, service_role;
+SQL
+
 if [[ "$(su_psql "$DB_NAME" -tAc "select to_regclass('public.profiles') is not null")" == "t" ]]; then
   log "Schema public già migrato: salto migrazioni e seed (usa reset.sh per ricreare)"
 else
@@ -118,18 +128,6 @@ else
   log "Seed supabase/seed.sql"
   su_psql "$DB_NAME" -f "$REPO_ROOT/supabase/seed.sql"
 fi
-
-# Privilegi di default come Supabase, dopo le migrazioni: RLS resta la difesa.
-log "Privilegi di default su public"
-su_psql "$DB_NAME" <<'SQL'
-grant usage on schema public to anon, authenticated, service_role;
-grant all on all tables in schema public to anon, authenticated, service_role;
-grant all on all sequences in schema public to anon, authenticated, service_role;
-grant all on all functions in schema public to anon, authenticated, service_role;
-alter default privileges for role postgres in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges for role postgres in schema public grant all on sequences to anon, authenticated, service_role;
-alter default privileges for role postgres in schema public grant all on functions to anon, authenticated, service_role;
-SQL
 
 # PostgREST ricarica lo schema se è già in esecuzione.
 su_psql "$DB_NAME" -c "notify pgrst, 'reload schema'"

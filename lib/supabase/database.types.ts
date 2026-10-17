@@ -1965,6 +1965,17 @@ export type Database = {
         };
         Relationships: [];
       };
+      published_weeks: {
+        Row: {
+          id: string | null;
+          week_start: string | null;
+          status: string | null;
+          version: number | null;
+          published_at: string | null;
+          note: string | null;
+        };
+        Relationships: [];
+      };
       store_weekly_totals: {
         Row: {
           week_start: string | null;

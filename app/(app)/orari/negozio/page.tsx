@@ -42,7 +42,7 @@ export default async function NegozioPage({
     getDepartments(supabase),
     getStoreCalendar(supabase, days[0], days[6]),
     supabase
-      .from("schedule_weeks")
+      .from("published_weeks")
       .select("status, note")
       .eq("week_start", weekStart)
       .maybeSingle(),

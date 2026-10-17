@@ -19,7 +19,10 @@ insert into public.schedule_weeks (id, week_start, status, published_shifts) val
   ('00000000-0000-0000-0000-000000000b01', '2026-10-12', 'published',
    '[{"id": "00000000-0000-0000-0000-000000000c01", "profile_id": "00000000-0000-0000-0000-0000000000e1",
       "date": "2026-10-14", "start_time": "10:00", "end_time": "14:00", "break_minutes": 0,
-      "is_absence": false, "is_back_office": false, "changed": false}]'),
+      "is_absence": false, "is_back_office": false, "changed": false},
+     {"id": "00000000-0000-0000-0000-000000000c04", "profile_id": "00000000-0000-0000-0000-0000000000e2",
+      "date": "2026-10-15", "break_minutes": 0, "template_code": "MA", "template_label": "Malattia",
+      "note": "visita medica", "is_absence": true, "is_back_office": false, "changed": false}]'),
   ('00000000-0000-0000-0000-000000000b02', '2026-10-19', 'draft',
    '[{"id": "00000000-0000-0000-0000-000000000c03", "profile_id": "00000000-0000-0000-0000-0000000000e1",
       "date": "2026-10-20", "start_time": "10:00", "end_time": "20:00", "break_minutes": 0,
@@ -66,9 +69,20 @@ begin
   select count(*) into n from public.shifts;
   if n <> 0 then raise exception 'FALLITO: il dipendente legge la tabella di lavoro dei turni (% righe)', n; end if;
   select count(*) into n from public.published_shifts;
-  if n <> 1 then raise exception 'FALLITO: il dipendente vede % turni pubblicati (atteso 1)', n; end if;
+  if n <> 2 then raise exception 'FALLITO: il dipendente vede % turni pubblicati (attesi 2)', n; end if;
+  -- L'assenza di un collega appare come "Assente": niente motivo, niente nota.
+  if exists (
+    select 1 from public.published_shifts
+    where profile_id <> auth.uid()
+      and (template_label is distinct from 'Assente' or template_code is not null or note is not null)
+  ) then
+    raise exception 'FALLITO: published_shifts espone il motivo o la nota dell''assenza altrui';
+  end if;
+  -- L'istantanea grezza resta agli admin; la testata pubblicata è per tutti.
   select count(*) into n from public.schedule_weeks;
-  if n <> 1 then raise exception 'FALLITO: il dipendente vede settimane in bozza'; end if;
+  if n <> 0 then raise exception 'FALLITO: il dipendente legge schedule_weeks (% righe)', n; end if;
+  select count(*) into n from public.published_weeks;
+  if n <> 1 then raise exception 'FALLITO: published_weeks mostra % settimane (attesa 1)', n; end if;
 
   -- Ferie: tabella completa solo proprie; vista pubblica senza motivo.
   select count(*) into n from public.leaves;
@@ -172,6 +186,18 @@ values ('00000000-0000-0000-0000-000000000d03', '00000000-0000-0000-0000-0000000
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e2', true);
 select public.respond_to_swap('00000000-0000-0000-0000-000000000d03', true);
+
+do $$
+begin
+  -- La diretta interessata vede il proprio motivo e la propria nota.
+  if not exists (
+    select 1 from public.published_shifts
+    where profile_id = auth.uid() and template_label = 'Malattia' and note = 'visita medica'
+  ) then
+    raise exception 'FALLITO: la dipendente non vede il dettaglio della propria assenza';
+  end if;
+end;
+$$;
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
 update public.requests set status = 'approved' where id = '00000000-0000-0000-0000-000000000d03';
