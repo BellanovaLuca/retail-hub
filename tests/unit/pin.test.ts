@@ -26,25 +26,20 @@ describe("codice dipendente", () => {
 });
 
 describe("PIN banali", () => {
-  it.each([
-    "000000",
-    "111111",
-    "123456",
-    "654321",
-    "456789",
-    "121212",
-    "123123",
-    "250390", // 25/03/90
-    "12345678",
-    "25031990",
-    "19900325",
-  ])("%s è banale", (pin) => {
-    expect(isTrivialPin(pin)).toBe(true);
-  });
+  it.each(["000000", "111111", "123456", "654321", "456789", "12345678", "98765432"])(
+    "%s è banale",
+    (pin) => {
+      expect(isTrivialPin(pin)).toBe(true);
+    },
+  );
 
-  it.each(["482913", "907354", "39182746"])("%s va bene", (pin) => {
-    expect(isTrivialPin(pin)).toBe(false);
-  });
+  // Date e blocchi ripetuti sono ammessi: il controllo rifiutava troppi PIN normali.
+  it.each(["482913", "907354", "39182746", "250390", "121212", "123123", "25031990"])(
+    "%s va bene",
+    (pin) => {
+      expect(isTrivialPin(pin)).toBe(false);
+    },
+  );
 });
 
 describe("validazione del nuovo PIN", () => {

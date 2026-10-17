@@ -46,38 +46,12 @@ function isSequence(pin: string) {
   return digits.every((d, i) => i === 0 || d - digits[i - 1] === step);
 }
 
-/** 121212, 123123, 12341234: un blocco corto ripetuto. */
-function isRepeatedBlock(pin: string) {
-  for (let size = 2; size <= pin.length / 2; size++) {
-    if (pin.length % size !== 0) continue;
-    if (pin.slice(0, size).repeat(pin.length / size) === pin) return true;
-  }
-  return false;
-}
-
-function isValidDayMonth(day: number, month: number) {
-  return month >= 1 && month <= 12 && day >= 1 && day <= 31;
-}
-
-/** Date "ovvie" all'italiana: GGMMAA (6 cifre), GGMMAAAA o AAAAMMGG (8 cifre). */
-function isObviousDate(pin: string) {
-  if (pin.length === 6) {
-    return isValidDayMonth(Number(pin.slice(0, 2)), Number(pin.slice(2, 4)));
-  }
-  if (pin.length === 8) {
-    const ddmmyyyy =
-      isValidDayMonth(Number(pin.slice(0, 2)), Number(pin.slice(2, 4))) &&
-      /^(19|20)\d\d$/.test(pin.slice(4));
-    const yyyymmdd =
-      /^(19|20)\d\d$/.test(pin.slice(0, 4)) &&
-      isValidDayMonth(Number(pin.slice(6, 8)), Number(pin.slice(4, 6)));
-    return ddmmyyyy || yyyymmdd;
-  }
-  return false;
-}
-
+/**
+ * Solo i PIN davvero ovvi: cifre tutte uguali (000000) o in fila (123456, 654321).
+ * Date e blocchi ripetuti sono ammessi: scartarli rifiutava troppi PIN normali.
+ */
 export function isTrivialPin(pin: string): boolean {
-  return isAllSame(pin) || isSequence(pin) || isRepeatedBlock(pin) || isObviousDate(pin);
+  return isAllSame(pin) || isSequence(pin);
 }
 
 export function pinRequirement(role: Role): string {
@@ -94,7 +68,7 @@ export function validateNewPin(pin: string, role: Role): string | null {
     return `Il PIN deve avere ${pinRequirement(role)}.`;
   }
   if (isTrivialPin(pin)) {
-    return "PIN troppo facile da indovinare: evita cifre ripetute, sequenze e date.";
+    return "PIN troppo facile: evita cifre tutte uguali (000000) o in fila (123456).";
   }
   return null;
 }
