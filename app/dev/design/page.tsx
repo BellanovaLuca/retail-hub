@@ -2,6 +2,7 @@ import { Bell, Check } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Wordmark } from "@/components/layout/wordmark";
+import { GridDemo } from "@/components/spreadsheet/grid-demo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -104,6 +105,15 @@ export default function DesignPage() {
 
       <Section title="Celle della griglia">
         <GridSample />
+      </Section>
+
+      <Section title="Foglio di calcolo">
+        <p className="mb-6 max-w-prose text-sm text-muted">
+          Frecce, Tab e Invio per muoversi; si digita direttamente nella cella; Canc svuota; Ctrl+C
+          / Ctrl+V anche da e verso Excel; maniglia di riempimento, Ctrl+D / Ctrl+R; Ctrl+Z /
+          Ctrl+Y. Su telefono un tocco apre il foglio dal basso.
+        </p>
+        <GridDemo />
       </Section>
 
       <Section title="Card e stati">

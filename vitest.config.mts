@@ -5,8 +5,16 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./", import.meta.url)) },
   },
+  // tsconfig usa `jsx: "preserve"` (lo trasforma Next): nei test serve il runtime automatico.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
-    include: ["tests/unit/**/*.test.ts", "lib/**/*.test.ts"],
+    // I test dei componenti dichiarano `// @vitest-environment jsdom`; gli altri restano in node.
+    include: [
+      "tests/unit/**/*.test.ts",
+      "tests/**/*.test.tsx",
+      "lib/**/*.test.ts",
+      "components/**/*.test.{ts,tsx}",
+    ],
     environment: "node",
   },
 });
