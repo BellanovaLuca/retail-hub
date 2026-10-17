@@ -117,6 +117,7 @@ export function AppShell({
             <NotificationBell profileId={profileId} initialCount={unreadCount} className="-mr-3" />
           </span>
         </header>
+        {area === "admin" ? <AdminStrip pathname={pathname} /> : null}
         <OfflineBanner />
         <main
           className={cn(
@@ -130,6 +131,38 @@ export function AppShell({
 
       {tabs ? <TabBar tabs={tabs} moreHrefs={moreHrefs} pathname={pathname} /> : null}
     </div>
+  );
+}
+
+/** Su telefono l'area amministrazione non ha la barra laterale: le sezioni scorrono in orizzontale. */
+function AdminStrip({ pathname }: { pathname: string }) {
+  return (
+    <nav
+      aria-label="Amministrazione"
+      className="sticky top-0 z-20 -mb-px overflow-x-auto border-b border-line bg-background md:hidden"
+    >
+      <ul className="flex w-max gap-1 px-3 py-2">
+        {adminSidebar.map((item) => {
+          const active = isActive(pathname, item.href);
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex min-h-10 items-center rounded-md px-3 text-sm whitespace-nowrap transition-colors",
+                  active
+                    ? "bg-foreground font-medium text-background"
+                    : "text-muted hover:bg-surface hover:text-foreground",
+                )}
+              >
+                {item.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 

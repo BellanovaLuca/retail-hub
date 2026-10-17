@@ -35,6 +35,7 @@ export default async function AdminDashboardPage() {
     { data: weeks },
     announcements,
     { data: absences },
+    { count: activePeople },
     ...evaluations
   ] = await Promise.all([
     supabase
@@ -51,6 +52,7 @@ export default async function AdminDashboardPage() {
       .select("profile_id, date, type, hours, status")
       .in("date", [today, tomorrow])
       .order("date"),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("active", true),
     ...coverageWeeks.map((w) => evaluateWeek(supabase, w)),
   ]);
 
@@ -62,7 +64,8 @@ export default async function AdminDashboardPage() {
   );
   const holes = evaluations.flatMap((e, i) =>
     e.violations
-      .filter((v) => v.severity === "warning" && v.date && !v.profileId)
+      // Solo da oggi in avanti: i giorni passati non si possono più coprire.
+      .filter((v) => v.severity === "warning" && v.date && v.date >= today && !v.profileId)
       .map((v) => ({ week: coverageWeeks[i], message: v.message })),
   );
   const ackMissing = announcements
@@ -170,7 +173,15 @@ export default async function AdminDashboardPage() {
             Buchi di copertura · prossime 2 settimane{" "}
             {holes.length ? <Badge tone="danger">{holes.length}</Badge> : null}
           </CardTitle>
-          {holes.length ? (
+          {(activePeople ?? 0) <= 1 ? (
+            <p className="text-sm text-muted">
+              Aggiungi il personale da{" "}
+              <Link href="/admin/dipendenti/nuovo" className="link-underline">
+                Dipendenti
+              </Link>
+              : i buchi si calcolano sui turni delle persone.
+            </p>
+          ) : holes.length ? (
             <ul className="flex max-h-80 flex-col gap-1.5 overflow-y-auto text-sm text-danger">
               {holes.slice(0, 30).map((h, i) => (
                 <li key={i}>
