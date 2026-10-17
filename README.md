@@ -47,8 +47,9 @@ Servono tre account gratuiti: **GitHub** (questo repository), **Supabase** (il d
 npx web-push generate-vapid-keys
 ```
 
-Annota la _Public Key_ e la _Private Key_. Genera anche un segreto per i promemoria automatici,
-per esempio con `openssl rand -hex 24`.
+Annota la _Public Key_ e la _Private Key_. Genera anche due segreti con `openssl rand -hex 32`: uno
+per i promemoria automatici (`CRON_SECRET`) e uno per l'impronta dei PIN (`PIN_PEPPER`, da non
+cambiare mai dopo i primi accessi).
 
 ### 3. Sito (Vercel)
 
@@ -63,6 +64,7 @@ per esempio con `openssl rand -hex 24`.
    | `NEXT_PUBLIC_APP_URL`                    | l'indirizzo del sito, es. `https://staff-cordusio.vercel.app`           |
    | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | le chiavi del passo 2                                                   |
    | `CRON_SECRET`                            | il segreto del passo 2                                                  |
+   | `PIN_PEPPER`                             | un altro segreto (`openssl rand -hex 32`): entra nell'impronta dei PIN  |
    | `RESEND_API_KEY`, `EMAIL_FROM`           | facoltative, solo se volete le email ([resend.com](https://resend.com)) |
 
 3. _Deploy_. Ogni branch ha la sua anteprima; il branch di produzione è quello impostato in

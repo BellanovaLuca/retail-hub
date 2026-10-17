@@ -185,3 +185,40 @@ describe("bestPerformer", () => {
     expect(bestPerformer([])).toBeNull();
   });
 });
+
+describe("assegnazione con valori scritti a mano", () => {
+  const store = {
+    totalHours: 100,
+    vistaValueEur: 30000,
+    vistaAvgPrice: 400,
+    vistaWo: 75,
+    solePieces: 100,
+    soleValueEur: 20000,
+    soleAvgPrice: 200,
+  };
+  const kpis = [
+    { code: "WO", defaultTargetRule: { type: "assignment" as const } },
+    { code: "DOPPI_VISTA", defaultTargetRule: { type: "pct_of" as const, kpi: "WO", pct: 0.2 } },
+    { code: "PROG", defaultTargetRule: { type: "pct_of" as const, kpi: "WO", pct: 0.1 } },
+  ];
+  const people = [
+    {
+      profileId: "a",
+      zone: "vista" as const,
+      plannedHours: 20,
+      kpiCodes: ["WO", "DOPPI_VISTA", "PROG"],
+    },
+  ];
+
+  it('le voci "% di …" seguono il valore corretto a mano della voce base', () => {
+    const clean = assignWeeklyTargets(store, people, kpis);
+    expect(clean.people[0].targets).toEqual({ WO: 15, DOPPI_VISTA: 3, PROG: 2 });
+    const withManual = assignWeeklyTargets(store, people, kpis, { a: { WO: 40 } });
+    expect(withManual.people[0].targets).toEqual({ WO: 40, DOPPI_VISTA: 8, PROG: 4 });
+  });
+
+  it("una voce derivata corretta a mano vince sulla percentuale", () => {
+    const r = assignWeeklyTargets(store, people, kpis, { a: { WO: 40, DOPPI_VISTA: 5 } });
+    expect(r.people[0].targets).toEqual({ WO: 40, DOPPI_VISTA: 5, PROG: 4 });
+  });
+});

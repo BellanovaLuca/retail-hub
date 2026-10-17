@@ -1,4 +1,4 @@
-import "server-only";
+// Solo lato server (usa node:crypto): mai importare da componenti client.
 import { createHash } from "node:crypto";
 
 /**
