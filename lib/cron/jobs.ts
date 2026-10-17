@@ -4,6 +4,7 @@ import { parseISO } from "date-fns";
 import { it } from "date-fns/locale";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { parsePrefs } from "@/lib/delivery";
+import { getMissingCompilers } from "@/lib/data/targets";
 import { adminIds, notify, notifyEach } from "@/lib/notifications";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
@@ -51,15 +52,8 @@ const coreJobs: CronJob[] = [
       "Promemoria delle 19:30 a chi è in turno e non ha compilato i numeri del giorno (§8.3).",
     after: "19:30",
     async run({ db, today }) {
-      const people = working(await publishedShiftsOn(db, today));
-      if (!people.length) return { sent: 0 };
-      const [{ data: filled }, { data: withKpis }] = await Promise.all([
-        db.from("daily_entries").select("profile_id").eq("date", today).in("profile_id", people),
-        db.from("profile_kpis").select("profile_id").eq("active", true).in("profile_id", people),
-      ]);
-      const done = new Set((filled ?? []).map((r) => r.profile_id));
-      const tracked = new Set((withKpis ?? []).map((r) => r.profile_id));
-      const targets = people.filter((p) => tracked.has(p) && !done.has(p));
+      const [missing] = await getMissingCompilers(db, [today]);
+      const targets = missing?.profileIds ?? [];
       await notify(targets, {
         kind: "daily_reminder",
         title: "Compila la giornata",
