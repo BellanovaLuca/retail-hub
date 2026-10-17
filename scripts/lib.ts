@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { randomBytes } from "node:crypto";
 import { normalizeEmployeeCode, syntheticEmail, type Role } from "../lib/auth/pin";
+import { authPassword } from "../lib/auth/secret";
 import type { Database } from "../lib/supabase/database.types";
 import type { HomeZone as Zone } from "../lib/supabase/types";
 
@@ -52,11 +54,15 @@ export async function createPerson(db: ReturnType<typeof adminClient>, person: N
 
   const { data: created, error } = await db.auth.admin.createUser({
     email: syntheticEmail(code),
-    password: person.pin,
+    password: randomBytes(32).toString("hex"), // provvisoria: sotto si imposta l'impronta del PIN
     email_confirm: true,
   });
   if (error || !created.user) throw new Error(`Utente ${code}: ${error?.message}`);
   const id = created.user.id;
+  const { error: pinError } = await db.auth.admin.updateUserById(id, {
+    password: authPassword(id, person.pin),
+  });
+  if (pinError) throw new Error(`PIN ${code}: ${pinError.message}`);
 
   const { error: profileError } = await db.from("profiles").insert({
     id,

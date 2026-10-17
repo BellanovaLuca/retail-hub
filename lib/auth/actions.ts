@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { validateNewPin } from "@/lib/auth/pin";
+import { authPassword } from "@/lib/auth/secret";
 import { getCurrentProfile } from "@/lib/auth/session";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -38,7 +39,7 @@ export async function changePin(input: z.infer<typeof changePinSchema>): Promise
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.updateUser({ password: pin });
+  const { error } = await supabase.auth.updateUser({ password: authPassword(profile.id, pin) });
   if (error) {
     return {
       ok: false,

@@ -579,6 +579,7 @@ export function ShiftEditor(props: EditorProps) {
             people={peopleById}
             warnings={props.warningsCount}
             warningsList={props.warningsList}
+            onPublished={setNotice}
             trigger={
               <Button size="sm">
                 <Send aria-hidden /> {week.status === "draft" ? "Pubblica" : "Ripubblica"}

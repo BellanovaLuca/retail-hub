@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
@@ -11,6 +12,7 @@ import {
   type ActionResult,
 } from "@/lib/auth/guards";
 import { credentialsMessage, generatePin, syntheticEmail } from "@/lib/auth/pin";
+import { authPassword } from "@/lib/auth/secret";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
 import { employeeSchema, type EmployeeInput, type EmployeeValues } from "@/lib/validators/employee";
@@ -146,13 +148,21 @@ export async function createEmployee(
     const admin = createAdminClient();
     const { data: created, error: authError } = await admin.auth.admin.createUser({
       email: syntheticEmail(v.employeeCode),
-      password: pin,
+      password: randomBytes(32).toString("hex"), // provvisoria: sotto si imposta l'impronta del PIN
       email_confirm: true,
     });
     if (authError || !created.user) {
       return { ok: false, message: "Non è stato possibile creare l'accesso. Riprova." };
     }
     const id = created.user.id;
+    // La password vera è l'impronta del PIN legata all'id appena creato.
+    const { error: pinError } = await admin.auth.admin.updateUserById(id, {
+      password: authPassword(id, pin),
+    });
+    if (pinError) {
+      await admin.auth.admin.deleteUser(id);
+      return { ok: false, message: "Non è stato possibile impostare il PIN. Riprova." };
+    }
 
     // Il profilo lo scrive l'admin con la propria sessione, così finisce nel registro a suo nome.
     const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true });
@@ -249,7 +259,9 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
     if (!person) return { ok: false, message: "Dipendente non trovato." };
 
     const pin = generatePin(person.role);
-    const { error } = await createAdminClient().auth.admin.updateUserById(id, { password: pin });
+    const { error } = await createAdminClient().auth.admin.updateUserById(id, {
+      password: authPassword(id, pin),
+    });
     if (error) return { ok: false, message: "PIN non aggiornato. Riprova." };
     await supabase.from("profiles").update({ must_change_pin: true }).eq("id", id);
 

@@ -7,6 +7,7 @@ import {
   lockedUntil,
 } from "@/lib/auth/lockout";
 import { normalizeEmployeeCode, syntheticEmail } from "@/lib/auth/pin";
+import { authPassword } from "@/lib/auth/secret";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -60,11 +61,19 @@ export async function POST(request: NextRequest) {
     lockedUntil(toAttempts(byIp.data), MAX_FAILED_PER_IP);
   if (locked) return lockedResponse(locked);
 
+  // Il PIN non è la password di Supabase: lo è la sua impronta legata all'utente (lib/auth/secret).
+  const { data: account } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("employee_code", code)
+    .maybeSingle();
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: syntheticEmail(code),
-    password: parsed.data.pin,
-  });
+  const { data, error } = account
+    ? await supabase.auth.signInWithPassword({
+        email: syntheticEmail(code),
+        password: authPassword(account.id, parsed.data.pin),
+      })
+    : { data: { user: null }, error: new Error("account inesistente") };
 
   if (error || !data.user) {
     await admin.from("login_attempts").insert({ employee_code: code, ip, success: false });

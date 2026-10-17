@@ -21,6 +21,7 @@ export function PublishDialog({
   warnings,
   warningsList,
   trigger,
+  onPublished,
 }: {
   weekId: string;
   firstPublish: boolean;
@@ -29,6 +30,8 @@ export function PublishDialog({
   warnings?: number;
   warningsList?: React.ReactNode;
   trigger: React.ReactNode;
+  /** Esito positivo: la finestra si chiude e il messaggio resta nella pagina. */
+  onPublished?: (message: string) => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,10 +44,12 @@ export function PublishDialog({
   function publish() {
     startTransition(async () => {
       const res = await publishWeek(weekId, firstPublish ? "all" : mode);
-      setResult(res);
       if (res.ok) {
+        setOpen(false);
+        onPublished?.(res.message ?? "Settimana pubblicata.");
         router.refresh();
-        setTimeout(() => setOpen(false), 900);
+      } else {
+        setResult(res);
       }
     });
   }
