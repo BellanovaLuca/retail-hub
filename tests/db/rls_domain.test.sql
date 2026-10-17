@@ -165,10 +165,10 @@ end;
 $$;
 
 -- ---- scambio: e1 propone a e2, e2 accetta, admin approva ------------------
-insert into public.requests (id, profile_id, type, start_date, end_date, shift_id, target_profile_id, target_shift_id)
+insert into public.requests (id, profile_id, type, start_date, end_date, shift_id, target_profile_id, target_shift_id, target_date)
 values ('00000000-0000-0000-0000-000000000d03', '00000000-0000-0000-0000-0000000000e1', 'scambio_turno',
         '2026-10-14', '2026-10-14', '00000000-0000-0000-0000-000000000c01',
-        '00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-000000000c02');
+        '00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-000000000c02', '2026-10-14');
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e2', true);
 select public.respond_to_swap('00000000-0000-0000-0000-000000000d03', true);

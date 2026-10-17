@@ -189,6 +189,7 @@ create table public.requests (
   shift_id uuid references public.shifts (id) on delete set null,          -- il mio turno (cambio/scambio)
   target_profile_id uuid references public.profiles (id) on delete set null, -- collega (scambio)
   target_shift_id uuid references public.shifts (id) on delete set null,
+  target_date date,                      -- giorno del turno del collega (scambio)
   message text,
   attachment_path text,
   status text not null default 'pending' check (status in ('pending', 'peer_accepted', 'peer_declined',
@@ -887,6 +888,8 @@ declare
   v_day date;
   v_a public.shifts;
   v_b public.shifts;
+  v_ids_a uuid[];
+  v_ids_b uuid[];
 begin
   if new.status <> 'approved' or old.status = 'approved' then
     return new;
@@ -926,25 +929,36 @@ begin
     if old.status <> 'peer_accepted' then
       raise exception 'Lo scambio va prima accettato dal collega';
     end if;
-    select * into v_a from public.shifts where id = new.shift_id for update;
-    select * into v_b from public.shifts where id = new.target_shift_id for update;
-    if v_a.id is null and v_b.id is null then
-      raise exception 'Turni dello scambio non trovati';
+    -- Lo scambio lavora sulle giornate (persona + data), non sugli id: gli id dei turni
+    -- cambiano quando l'admin riscrive una giornata dopo la pubblicazione.
+    select array_agg(id) into v_ids_a from public.shifts
+     where profile_id = new.profile_id and date = new.start_date;
+    if v_ids_a is null then
+      raise exception 'Turni dello scambio non trovati: il turno di chi chiede non c''è più';
+    end if;
+    if new.target_date is not null then
+      select array_agg(id) into v_ids_b from public.shifts
+       where profile_id = new.target_profile_id and date = new.target_date;
+      if v_ids_b is null then
+        raise exception 'Turni dello scambio non trovati: il turno del collega non c''è più';
+      end if;
     end if;
 
     set constraints public.shifts_profile_date_start deferred;
-    if v_a.id is not null then
-      update public.shifts set profile_id = new.target_profile_id, zone = coalesce(v_a.zone, zone)
-       where id = v_a.id;
+
+    for v_a in select * from public.shifts where id = any (v_ids_a) loop
+      update public.shifts set profile_id = new.target_profile_id where id = v_a.id;
       insert into public.shift_changes (shift_id, profile_id, date, before, after, changed_by)
       values (v_a.id, new.profile_id, v_a.date, to_jsonb(v_a), null, auth.uid()),
              (v_a.id, new.target_profile_id, v_a.date, null, to_jsonb(v_a), auth.uid());
-    end if;
-    if v_b.id is not null then
-      update public.shifts set profile_id = new.profile_id where id = v_b.id;
-      insert into public.shift_changes (shift_id, profile_id, date, before, after, changed_by)
-      values (v_b.id, new.target_profile_id, v_b.date, to_jsonb(v_b), null, auth.uid()),
-             (v_b.id, new.profile_id, v_b.date, null, to_jsonb(v_b), auth.uid());
+    end loop;
+    if v_ids_b is not null then
+      for v_b in select * from public.shifts where id = any (v_ids_b) loop
+        update public.shifts set profile_id = new.profile_id where id = v_b.id;
+        insert into public.shift_changes (shift_id, profile_id, date, before, after, changed_by)
+        values (v_b.id, new.target_profile_id, v_b.date, to_jsonb(v_b), null, auth.uid()),
+               (v_b.id, new.profile_id, v_b.date, null, to_jsonb(v_b), auth.uid());
+      end loop;
     end if;
   end if;
 

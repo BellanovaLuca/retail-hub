@@ -1115,6 +1115,7 @@ export type Database = {
           decision_note: string | null;
           created_at: string;
           updated_at: string;
+          target_date: string | null;
         };
         Insert: {
           id?: string;
@@ -1137,6 +1138,7 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
+          target_date?: string | null;
         };
         Update: {
           id?: string;
@@ -1159,6 +1161,7 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
+          target_date?: string | null;
         };
         Relationships: [
           {
