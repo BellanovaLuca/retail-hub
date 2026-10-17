@@ -2,7 +2,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/supabase/database.types";
+import type { Profile } from "@/lib/supabase/types";
 
 /** Profilo completo dell'utente collegato, o null. Una sola query per richiesta. */
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {

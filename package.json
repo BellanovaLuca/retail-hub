@@ -15,7 +15,8 @@
     "format:check": "prettier --check .",
     "db:types": "supabase gen types typescript --linked > lib/supabase/database.types.ts",
     "seed:admin": "tsx scripts/seed-admin.mts",
-    "seed:dev": "tsx scripts/seed-dev.mts"
+    "seed:dev": "tsx scripts/seed-dev.mts",
+    "db:types:local": "tsx scripts/gen-types.mts"
   },
   "dependencies": {
     "@date-fns/tz": "^1.5.0",

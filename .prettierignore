@@ -1,4 +1,5 @@
-pnpm-lock.yaml
+.claude/
 .next
 docs/SPEC.md
 lib/supabase/database.types.ts
+pnpm-lock.yaml

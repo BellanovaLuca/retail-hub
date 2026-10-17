@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { normalizeEmployeeCode, syntheticEmail, type Role } from "../lib/auth/pin";
-import type { Database, Zone } from "../lib/supabase/database.types";
+import type { Database } from "../lib/supabase/database.types";
+import type { HomeZone as Zone } from "../lib/supabase/types";
 
 export function loadEnv() {
   for (const file of [".env.local", ".env"]) {

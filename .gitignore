@@ -42,3 +42,6 @@ next-env.d.ts
 
 # env di esempio da versionare
 !.env.example
+
+# worktree degli agenti
+/.claude/worktrees/
