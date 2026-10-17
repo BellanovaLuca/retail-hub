@@ -16,7 +16,7 @@ export default async function AdminComunicazioniLayout({
   return (
     <>
       <PageHeader eyebrow="Bacheca e responsabilità" title="Comunicazioni" />
-      <SubNav items={tabs} exact={["/admin/comunicazioni"]} />
+      <SubNav items={tabs} exact={["/admin/comunicazioni"]} fallbackHref="/admin/comunicazioni" />
       {children}
     </>
   );

@@ -8,18 +8,22 @@ import { cn } from "@/lib/utils";
 export function SubNav({
   items,
   exact = [],
+  fallbackHref,
 }: {
   items: { href: string; label: string }[];
   exact?: string[];
+  /** Scheda attiva quando nessun'altra corrisponde (es. pagine di dettaglio). */
+  fallbackHref?: string;
 }) {
   const pathname = usePathname();
+  const matches = (href: string) =>
+    exact.includes(href) ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
+  const anyMatch = items.some((i) => matches(i.href));
   return (
     <nav aria-label="Sezioni" className="-mx-5 mb-10 overflow-x-auto px-5 sm:mx-0 sm:px-0">
       <ul className="flex min-w-max gap-6 border-b border-line">
         {items.map((item) => {
-          const active = exact.includes(item.href)
-            ? pathname === item.href
-            : pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const active = matches(item.href) || (!anyMatch && item.href === fallbackHref);
           return (
             <li key={item.href}>
               <Link
