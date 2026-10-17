@@ -1,6 +1,7 @@
 "use client";
 
-import { BellRing, Share, SquarePlus } from "lucide-react";
+import { Share, SquarePlus } from "lucide-react";
+import { PushToggle } from "@/components/notifications/push-toggle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -15,10 +16,12 @@ export function Onboarding({
   displayName,
   pinHint,
   startAtStep,
+  vapidPublicKey,
 }: {
   displayName: string;
   pinHint: string;
   startAtStep: number;
+  vapidPublicKey: string | null;
 }) {
   const router = useRouter();
   const [step, setStep] = useState(startAtStep);
@@ -52,7 +55,7 @@ export function Onboarding({
       ) : step === 1 ? (
         <HomeScreenStep onNext={() => setStep(2)} />
       ) : (
-        <NotificationsStep onDone={finish} />
+        <NotificationsStep onDone={finish} vapidPublicKey={vapidPublicKey} />
       )}
     </div>
   );
@@ -168,18 +171,13 @@ function HomeScreenStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-function NotificationsStep({ onDone }: { onDone: () => void }) {
-  const supported = typeof window !== "undefined" && "Notification" in window;
-  const [state, setState] = useState<NotificationPermission | "unsupported">(
-    supported ? Notification.permission : "unsupported",
-  );
-
-  async function enable() {
-    if (!supported) return;
-    setState(await Notification.requestPermission());
-    // La registrazione push (VAPID) arriva con la milestone Notifiche.
-  }
-
+function NotificationsStep({
+  onDone,
+  vapidPublicKey,
+}: {
+  onDone: () => void;
+  vapidPublicKey: string | null;
+}) {
   return (
     <div className="flex flex-col gap-6">
       <h1 className="font-display text-3xl font-light tracking-tight">Attiva le notifiche</h1>
@@ -187,24 +185,7 @@ function NotificationsStep({ onDone }: { onDone: () => void }) {
         Ti avvisiamo quando escono gli orari, quando una richiesta viene approvata e quando c&apos;è
         una comunicazione per te.
       </p>
-      {state === "granted" ? (
-        <p className="flex items-center gap-2 text-sm text-success">
-          <BellRing className="size-4 stroke-[1.5]" aria-hidden /> Notifiche attive.
-        </p>
-      ) : state === "denied" ? (
-        <p className="text-sm text-muted">
-          Le notifiche sono bloccate: puoi attivarle dalle impostazioni del browser.
-        </p>
-      ) : state === "unsupported" ? (
-        <p className="text-sm text-muted">
-          Su questo browser le notifiche non sono disponibili. Su iPhone funzionano dopo aver
-          aggiunto l&apos;app alla schermata Home.
-        </p>
-      ) : (
-        <Button size="lg" variant="secondary" onClick={enable}>
-          <BellRing aria-hidden /> Attiva le notifiche
-        </Button>
-      )}
+      <PushToggle vapidPublicKey={vapidPublicKey} compact />
       <Button size="lg" onClick={onDone}>
         Inizia
       </Button>

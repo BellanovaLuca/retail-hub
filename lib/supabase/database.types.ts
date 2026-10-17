@@ -158,6 +158,36 @@ export type Database = {
           }
         ];
       };
+      cron_runs: {
+        Row: {
+          id: string;
+          job: string;
+          run_key: string;
+          result: Json | null;
+          ran_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          job: string;
+          run_key: string;
+          result?: Json | null;
+          ran_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          job?: string;
+          run_key?: string;
+          result?: Json | null;
+          ran_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       daily_entries: {
         Row: {
           id: string;

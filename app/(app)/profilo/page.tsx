@@ -6,6 +6,8 @@ import { pinRequirement } from "@/lib/auth/pin";
 import { requireProfile } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { THEME_COOKIE, themeSchema } from "@/lib/theme";
+import { parsePrefs } from "@/lib/delivery";
+import { NotificationSettings } from "./notification-settings";
 import { ChangePinForm, SessionActions, ThemePicker } from "./profile-forms";
 
 export const metadata: Metadata = { title: "Profilo" };
@@ -62,6 +64,18 @@ export default async function ProfiloPage() {
         <Card>
           <CardTitle>Cambia PIN</CardTitle>
           <ChangePinForm pinHint={pinRequirement(profile.role)} />
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardTitle>Notifiche</CardTitle>
+          <NotificationSettings
+            vapidPublicKey={process.env.VAPID_PUBLIC_KEY ?? null}
+            initial={{
+              ...parsePrefs(profile.notification_prefs),
+              emailAddress: profile.email ?? "",
+              phone: profile.phone ?? "",
+            }}
+          />
         </Card>
 
         <Card>

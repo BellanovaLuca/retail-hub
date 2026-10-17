@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/app-shell";
 import { requireAdmin } from "@/lib/auth/session";
+import { unreadNotificationsCount } from "@/lib/notifications/actions";
 
 export const metadata: Metadata = { title: { default: "Amministrazione", template: "%s · Admin" } };
 
@@ -9,7 +10,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const profile = await requireAdmin();
 
   return (
-    <AppShell area="admin" isAdmin userName={profile.display_name}>
+    <AppShell
+      area="admin"
+      isAdmin
+      userName={profile.display_name}
+      profileId={profile.id}
+      unreadCount={await unreadNotificationsCount()}
+    >
       {children}
     </AppShell>
   );

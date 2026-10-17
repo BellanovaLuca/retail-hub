@@ -1,4 +1,5 @@
 import "server-only";
+import { sendEmail, sendPush } from "@/lib/delivery";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type NotificationKind =
@@ -48,14 +49,6 @@ const CHANNELS: Record<NotificationKind, Channel[]> = {
   responsibility_uncovered: ["in_app", "push"],
 };
 
-type Deliverer = (profileIds: string[], n: NotificationInput) => Promise<void>;
-
-/** Recapito push/email: registrato dal modulo push (milestone Notifiche). */
-let externalDeliverer: Deliverer | null = null;
-export function registerDeliverer(fn: Deliverer) {
-  externalDeliverer = fn;
-}
-
 /**
  * Invia la stessa notifica a più persone. Non fa mai fallire l'operazione che la
  * genera: gli errori di recapito finiscono nel log.
@@ -79,9 +72,10 @@ export async function notify(profileIds: string[], n: NotificationInput) {
         );
       if (error) console.error("notifiche in-app", error);
     }
-    if (externalDeliverer && (channels.includes("push") || channels.includes("email"))) {
-      await externalDeliverer(ids, n);
-    }
+    await Promise.all([
+      channels.includes("push") ? sendPush(ids, n) : null,
+      channels.includes("email") ? sendEmail(ids, n) : null,
+    ]);
   } catch (error) {
     console.error("notifiche", error);
   }

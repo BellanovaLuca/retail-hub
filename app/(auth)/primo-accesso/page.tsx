@@ -18,6 +18,7 @@ export default async function PrimoAccessoPage() {
       displayName={profile.display_name}
       pinHint={pinRequirement(profile.role)}
       startAtStep={needsPin ? 0 : 1}
+      vapidPublicKey={process.env.VAPID_PUBLIC_KEY ?? null}
     />
   );
 }
