@@ -17,10 +17,11 @@ const bodySchema = z.object({
 
 const WRONG_CREDENTIALS = "Codice o PIN non corretti.";
 
+/** IP del client: prima quello messo dalla piattaforma (Vercel), poi x-forwarded-for. */
 function clientIp(request: NextRequest) {
   return (
+    request.headers.get("x-real-ip")?.trim() ||
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
     "sconosciuto"
   );
 }
