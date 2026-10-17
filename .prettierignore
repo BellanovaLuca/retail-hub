@@ -3,3 +3,4 @@
 docs/SPEC.md
 lib/supabase/database.types.ts
 pnpm-lock.yaml
+.next-*

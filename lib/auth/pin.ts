@@ -1,5 +1,3 @@
-import { randomInt } from "node:crypto";
-
 /** Dominio delle email sintetiche interne: non compare mai in UI. */
 export const SYNTHETIC_EMAIL_DOMAIN = "staff.cordusio.local";
 
@@ -73,11 +71,25 @@ export function validateNewPin(pin: string, role: Role): string | null {
   return null;
 }
 
+/** Cifre casuali con la Web Crypto API (server e browser): niente import di node:crypto. */
+function randomDigits(length: number): number[] {
+  const out: number[] = [];
+  const bytes = new Uint8Array(length * 2);
+  while (out.length < length) {
+    globalThis.crypto.getRandomValues(bytes);
+    for (const b of bytes) {
+      // Scarta i byte ≥ 250 per non sbilanciare le cifre (250 = 25 × 10).
+      if (b < 250 && out.length < length) out.push(b % 10);
+    }
+  }
+  return out;
+}
+
 /** PIN provvisorio casuale, mai banale. */
 export function generatePin(role: Role): string {
   const length = role === "admin" ? ADMIN_PIN_MIN_LENGTH : EMPLOYEE_PIN_LENGTH;
   for (;;) {
-    const pin = Array.from({ length }, () => randomInt(0, 10)).join("");
+    const pin = randomDigits(length).join("");
     if (!isTrivialPin(pin)) return pin;
   }
 }
