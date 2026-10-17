@@ -59,6 +59,16 @@ export function EditorWithRules({
     return map;
   }, [violations]);
 
+  const slotWarning = useCallback(
+    (date: string, start: string) => {
+      const hits = (byDay.get(date) ?? []).filter(
+        (v) => v.severity === "warning" && v.start && v.end && v.start <= start && start < v.end,
+      );
+      return hits.length ? hits.map((v) => v.message).join("\n") : undefined;
+    },
+    [byDay],
+  );
+
   const footerExtra: FooterRow[] = useMemo(
     () => [
       {
@@ -95,6 +105,7 @@ export function EditorWithRules({
     <ShiftEditor
       {...props}
       cellWarning={cellWarning}
+      slotWarning={slotWarning}
       footerExtra={footerExtra}
       warningsCount={warnings.length}
       warningsList={<ViolationList violations={warnings.slice(0, 8)} />}

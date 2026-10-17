@@ -82,6 +82,10 @@ export type EditorProps = {
   cellWarning?: (profileId: string, date: string) => string | undefined;
   warningsCount?: number;
   warningsList?: React.ReactNode;
+  /** Richieste di assenza in attesa (verde tratteggiato nel foglio orario). */
+  pendingRequests?: { profileId: string; date: string }[];
+  /** Avviso delle regole per una fascia del foglio orario. */
+  slotWarning?: (date: string, start: string) => string | undefined;
 };
 
 export function ShiftEditor(props: EditorProps) {
@@ -478,6 +482,8 @@ export function ShiftEditor(props: EditorProps) {
               departments={departments}
               calendar={calendar}
               onSaveDay={onSaveDay}
+              pendingRequests={props.pendingRequests}
+              violationsByDaySlot={props.slotWarning}
             />
           )}
           <p className={cn("mt-3 text-xs text-muted", mode === "timesheet" && "hidden")}>

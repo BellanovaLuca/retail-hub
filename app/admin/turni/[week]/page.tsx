@@ -53,6 +53,24 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
   ]);
 
   const evaluation = await evaluateWeek(supabase, weekStart);
+  const { data: pendingRows } = await supabase
+    .from("requests")
+    .select("profile_id, start_date, end_date, recurring_weekdays")
+    .in("status", ["pending", "peer_accepted"])
+    .in("type", ["ferie", "permesso", "giorno_libero", "indisponibilita", "malattia"])
+    .lte("start_date", sunday)
+    .gte("end_date", weekStart);
+  const pendingRequests = (pendingRows ?? []).flatMap((r) =>
+    data.days
+      .filter(
+        (d) =>
+          d >= r.start_date &&
+          d <= r.end_date &&
+          (!r.recurring_weekdays?.length ||
+            r.recurring_weekdays.includes(((parseISO(d).getDay() + 6) % 7) + 1)),
+      )
+      .map((d) => ({ profileId: r.profile_id, date: d })),
+  );
   const { data: ruleRows } = await supabase.from("planning_rules").select("id, name");
 
   // Copertura minima per giorno nell'orario di apertura (riga "Copertura" in fondo al foglio).
@@ -88,6 +106,7 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
       ignored={evaluation.ignored}
       ruleNames={Object.fromEntries((ruleRows ?? []).map((r) => [r.id, r.name]))}
       coverage={coverage}
+      pendingRequests={pendingRequests}
       me={{ id: me.id, displayName: me.display_name }}
       week={data.week}
       days={data.days}
