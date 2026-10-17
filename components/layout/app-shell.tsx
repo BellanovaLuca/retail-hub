@@ -95,7 +95,10 @@ export function AppShell({
         </nav>
         <div className="flex flex-col gap-0.5 border-t border-line pt-4">
           {footerLink ? <SidebarLink item={footerLink} active={false} /> : null}
-          <p className="truncate px-3 py-2 text-sm text-muted">{userName}</p>
+          <div className="flex items-center justify-between gap-2 pl-3">
+            <p className="truncate text-sm text-muted">{userName}</p>
+            <NotificationBell profileId={profileId} initialCount={unreadCount} />
+          </div>
           <form action={signOut} onSubmit={clearOfflineCopy}>
             <button
               type="submit"
