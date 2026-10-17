@@ -22,6 +22,17 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
   ]);
   if (!person) notFound();
 
+  // Storico, per decidere tra disattivare ed eliminare.
+  const count = async (table: "shifts" | "leaves" | "requests" | "daily_entries") =>
+    (await supabase.from(table).select("id", { count: "exact", head: true }).eq("profile_id", id))
+      .count ?? 0;
+  const [shiftsCount, leavesCount, requestsCount, entriesCount] = await Promise.all([
+    count("shifts"),
+    count("leaves"),
+    count("requests"),
+    count("daily_entries"),
+  ]);
+
   const member = {
     memberships: (memberships ?? []).map((m) => ({
       departmentId: m.department_id,
@@ -66,7 +77,19 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
           adminNotes: person.admin_notes ?? "",
         }}
       />
-      <AccountActions id={person.id} active={person.active} isSelf={person.id === me.id} />
+      <AccountActions
+        id={person.id}
+        name={person.display_name}
+        active={person.active}
+        isSelf={person.id === me.id}
+        everLoggedIn={Boolean(person.privacy_accepted_at)}
+        history={{
+          shifts: shiftsCount,
+          leaves: leavesCount,
+          requests: requestsCount,
+          entries: entriesCount,
+        }}
+      />
     </>
   );
 }

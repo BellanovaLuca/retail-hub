@@ -1,23 +1,52 @@
 "use client";
 
-import { KeyRound, UserX, UserCheck } from "lucide-react";
+import { KeyRound, Trash2, UserX, UserCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { FormMessage } from "@/components/ui/form";
-import { resetPin, setEmployeeActive, type Credentials } from "../actions";
+import { deleteEmployee, resetPin, setEmployeeActive, type Credentials } from "../actions";
 import { CredentialsDialog } from "../credentials-dialog";
+
+type History = { shifts: number; leaves: number; requests: number; entries: number };
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Testo della conferma: cosa sparisce con l'account. */
+function deleteQuestion(name: string, history: History, everLoggedIn: boolean) {
+  const parts = [
+    history.shifts ? plural(history.shifts, "turno", "turni") : null,
+    history.leaves
+      ? plural(history.leaves, "giorno di ferie/assenza", "giorni di ferie/assenza")
+      : null,
+    history.requests ? plural(history.requests, "richiesta", "richieste") : null,
+    history.entries
+      ? plural(history.entries, "numero degli obiettivi", "numeri degli obiettivi")
+      : null,
+  ].filter(Boolean);
+  const lines = [`Eliminare definitivamente ${name}? L'operazione non si può annullare.`];
+  if (parts.length) lines.push(`Verranno cancellati anche: ${parts.join(", ")}.`);
+  if (everLoggedIn || parts.length)
+    lines.push('Se ha già lavorato in negozio è meglio "Disattiva account": lo storico resta.');
+  return lines.join("\n\n");
+}
 
 export function AccountActions({
   id,
+  name,
   active,
   isSelf,
+  everLoggedIn,
+  history,
 }: {
   id: string;
+  name: string;
   active: boolean;
   isSelf: boolean;
+  everLoggedIn: boolean;
+  history: History;
 }) {
   const router = useRouter();
   const [credentials, setCredentials] = useState<Credentials | null>(null);
@@ -50,6 +79,19 @@ export function AccountActions({
     });
   }
 
+  function onDelete() {
+    if (!confirm(deleteQuestion(name, history, everLoggedIn))) return;
+    startTransition(async () => {
+      const res = await deleteEmployee(id);
+      if (res.ok) {
+        router.replace("/admin/dipendenti");
+        router.refresh();
+      } else {
+        setResult({ ok: false, message: res.message });
+      }
+    });
+  }
+
   return (
     <Card className="mt-6">
       <CardTitle>Accesso</CardTitle>
@@ -77,6 +119,11 @@ export function AccountActions({
           >
             {active ? <UserX aria-hidden /> : <UserCheck aria-hidden />}
             {active ? "Disattiva account" : "Riattiva account"}
+          </Button>
+        ) : null}
+        {!isSelf ? (
+          <Button variant="ghost" className="text-danger" onClick={onDelete} disabled={pending}>
+            <Trash2 aria-hidden /> Elimina account
           </Button>
         ) : null}
         <FormMessage result={result} />

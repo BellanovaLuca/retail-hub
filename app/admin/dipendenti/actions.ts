@@ -303,6 +303,67 @@ export async function setEmployeeActive(id: string, active: boolean): Promise<Ac
   });
 }
 
+/**
+ * Elimina definitivamente un account (es. persona creata per errore): profilo, turni, ferie,
+ * richieste, numeri e notifiche spariscono a cascata. Per chi ha lavorato in negozio è meglio
+ * disattivare, così lo storico resta.
+ */
+export async function deleteEmployee(id: string): Promise<ActionResult> {
+  return runAction(async () => {
+    const { supabase, profile: me } = await adminAction();
+    const personId = z.uuid().parse(id);
+    if (personId === me.id) return { ok: false, message: "Non puoi eliminare il tuo account." };
+
+    const { data: person } = await supabase
+      .from("profiles")
+      .select("display_name")
+      .eq("id", personId)
+      .maybeSingle();
+    if (!person) return { ok: false, message: "Dipendente non trovato." };
+
+    // Turni già pubblicati: la persona sparisce anche dagli orari che vedono i colleghi.
+    const { data: weeks } = await supabase
+      .from("schedule_weeks")
+      .select("id, published_shifts")
+      .filter("published_shifts", "cs", JSON.stringify([{ profile_id: personId }]));
+    for (const w of weeks ?? []) {
+      const list = (w.published_shifts ?? []) as { profile_id?: string }[];
+      const { error } = await supabase
+        .from("schedule_weeks")
+        .update({ published_shifts: list.filter((s) => s.profile_id !== personId) })
+        .eq("id", w.id);
+      if (error) return { ok: false, message: dbErrorMessage(error, "Eliminazione non riuscita.") };
+    }
+
+    // Scambi che altri colleghi le avevano proposto: senza di lei non hanno più senso (e il
+    // vincolo "scambio con un collega" impedirebbe l'eliminazione).
+    const { error: swapError } = await supabase
+      .from("requests")
+      .delete()
+      .eq("type", "scambio_turno")
+      .eq("target_profile_id", personId);
+    if (swapError)
+      return { ok: false, message: dbErrorMessage(swapError, "Eliminazione non riuscita.") };
+
+    // Il profilo lo elimina l'admin con la propria sessione (finisce nel registro a suo nome),
+    // poi si toglie l'accesso.
+    const { error } = await supabase.from("profiles").delete().eq("id", personId);
+    if (error) return { ok: false, message: dbErrorMessage(error, "Eliminazione non riuscita.") };
+    const { error: authError } = await createAdminClient().auth.admin.deleteUser(personId);
+    if (authError) {
+      return {
+        ok: false,
+        message: "Il profilo è stato eliminato ma l'accesso no: riprova o contatta l'assistenza.",
+      };
+    }
+
+    revalidatePath("/admin/dipendenti");
+    revalidatePath("/admin", "layout");
+    revalidatePath("/", "layout");
+    return { ok: true, message: `${person.display_name} è stata eliminata.` };
+  });
+}
+
 /** Ordine manuale delle persone in griglia. */
 export async function reorderEmployees(orderedIds: string[]): Promise<ActionResult> {
   return runAction(async () => {
