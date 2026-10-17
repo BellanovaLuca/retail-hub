@@ -237,7 +237,10 @@ export async function updateEmployee(id: string, input: EmployeeInput): Promise<
 /** Nuovo PIN provvisorio, mostrato una sola volta; cambio obbligatorio al primo accesso. */
 export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
   return runAction(async () => {
-    const { supabase } = await adminAction();
+    const { supabase, profile } = await adminAction();
+    if (id === profile.id) {
+      return { ok: false, message: "Per cambiare il tuo PIN usa la pagina Profilo." };
+    }
     const { data: person } = await supabase
       .from("profiles")
       .select("display_name, employee_code, role")

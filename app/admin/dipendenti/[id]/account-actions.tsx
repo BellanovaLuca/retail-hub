@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyRound, UserX, UserCheck } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,11 @@ export function AccountActions({
   const [pending, startTransition] = useTransition();
 
   function onReset() {
-    if (!confirm("Generare un nuovo PIN provvisorio? Quello attuale smetterà di funzionare."))
+    if (
+      !confirm(
+        "Generare un nuovo PIN provvisorio? Quello attuale smetterà di funzionare e la persona dovrà sceglierne uno nuovo al prossimo accesso.",
+      )
+    )
       return;
     startTransition(async () => {
       const res = await resetPin(id);
@@ -49,9 +54,21 @@ export function AccountActions({
     <Card className="mt-6">
       <CardTitle>Accesso</CardTitle>
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <Button variant="secondary" onClick={onReset} disabled={pending || !active}>
-          <KeyRound aria-hidden /> Genera nuovo PIN
-        </Button>
+        {isSelf ? (
+          // Sul proprio account "Genera nuovo PIN" crea un PIN provvisorio da cambiare subito:
+          // per scegliere un PIN nuovo si passa dal Profilo.
+          <p className="text-sm text-muted">
+            Per cambiare il tuo PIN vai al{" "}
+            <Link href="/profilo" className="text-foreground underline underline-offset-4">
+              Profilo
+            </Link>
+            .
+          </p>
+        ) : (
+          <Button variant="secondary" onClick={onReset} disabled={pending || !active}>
+            <KeyRound aria-hidden /> Genera nuovo PIN
+          </Button>
+        )}
         {!isSelf ? (
           <Button
             variant={active ? "danger" : "secondary"}
