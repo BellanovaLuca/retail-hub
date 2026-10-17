@@ -1,12 +1,6 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/layout/coming-soon";
+import { redirect } from "next/navigation";
+import { nowInRome } from "@/lib/dates";
 
-export const metadata: Metadata = { title: "Performance" };
-
-export default function Page() {
-  return (
-    <ComingSoon eyebrow="Annuale" title="Performance" milestone={10}>
-      <p>Obiettivi Achievement e Leadership di tutto il negozio.</p>
-    </ComingSoon>
-  );
+export default function PerformanceIndexPage() {
+  redirect(`/admin/performance/${nowInRome().getFullYear()}`);
 }
