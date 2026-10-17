@@ -13,10 +13,10 @@ export const metadata: Metadata = { title: "Dipendenti" };
 export default async function DipendentiPage({
   searchParams,
 }: {
-  searchParams: Promise<{ disattivati?: string }>;
+  searchParams: Promise<{ disattivati?: string; eliminato?: string }>;
 }) {
   await requireAdmin();
-  const { disattivati } = await searchParams;
+  const { disattivati, eliminato } = await searchParams;
   const supabase = await createClient();
   const [staff, departments] = await Promise.all([
     getStaff(supabase, { includeInactive: true }),
@@ -55,6 +55,11 @@ export default async function DipendentiPage({
           settimana
         </p>
       </PageHeader>
+      {eliminato ? (
+        <p role="status" className="mb-8 border-l-2 border-foreground pl-3 text-sm">
+          {eliminato.slice(0, 60)} è stata eliminata con tutti i suoi dati.
+        </p>
+      ) : null}
       <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-xl text-sm text-muted">
           L&apos;ordine dell&apos;elenco è quello delle righe nella griglia turni: trascina o usa le

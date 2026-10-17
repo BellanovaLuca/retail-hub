@@ -82,3 +82,13 @@ describe("PIN provvisorio", () => {
     expect(text).toContain("https://esempio.vercel.app");
   });
 });
+
+describe("conferma dell'eliminazione con il nome", () => {
+  it("ignora maiuscole e spazi in più, rifiuta nomi diversi o vuoti", async () => {
+    const { sameName } = await import("@/lib/employees/confirm");
+    expect(sameName("  roberta ", "Roberta")).toBe(true);
+    expect(sameName("Fra  R.", "Fra R.")).toBe(true);
+    expect(sameName("Robert", "Roberta")).toBe(false);
+    expect(sameName("", "")).toBe(false);
+  });
+});

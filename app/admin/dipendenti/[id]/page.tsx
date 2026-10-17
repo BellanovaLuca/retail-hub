@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/ui/feedback";
 import { requireAdmin } from "@/lib/auth/session";
 import { getDepartments, primaryDepartmentId } from "@/lib/data/people";
 import { createClient } from "@/lib/supabase/server";
+import { getEmployeeFootprint } from "@/lib/data/employee-footprint";
 import { EmployeeForm } from "../employee-form";
 import { AccountActions } from "./account-actions";
 
@@ -22,16 +23,8 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
   ]);
   if (!person) notFound();
 
-  // Storico, per decidere tra disattivare ed eliminare.
-  const count = async (table: "shifts" | "leaves" | "requests" | "daily_entries") =>
-    (await supabase.from(table).select("id", { count: "exact", head: true }).eq("profile_id", id))
-      .count ?? 0;
-  const [shiftsCount, leavesCount, requestsCount, entriesCount] = await Promise.all([
-    count("shifts"),
-    count("leaves"),
-    count("requests"),
-    count("daily_entries"),
-  ]);
+  // Tutto ciò che sparirebbe eliminando l'account (per la finestra di conferma).
+  const footprint = await getEmployeeFootprint(supabase, id);
 
   const member = {
     memberships: (memberships ?? []).map((m) => ({
@@ -82,13 +75,7 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
         name={person.display_name}
         active={person.active}
         isSelf={person.id === me.id}
-        everLoggedIn={Boolean(person.privacy_accepted_at)}
-        history={{
-          shifts: shiftsCount,
-          leaves: leavesCount,
-          requests: requestsCount,
-          entries: entriesCount,
-        }}
+        footprint={footprint}
       />
     </>
   );

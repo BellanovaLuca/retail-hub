@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/guards";
 import { credentialsMessage, generatePin, syntheticEmail } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
+import { sameName } from "@/lib/employees/confirm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
 import { employeeSchema, type EmployeeInput, type EmployeeValues } from "@/lib/validators/employee";
@@ -307,60 +308,98 @@ export async function setEmployeeActive(id: string, active: boolean): Promise<Ac
  * Elimina definitivamente un account (es. persona creata per errore): profilo, turni, ferie,
  * richieste, numeri e notifiche spariscono a cascata. Per chi ha lavorato in negozio è meglio
  * disattivare, così lo storico resta.
+ *
+ * Passaggi, nell'ordine, pensati per poter essere ripetuti senza danni se uno fallisce
+ * (fino all'ultimo la scheda della persona esiste ancora e si può riprovare da lì):
+ * 1. accesso bloccato e account disattivato (nessun nuovo login mentre si cancella);
+ * 2. la persona viene tolta dagli orari già pubblicati;
+ * 3. via gli scambi che i colleghi le avevano proposto (il vincolo li impedirebbe);
+ * 4. registro modifiche: chi elimina chi;
+ * 5. account di accesso eliminato: profilo e dati collegati spariscono a cascata, in un passo.
  */
-export async function deleteEmployee(id: string): Promise<ActionResult> {
+export async function deleteEmployee(id: string, confirmName: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase, profile: me } = await adminAction();
     const personId = z.uuid().parse(id);
     if (personId === me.id) return { ok: false, message: "Non puoi eliminare il tuo account." };
+    const admin = createAdminClient();
 
     const { data: person } = await supabase
       .from("profiles")
       .select("display_name")
       .eq("id", personId)
       .maybeSingle();
-    if (!person) return { ok: false, message: "Dipendente non trovato." };
 
-    // Turni già pubblicati: la persona sparisce anche dagli orari che vedono i colleghi.
-    const { data: weeks } = await supabase
+    if (!person) {
+      // Profilo già eliminato in un tentativo precedente: resta solo l'accesso da togliere.
+      const { data: orphan } = await admin.auth.admin.getUserById(personId);
+      if (!orphan?.user) return { ok: false, message: "Dipendente non trovato." };
+      const { error } = await admin.auth.admin.deleteUser(personId);
+      if (error) return { ok: false, message: "Eliminazione non completata. Riprova." };
+      revalidatePath("/admin/dipendenti");
+      return { ok: true, message: "Eliminazione completata." };
+    }
+
+    // La conferma col nome si ricontrolla qui: non basta il pulsante disabilitato nel browser.
+    if (!sameName(confirmName, person.display_name)) {
+      return {
+        ok: false,
+        message: `Per confermare scrivi esattamente il nome "${person.display_name}".`,
+      };
+    }
+
+    const fail = (message: string) => ({
+      ok: false as const,
+      message: `${message} L'account è bloccato: riprova per completare l'eliminazione.`,
+    });
+
+    // 1. Accesso bloccato subito.
+    const { error: banError } = await admin.auth.admin.updateUserById(personId, {
+      ban_duration: "876000h",
+    });
+    if (banError) return { ok: false, message: "Eliminazione non riuscita: riprova." };
+    await supabase.from("profiles").update({ active: false }).eq("id", personId);
+
+    // 2. Fuori dagli orari già pubblicati.
+    const { data: weeks, error: weeksError } = await supabase
       .from("schedule_weeks")
       .select("id, published_shifts")
       .filter("published_shifts", "cs", JSON.stringify([{ profile_id: personId }]));
+    if (weeksError) return fail("Non è stato possibile aggiornare gli orari pubblicati.");
     for (const w of weeks ?? []) {
       const list = (w.published_shifts ?? []) as { profile_id?: string }[];
       const { error } = await supabase
         .from("schedule_weeks")
         .update({ published_shifts: list.filter((s) => s.profile_id !== personId) })
         .eq("id", w.id);
-      if (error) return { ok: false, message: dbErrorMessage(error, "Eliminazione non riuscita.") };
+      if (error) return fail("Non è stato possibile aggiornare gli orari pubblicati.");
     }
 
-    // Scambi che altri colleghi le avevano proposto: senza di lei non hanno più senso (e il
-    // vincolo "scambio con un collega" impedirebbe l'eliminazione).
+    // 3. Scambi proposti a lei dai colleghi.
     const { error: swapError } = await supabase
       .from("requests")
       .delete()
       .eq("type", "scambio_turno")
       .eq("target_profile_id", personId);
-    if (swapError)
-      return { ok: false, message: dbErrorMessage(swapError, "Eliminazione non riuscita.") };
+    if (swapError) return fail("Non è stato possibile togliere gli scambi che la riguardano.");
 
-    // Il profilo lo elimina l'admin con la propria sessione (finisce nel registro a suo nome),
-    // poi si toglie l'accesso.
-    const { error } = await supabase.from("profiles").delete().eq("id", personId);
-    if (error) return { ok: false, message: dbErrorMessage(error, "Eliminazione non riuscita.") };
-    const { error: authError } = await createAdminClient().auth.admin.deleteUser(personId);
-    if (authError) {
-      return {
-        ok: false,
-        message: "Il profilo è stato eliminato ma l'accesso no: riprova o contatta l'assistenza.",
-      };
-    }
+    // 4. Registro modifiche a nome dell'admin (la cascata del passo 5 non ha un autore).
+    await admin.from("audit_log").insert({
+      actor_id: me.id,
+      action: "delete",
+      entity: "profiles",
+      entity_id: personId,
+      diff: { eliminazione_account: person.display_name },
+    });
+
+    // 5. Account di accesso: profilo e dati collegati spariscono a cascata, in un solo passo.
+    const { error: deleteError } = await admin.auth.admin.deleteUser(personId);
+    if (deleteError) return fail("Eliminazione dell'account non riuscita.");
 
     revalidatePath("/admin/dipendenti");
     revalidatePath("/admin", "layout");
     revalidatePath("/", "layout");
-    return { ok: true, message: `${person.display_name} è stata eliminata.` };
+    return { ok: true, message: `${person.display_name} è stata eliminata con tutti i suoi dati.` };
   });
 }
 
