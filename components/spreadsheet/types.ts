@@ -96,6 +96,8 @@ export type SpreadsheetGridProps = {
   toolbar?: React.ReactNode;
   /** Doppio clic / Alt+Invio: apre un popover dettagliato gestito dal chiamante. */
   onCellActivate?: (rowId: string, colId: string) => void;
+  /** Selezione corrente (righe e colonne dell'intervallo), anche in sola lettura. */
+  onSelectionChange?: (selection: { rowIds: string[]; colIds: string[] }) => void;
   /** Su schermi touch/stretti: tocco su cella => foglio dal basso con questo contenuto. */
   renderMobileEditor?: (ctx: MobileEditorContext) => React.ReactNode;
   onRowHeaderClick?: (rowId: string) => void;

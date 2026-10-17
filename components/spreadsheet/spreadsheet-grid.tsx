@@ -129,6 +129,7 @@ export function SpreadsheetGrid({
   presence,
   toolbar,
   onCellActivate,
+  onSelectionChange,
   renderMobileEditor,
   onRowHeaderClick,
   highlightRowId,
@@ -219,6 +220,14 @@ export function SpreadsheetGrid({
     focus: clampPos(rawSel.focus, bounds),
   };
   const rect = rectOf(sel);
+  const onSelectionChangeRef = React.useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  React.useEffect(() => {
+    if (!onSelectionChangeRef.current || !hasCells) return;
+    const rowIds = visibleRows.slice(rect.r1, rect.r2 + 1).map((r) => r.id);
+    const colIds = columns.slice(rect.c1, rect.c2 + 1).map((c) => c.id);
+    onSelectionChangeRef.current({ rowIds, colIds });
+  }, [rect.r1, rect.r2, rect.c1, rect.c2, hasCells]); // eslint-disable-line react-hooks/exhaustive-deps
   const [editing, setEditing] = React.useState<Editing | null>(null);
   const editingRef = React.useRef<Editing | null>(null);
   editingRef.current = editing;

@@ -335,17 +335,20 @@ export function LeavePlanner(props: LeavePlannerProps) {
   }, [view, period, dates, today, year, month]);
 
   /** Sola lettura: il dipendente seleziona un intervallo sulla griglia per chiedere le ferie. */
-  const readGridSelection = () => {
-    if (admin) return;
-    const cells = gridWrap.current?.querySelectorAll<HTMLElement>(
-      '[data-cell][aria-selected="true"]',
-    );
-    if (!cells || cells.length === 0) return;
-    const cols = [...cells].map((c) => Number(c.dataset.c)).filter((n) => Number.isFinite(n));
-    const from = columns[Math.min(...cols)]?.id;
-    const to = columns[Math.max(...cols)]?.id;
-    if (from && to) setSelection({ from, to });
-  };
+  // La griglia annuncia anche la selezione iniziale: conta solo dopo un'azione dell'utente.
+  const selectionReady = React.useRef(false);
+  const onGridSelection = React.useCallback(
+    ({ colIds }: { rowIds: string[]; colIds: string[] }) => {
+      if (!selectionReady.current) {
+        selectionReady.current = true;
+        return;
+      }
+      if (admin || colIds.length === 0) return;
+      const sorted = [...colIds].sort();
+      setSelection({ from: sorted[0], to: sorted[sorted.length - 1] });
+    },
+    [admin],
+  );
 
   const refresh = React.useCallback(() => router.refresh(), [router]);
 
@@ -453,13 +456,9 @@ export function LeavePlanner(props: LeavePlannerProps) {
       ) : null}
 
       {view === "persone" ? (
-        <div
-          ref={gridWrap}
-          onPointerUp={readGridSelection}
-          onKeyUp={readGridSelection}
-          style={{ "--grid-max-height": "70vh" } as React.CSSProperties}
-        >
+        <div ref={gridWrap} style={{ "--grid-max-height": "70vh" } as React.CSSProperties}>
           <SpreadsheetGrid
+            onSelectionChange={onGridSelection}
             ariaLabel={`Planning ferie ${year}`}
             rows={rows}
             columns={columns}
