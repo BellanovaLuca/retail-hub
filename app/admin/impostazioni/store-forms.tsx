@@ -141,6 +141,7 @@ export function LogoForm({ logoUrl }: { logoUrl: string | null }) {
           ref={inputRef}
           type="file"
           name="logo"
+          aria-label="File del logo"
           accept="image/png,image/svg+xml,image/jpeg,image/webp"
           className="text-sm file:mr-4 file:h-11 file:rounded-md file:border file:border-foreground file:bg-transparent file:px-4 file:text-sm"
         />

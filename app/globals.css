@@ -11,7 +11,8 @@
   --line: #e7e5e4;
   --line-strong: #a8a29e;
   --muted: #57534e;
-  --subtle: #a8a29e;
+  /* Testo secondario leggero: sempre ≥ 4,5:1 sulle superfici (WCAG AA). */
+  --subtle: #716a64;
   --primary: #0a0a0a;
   --primary-foreground: #ffffff;
 
@@ -20,6 +21,9 @@
   --warning: #b54708;
   --zone-vista: #1f3a5f;
   --zone-sole: #a87b3d;
+  /* Variante scura del Sole per il testo (contrasto AA sulle tinte). */
+  --zone-sole-ink: #7d5a26;
+  --zone-vista-ink: #1f3a5f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -30,7 +34,7 @@
     --line: #292524;
     --line-strong: #57534e;
     --muted: #a8a29e;
-    --subtle: #78716c;
+    --subtle: #8f8984;
     --primary: #fafaf9;
     --primary-foreground: #0a0a0a;
     --danger: #f97066;
@@ -38,6 +42,8 @@
     --warning: #fdb022;
     --zone-vista: #84adff;
     --zone-sole: #e0b97a;
+    --zone-sole-ink: #e0b97a;
+    --zone-vista-ink: #84adff;
     color-scheme: dark;
   }
 }
@@ -49,7 +55,7 @@
   --line: #292524;
   --line-strong: #57534e;
   --muted: #a8a29e;
-  --subtle: #78716c;
+  --subtle: #8f8984;
   --primary: #fafaf9;
   --primary-foreground: #0a0a0a;
   --danger: #f97066;
@@ -57,6 +63,8 @@
   --warning: #fdb022;
   --zone-vista: #84adff;
   --zone-sole: #e0b97a;
+  --zone-sole-ink: #e0b97a;
+  --zone-vista-ink: #84adff;
   color-scheme: dark;
 }
 
@@ -75,6 +83,8 @@
   --color-warning: var(--warning);
   --color-vista: var(--zone-vista);
   --color-sole: var(--zone-sole);
+  --color-sole-ink: var(--zone-sole-ink);
+  --color-vista-ink: var(--zone-vista-ink);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-inter-tight), var(--font-inter), ui-sans-serif, system-ui, sans-serif;

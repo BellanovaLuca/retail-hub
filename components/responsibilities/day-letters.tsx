@@ -4,7 +4,11 @@ import { DAY_LETTERS, scheduleLabel } from "./format";
 /** Giorni previsti come lettere L M M G V S D (pieni = previsti). */
 export function DayLetters({ days, className }: { days: number[]; className?: string }) {
   return (
-    <span className={cn("inline-flex gap-0.5", className)} aria-label={scheduleLabel(days)}>
+    <span
+      role="img"
+      className={cn("inline-flex gap-0.5", className)}
+      aria-label={scheduleLabel(days)}
+    >
       {DAY_LETTERS.map((letter, i) => {
         const on = days.includes(i + 1);
         return (
