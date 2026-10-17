@@ -252,7 +252,7 @@ export function AnnouncementEditor({
                     label="Data e ora di pubblicazione"
                     htmlFor="pubblica"
                     error={errors.publishAt}
-                    hint="Ora italiana. I destinatari ricevono la notifica a quell'ora."
+                    hint="Ora italiana. I destinatari ricevono la notifica entro un quarto d'ora da quell'ora."
                   >
                     <Input
                       id="pubblica"

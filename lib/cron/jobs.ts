@@ -24,6 +24,8 @@ export type CronJob = {
   days?: number[];
   /** Chiave di idempotenza: per default una volta al giorno. */
   key?: (ctx: CronContext) => string;
+  /** false = si esegue a ogni chiamata senza passare da cron_runs (idempotenza propria). */
+  idempotent?: boolean;
   run: (ctx: CronContext) => Promise<Record<string, unknown>>;
 };
 
@@ -142,11 +144,25 @@ export function cronContext(): CronContext {
 export async function runDueJobs(opts: { only?: string; force?: boolean } = {}) {
   const ctx = cronContext();
   const results: Record<string, unknown> = {};
+  // Le esecuzioni passate servono solo all'idempotenza: si tengono 60 giorni.
+  await ctx.db
+    .from("cron_runs")
+    .delete()
+    .lt("ran_at", new Date(Date.now() - 60 * 86_400_000).toISOString());
   for (const job of registry) {
     if (opts.only && job.name !== opts.only) continue;
     const due = ctx.time >= job.after && (!job.days?.length || job.days.includes(ctx.weekday));
     if (!due && !opts.force) continue;
     const runKey = job.key ? job.key(ctx) : `${job.name}:${ctx.today}`;
+    if (job.idempotent === false) {
+      try {
+        results[job.name] = await job.run(ctx);
+      } catch (error) {
+        console.error("cron", job.name, error);
+        results[job.name] = { error: String(error) };
+      }
+      continue;
+    }
     if (!opts.force) {
       const { error } = await ctx.db.from("cron_runs").insert({ job: job.name, run_key: runKey });
       if (error) {

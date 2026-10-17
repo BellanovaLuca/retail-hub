@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { clearOfflineCopy } from "@/components/layout/offline-copy";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/input";
 import { changePin, setTheme, signOut, signOutEverywhere } from "@/lib/auth/actions";
@@ -113,12 +114,12 @@ export function ThemePicker({ current }: { current: Theme }) {
 export function SessionActions() {
   return (
     <div className="flex flex-col gap-3">
-      <form action={signOut}>
+      <form action={signOut} onSubmit={clearOfflineCopy}>
         <Button type="submit" variant="secondary" className="w-full">
           Esci
         </Button>
       </form>
-      <form action={signOutEverywhere}>
+      <form action={signOutEverywhere} onSubmit={clearOfflineCopy}>
         <Button type="submit" variant="ghost" className="w-full text-muted">
           Esci da tutti i dispositivi
         </Button>

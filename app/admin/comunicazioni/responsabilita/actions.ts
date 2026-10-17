@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { nowInRome, toISODate } from "@/lib/dates";
 import {
   ActionError,
   adminAction,
@@ -226,7 +227,9 @@ export async function reorderResponsibilities(orderedIds: string[]): Promise<Act
 const extraTaskSchema = z.object({
   title: z.string().trim().min(1, "Scrivi un titolo.").max(160, "Titolo troppo lungo."),
   description: z.string().max(10000, "Testo troppo lungo."),
-  dueDate: z.union([z.iso.date(), z.literal("")]),
+  dueDate: z
+    .union([z.iso.date(), z.literal("")])
+    .refine((d) => !d || d >= toISODate(nowInRome()), "La scadenza non può essere nel passato."),
   assigneeIds: z.array(z.uuid()).min(1, "Scegli almeno una persona.").max(50),
 });
 

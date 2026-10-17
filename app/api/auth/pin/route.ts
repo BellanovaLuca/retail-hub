@@ -68,6 +68,13 @@ export async function POST(request: NextRequest) {
 
   if (error || !data.user) {
     await admin.from("login_attempts").insert({ employee_code: code, ip, success: false });
+    // Account disattivato (bannato in Supabase Auth): messaggio chiaro invece di quello generico.
+    if (error && "code" in error && error.code === "user_banned") {
+      return NextResponse.json(
+        { error: "Questo account è disattivato. Rivolgiti a un responsabile." },
+        { status: 403 },
+      );
+    }
     return NextResponse.json({ error: WRONG_CREDENTIALS }, { status: 401 });
   }
 

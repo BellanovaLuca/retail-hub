@@ -41,6 +41,12 @@ export async function notifyAnnouncement(id: string): Promise<number> {
 
   const people = await getPeopleDirectory(db);
   const ids = recipientsOf(a, people).map((p) => p.id);
+  if (ids.length === 0) {
+    // Nessun destinatario trovato (es. elenco persone non leggibile): non "bruciare" la
+    // comunicazione, si riproverà alla prossima chiamata.
+    await db.from("announcements").update({ notified_at: null }).eq("id", id);
+    return 0;
+  }
   await notify(ids, notificationFor(a));
   return ids.length;
 }

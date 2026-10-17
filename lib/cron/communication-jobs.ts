@@ -96,7 +96,7 @@ export const communicationJobs: CronJob[] = [
       "Notifica le comunicazioni programmate quando arriva il momento della pubblicazione.",
     after: "00:00",
     // A ogni chiamata: l'idempotenza la garantisce announcements.notified_at.
-    key: ({ today, time }) => `comunicazioni-programmate:${today}T${time}`,
+    idempotent: false,
     run: async () => sendDueAnnouncementNotifications(),
   },
 ];

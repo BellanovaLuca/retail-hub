@@ -168,8 +168,20 @@ export async function saveShiftTemplate(
 export async function deleteShiftTemplate(id: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
-    // I turni già pianificati restano: perdono solo il collegamento al codice.
-    const { error } = await supabase.from("shift_templates").delete().eq("id", z.uuid().parse(id));
+    const templateId = z.uuid().parse(id);
+    // Un turno rapido usato nei turni non si può eliminare (i turni di assenza non avrebbero
+    // più né orario né codice): prima va sostituito nel foglio turni.
+    const { count } = await supabase
+      .from("shifts")
+      .select("id", { count: "exact", head: true })
+      .eq("template_id", templateId);
+    if (count) {
+      return {
+        ok: false,
+        message: `Questo turno rapido è usato in ${count} ${count === 1 ? "turno" : "turni"}: sostituiscilo nel foglio turni prima di eliminarlo.`,
+      };
+    }
+    const { error } = await supabase.from("shift_templates").delete().eq("id", templateId);
     if (error) return { ok: false, message: dbErrorMessage(error, "Turno non eliminato.") };
     return done("Turno rapido eliminato.");
   });
@@ -196,7 +208,9 @@ export async function saveHoliday(input: {
     const row = { date: v.date, label: v.label, store_closed: v.storeClosed };
     const { error } = v.id
       ? await supabase.from("holidays").update(row).eq("id", v.id)
-      : await supabase.from("holidays").upsert(row, { onConflict: "date" });
+      : await supabase.from("holidays").insert(row);
+    if (error?.code === "23505")
+      return { ok: false, message: "Esiste già una festività in quella data: modifica quella." };
     if (error) return { ok: false, message: dbErrorMessage(error, "Festività non salvata.") };
     return done("Festività salvata.");
   });

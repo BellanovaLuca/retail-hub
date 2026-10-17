@@ -16,6 +16,7 @@ import {
   isActive,
   type NavItem,
 } from "./nav";
+import { clearOfflineCopy } from "./offline-copy";
 import { Wordmark } from "./wordmark";
 
 type ShellProps = {
@@ -25,15 +26,12 @@ type ShellProps = {
   userName: string;
   profileId: string;
   unreadCount: number;
+  /** Logo caricato dall'admin; null = wordmark testuale. */
+  logo?: { url: string; name: string } | null;
   children: React.ReactNode;
 };
 
 const personalArea: NavItem = { href: "/", label: "Area personale", icon: Home };
-
-/** Svuota la copia offline delle pagine (dati personali) quando si esce. */
-function clearOfflineCopy() {
-  navigator.serviceWorker?.controller?.postMessage("logout");
-}
 
 function OfflineBanner() {
   const [offline, setOffline] = useState(false);
@@ -61,6 +59,7 @@ export function AppShell({
   userName,
   profileId,
   unreadCount,
+  logo,
   children,
 }: ShellProps) {
   const pathname = usePathname();
@@ -79,7 +78,7 @@ export function AppShell({
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line px-5 py-8 md:flex">
         <Link href="/" className="mb-12 block">
-          <Wordmark />
+          <Wordmark logo={logo} />
         </Link>
         <nav aria-label="Principale" className="flex flex-1 flex-col gap-0.5">
           {sidebar.map((item) => (
@@ -106,7 +105,7 @@ export function AppShell({
       <div className="flex min-w-0 flex-col">
         <header className="flex items-center justify-between border-b border-line px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-4 md:hidden">
           <Link href="/">
-            <Wordmark />
+            <Wordmark logo={logo} />
           </Link>
           <span className="flex items-center gap-3">
             {footerLink ? (

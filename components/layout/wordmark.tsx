@@ -1,7 +1,23 @@
 import { cn } from "@/lib/utils";
 
-/** Wordmark testuale usato finché l'admin non carica il logo del negozio (§9). */
-export function Wordmark({ className }: { className?: string }) {
+/** Wordmark testuale, sostituito dal logo del negozio quando l'admin lo carica (§9). */
+export function Wordmark({
+  className,
+  logo,
+}: {
+  className?: string;
+  logo?: { url: string; name: string } | null;
+}) {
+  if (logo) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- URL firmato di Storage, non ottimizzabile
+      <img
+        src={logo.url}
+        alt={logo.name}
+        className={cn("block h-8 w-auto max-w-[11rem] object-contain object-left", className)}
+      />
+    );
+  }
   return (
     <span
       className={cn(

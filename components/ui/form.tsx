@@ -84,6 +84,7 @@ export function Switch({
   description,
   disabled,
   name,
+  id: explicitId,
 }: {
   checked: boolean;
   onCheckedChange: (value: boolean) => void;
@@ -91,8 +92,11 @@ export function Switch({
   description?: string;
   disabled?: boolean;
   name?: string;
+  /** Id stabile: utile dentro Controller di react-hook-form, dove useId può divergere tra server e client. */
+  id?: string;
 }) {
-  const id = React.useId();
+  const generatedId = React.useId();
+  const id = explicitId ?? generatedId;
   return (
     <div className="flex min-h-11 items-center justify-between gap-4 py-2">
       <label htmlFor={id} className="text-sm">

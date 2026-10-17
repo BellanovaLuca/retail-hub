@@ -229,6 +229,7 @@ export function EmployeeForm({
           render={({ field }) => (
             <div className="mt-4 border-t border-line pt-2">
               <Switch
+                id="switch-1"
                 checked={!field.value}
                 onCheckedChange={(v) => field.onChange(!v)}
                 label="Di solito in back office"
