@@ -9,6 +9,8 @@
  *   fisso 1 per Vista e Jolly ("Pz sole x ADV").
  * - Voci `pct_of`: round(base × pct), ma almeno 1 se la base è > 0 (0 se la base è 0).
  * - Voci `fixed`: il valore. Voci senza regola: nessun obiettivo proposto (lo scrive l'admin).
+ * - Chi non ha ore in vendita in settimana non riceve proposte automatiche: solo i valori scritti
+ *   a mano (e le voci "% di …" calcolate su quelli).
  */
 
 export type StoreWeeklyTargets = {
@@ -83,6 +85,7 @@ export function assignWeeklyTargets(
 
   const result = people.map((p): PersonTargets => {
     const hours = Math.max(0, p.plannedHours);
+    const working = hours > 0;
     const isSole = p.zone === "sole";
     const valueWo = isSole ? 0 : eurPerHourVista * hours;
     const woTarget = Math.round(safeDiv(valueWo, store.vistaAvgPrice));
@@ -100,13 +103,16 @@ export function assignWeeklyTargets(
       }
       const rule = rules.get(code);
       let value: number | null = null;
-      if (rule?.type === "fixed") value = rule.value;
+      if (rule?.type === "fixed") value = working ? rule.value : null;
       else if (rule?.type === "assignment") {
-        if (code === "WO") value = woTarget;
+        if (!working) value = null;
+        else if (code === "WO") value = woTarget;
         else if (code === "PZ_SOLE") value = isSole ? soleTarget : PZ_SOLE_VISTA_FIXED;
       } else if (rule?.type === "pct_of") {
-        const base = compute(rule.kpi, new Set([...visiting, code])) ?? 0;
-        value = base > 0 ? Math.max(1, Math.round(base * rule.pct)) : 0;
+        const raw = compute(rule.kpi, new Set([...visiting, code]));
+        const base = raw ?? 0;
+        value =
+          !working && raw === null ? null : base > 0 ? Math.max(1, Math.round(base * rule.pct)) : 0;
       }
       cache.set(code, value);
       return value;

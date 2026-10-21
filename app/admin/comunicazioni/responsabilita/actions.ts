@@ -18,7 +18,7 @@ import { scheduleLabel } from "@/lib/responsibilities/labels";
 
 function revalidateAll() {
   revalidatePath("/admin/comunicazioni/responsabilita", "layout");
-  revalidatePath("/comunicazioni/responsabilita");
+  revalidatePath("/comunicazioni/responsabilita", "layout");
   revalidatePath("/");
 }
 
@@ -270,7 +270,7 @@ export async function createExtraTask(input: ExtraTaskInput): Promise<ActionResu
       body: v.dueDate
         ? `Da fare entro il ${new Date(`${v.dueDate}T12:00:00`).toLocaleDateString("it-IT", { day: "numeric", month: "long" })}.`
         : "Segnala «Fatto» quando l'hai completata.",
-      link: "/comunicazioni/responsabilita",
+      link: "/comunicazioni/responsabilita/spunte",
     });
     revalidateAll();
     return { ok: true, message: "Attività extra creata e notificata." };

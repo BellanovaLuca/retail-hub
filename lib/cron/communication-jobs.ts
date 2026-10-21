@@ -44,7 +44,7 @@ export const communicationJobs: CronJob[] = [
                   : d.responsibility.title,
               )
               .join(", "),
-            link: "/comunicazioni/responsabilita",
+            link: "/comunicazioni/responsabilita/spunte",
           },
         })),
       );

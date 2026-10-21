@@ -13,6 +13,7 @@ const PAGES = [
   "/obiettivi",
   "/comunicazioni",
   "/comunicazioni/responsabilita",
+  "/comunicazioni/responsabilita/spunte",
   "/performance",
   "/profilo",
   "/notifiche",

@@ -99,6 +99,19 @@ describe("assignWeeklyTargets", () => {
     expect(result.totals.byKpi.WO).toBe(33);
   });
 
+  it("chi non ha turni in settimana: nessuna proposta, solo i valori scritti a mano", () => {
+    const people = [
+      { profileId: "v", zone: "vista" as const, plannedHours: 40, kpiCodes: VISTA },
+      { profileId: "x", zone: "vista" as const, plannedHours: 0, kpiCodes: VISTA },
+    ];
+    const auto = assignWeeklyTargets(store, people, kpis);
+    expect(auto.people[1].targets).toEqual({});
+    expect(auto.totals.byKpi.PZ_SOLE).toBe(1); // solo chi lavora ha il "Pz sole x ADV"
+    const manual = assignWeeklyTargets(store, people, kpis, { x: { WO: 10 } });
+    // Le voci "% di WO" seguono il valore scritto a mano; le altre restano vuote.
+    expect(manual.people[1].targets).toEqual({ WO: 10, DOPPI_VISTA: 2, TRANSITION: 2, PROG: 1 });
+  });
+
   it("ore totali 0 e prezzi medi 0: nessuna divisione per zero", () => {
     const zero = assignWeeklyTargets(
       { ...store, totalHours: 0, vistaAvgPrice: 0 },
@@ -107,7 +120,8 @@ describe("assignWeeklyTargets", () => {
     );
     expect(zero.eurPerHourVista).toBe(0);
     expect(zero.people[0]).toMatchObject({ valueWo: 0, woTarget: 0 });
-    expect(zero.people[0].targets).toMatchObject({ WO: 0, DOPPI_VISTA: 0, PROG: 0 });
+    // Senza ore nessuna proposta automatica.
+    expect(zero.people[0].targets).toEqual({});
     const noPm = assignWeeklyTargets(
       { ...store, soleAvgPrice: 0 },
       [{ profileId: "s", zone: "sole", plannedHours: 40, kpiCodes: SOLE }],

@@ -37,6 +37,7 @@ type Person = {
   color: string | null;
   zone: TargetZone;
   plannedHours: number;
+  hasShifts: boolean;
   kpis: { kpiId: string; code: string; label: string }[];
 };
 
@@ -70,7 +71,8 @@ export function AssignmentEditor(props: {
   people: Person[];
   kpis: Kpi[];
   savedTargets: { profileId: string; kpiId: string; target: number; overridden: boolean }[];
-  backOfficeOnly: string[];
+  /** Persone senza ore in vendita (e senza obiettivi salvati): nessuna proposta automatica. */
+  withoutHours: string[];
 }) {
   const { weekStart, people, kpis } = props;
   const router = useRouter();
@@ -132,11 +134,22 @@ export function AssignmentEditor(props: {
   const rows: GridRow[] = React.useMemo(
     () =>
       [...people]
-        .sort((a, b) => Number(a.zone === "sole") - Number(b.zone === "sole"))
+        .sort(
+          (a, b) =>
+            Number(a.zone === "sole") - Number(b.zone === "sole") ||
+            Number(a.plannedHours === 0) - Number(b.plannedHours === 0),
+        )
         .map((p) => ({
           id: p.profileId,
           label: p.name,
-          sublabel: p.zone === "jolly" ? "Jolly" : undefined,
+          sublabel:
+            p.plannedHours === 0
+              ? p.hasShifts
+                ? "Solo back office"
+                : "Nessun turno"
+              : p.zone === "jolly"
+                ? "Jolly"
+                : undefined,
           groupId: p.zone === "sole" ? "sole" : "vista",
           accentColor: p.color ?? undefined,
         })),
@@ -413,7 +426,7 @@ export function AssignmentEditor(props: {
 
         {people.length === 0 ? (
           <p className="py-10 font-display text-2xl font-light text-subtle">
-            Nessuna persona con ore in vendita nei turni di questa settimana.
+            Nessuna persona attiva: aggiungile da Amministrazione → Dipendenti.
           </p>
         ) : (
           <SpreadsheetGrid
@@ -447,10 +460,11 @@ export function AssignmentEditor(props: {
             unit="h"
           />
         </dl>
-        {props.backOfficeOnly.length ? (
+        {props.withoutHours.length ? (
           <p className="text-xs text-muted">
-            Solo in back office questa settimana (nessun obiettivo proposto):{" "}
-            {props.backOfficeOnly.join(", ")}.
+            Senza ore in vendita nei turni di questa settimana: {props.withoutHours.join(", ")}.
+            Gli obiettivi si calcolano sulle ore dei turni, quindi per loro non c&apos;è una
+            proposta: scrivili a mano nelle celle oppure inserisci prima i turni in Turni.
           </p>
         ) : null}
         {props.scheduleStatus !== "published" ? (

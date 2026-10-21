@@ -13,7 +13,7 @@ import { nowInRome, toISODate } from "@/lib/dates";
 import { canToggleCheck } from "./assignment";
 
 function revalidateBoards() {
-  revalidatePath("/comunicazioni/responsabilita");
+  revalidatePath("/comunicazioni/responsabilita", "layout");
   revalidatePath("/admin/comunicazioni/responsabilita");
   revalidatePath("/");
 }

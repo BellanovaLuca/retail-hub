@@ -10,10 +10,16 @@ export function PersonFilter({
   people,
   viewerId,
   selected,
+  allLabel = "Tutte",
+  hideMine = false,
 }: {
   people: { id: string; name: string }[];
   viewerId: string;
   selected: string | null;
+  /** Etichetta del primo chip (nessuna persona scelta). */
+  allLabel?: string;
+  /** Nasconde il chip "Solo le mie". */
+  hideMine?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -42,15 +48,17 @@ export function PersonFilter({
         className={chip(!selected)}
         aria-current={!selected ? "true" : undefined}
       >
-        Tutte
+        {allLabel}
       </Link>
-      <Link
-        href={hrefFor(viewerId)}
-        className={chip(selected === viewerId)}
-        aria-current={selected === viewerId ? "true" : undefined}
-      >
-        Solo le mie
-      </Link>
+      {hideMine ? null : (
+        <Link
+          href={hrefFor(viewerId)}
+          className={chip(selected === viewerId)}
+          aria-current={selected === viewerId ? "true" : undefined}
+        >
+          Solo le mie
+        </Link>
+      )}
       <label htmlFor="filtro-persona" className="sr-only">
         Di cosa si occupa…
       </label>
