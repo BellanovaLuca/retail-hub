@@ -25,33 +25,126 @@ export type ResponsibilityAssignment = {
   supportIds: string[];
   /** Assegnazione settimanale: chi del gruppo è in turno fa l'attività. */
   weekly?: boolean;
+  /**
+   * Con `weekly`: i giorni (1 = lunedì … 7 = domenica) in cui ciascun assegnato fa l'attività.
+   * `scheduleDays` è allora l'unione dei giorni di tutti.
+   */
+  personDays?: PersonDays;
 };
+
+/** Giorni della settimana (1–7) per persona. */
+export type PersonDays = Record<string, number[]>;
+
+/** Giorni validi, senza ripetizioni e in ordine. */
+export function normalizeDays(days: readonly number[]): number[] {
+  return [...new Set(days.filter((d) => Number.isInteger(d) && d >= 1 && d <= 7))].sort(
+    (a, b) => a - b,
+  );
+}
+
+/** Toglie chi non ha giorni e mette in ordine i giorni degli altri. */
+export function normalizePersonDays(personDays: PersonDays): PersonDays {
+  const out: PersonDays = {};
+  for (const [id, days] of Object.entries(personDays)) {
+    const clean = normalizeDays(days);
+    if (clean.length) out[id] = clean;
+  }
+  return out;
+}
+
+export function samePersonDays(a: PersonDays, b: PersonDays): boolean {
+  const x = normalizePersonDays(a);
+  const y = normalizePersonDays(b);
+  const keys = Object.keys(x);
+  return (
+    keys.length === Object.keys(y).length &&
+    keys.every((id) => y[id] !== undefined && x[id].join() === y[id].join())
+  );
+}
 
 /** Lunedì della settimana che contiene la data. */
 export function mondayOf(date: ISODate): ISODate {
   return shiftDate(date, 1 - isoWeekdayOf(date));
 }
 
-/** Assegnazione di un'attività per una settimana (lunedì). */
-export type WeekTeam = { weekStart: ISODate; profileIds: string[] };
+/**
+ * Assegnazione di un'attività per una settimana (lunedì): le persone e, per ciascuna, i giorni
+ * (chi non compare in `personDays` fa tutti i giorni previsti dall'attività).
+ */
+export type WeekTeam = { weekStart: ISODate; profileIds: string[]; personDays?: PersonDays };
 
 /**
- * Gruppo della settimana: l'assegnazione di quella settimana o, in mancanza, dell'ultima
- * settimana precedente assegnata (si ripete finché non si cambia). `null` = mai assegnata per
- * settimana: valgono responsabile e supporti della scheda.
+ * Assegnazione in vigore nella settimana: quella della settimana stessa o, in mancanza,
+ * dell'ultima settimana precedente assegnata (si ripete finché non si cambia). `null` = mai
+ * assegnata per settimana: valgono responsabile e supporti della scheda.
  */
-export function effectiveWeekTeam(plans: WeekTeam[], weekStart: ISODate): string[] | null {
+export function effectiveWeekPlan(plans: WeekTeam[], weekStart: ISODate): WeekTeam | null {
   let best: WeekTeam | null = null;
   for (const p of plans) {
     if (p.weekStart <= weekStart && (!best || p.weekStart > best.weekStart)) best = p;
   }
+  return best;
+}
+
+/** Solo le persone dell'assegnazione in vigore (vedi `effectiveWeekPlan`). */
+export function effectiveWeekTeam(plans: WeekTeam[], weekStart: ISODate): string[] | null {
+  const best = effectiveWeekPlan(plans, weekStart);
   return best ? [...best.profileIds] : null;
 }
 
-/** Applica il gruppo della settimana (se c'è) a un'attività. */
-export function withWeekTeam<T extends ResponsibilityAssignment>(r: T, team: string[] | null): T {
+/**
+ * Applica l'assegnazione della settimana (se c'è) a un'attività. Con i giorni per persona,
+ * l'attività risulta prevista solo nei giorni in cui qualcuno è assegnato; se non è assegnato
+ * nessuno restano i giorni della scheda (così si vede che è scoperta).
+ */
+export function withWeekTeam<T extends ResponsibilityAssignment>(
+  r: T,
+  team: string[] | null,
+  personDays?: PersonDays,
+): T {
   if (team === null || r.allStaff) return r;
-  return { ...r, ownerId: null, supportIds: [...team], weekly: true };
+  const days: PersonDays = {};
+  for (const id of team) {
+    const own = normalizeDays(personDays?.[id] ?? r.scheduleDays);
+    if (own.length) days[id] = own;
+  }
+  const ids = team.filter((id) => days[id]);
+  return {
+    ...r,
+    ownerId: null,
+    supportIds: ids,
+    weekly: true,
+    personDays: days,
+    scheduleDays: ids.length ? normalizeDays(Object.values(days).flat()) : r.scheduleDays,
+  };
+}
+
+/**
+ * Giorni (1–7) in cui la persona ha l'attività: i suoi giorni nell'assegnazione settimanale,
+ * oppure i giorni previsti se è responsabile/supporto della scheda o l'attività è per tutti.
+ */
+export function daysOfPerson(r: ResponsibilityAssignment, profileId: string): number[] {
+  if (r.allStaff) return r.scheduleDays;
+  if (r.weekly) {
+    if (!r.supportIds.includes(profileId)) return [];
+    return r.personDays?.[profileId] ?? r.scheduleDays;
+  }
+  return r.ownerId === profileId || r.supportIds.includes(profileId) ? r.scheduleDays : [];
+}
+
+/** La persona ha l'attività in quella data? */
+export function isAssignedOn(
+  r: ResponsibilityAssignment,
+  profileId: string,
+  date: ISODate,
+): boolean {
+  return daysOfPerson(r, profileId).includes(isoWeekdayOf(date));
+}
+
+/** Giorni per persona di tutti gli assegnati (anche responsabile e supporti della scheda). */
+export function personDaysOf(r: ResponsibilityAssignment): PersonDays {
+  if (r.allStaff) return {};
+  return Object.fromEntries(assigneeIds(r).map((id) => [id, daysOfPerson(r, id)]));
 }
 
 /** Assegnati effettivi (responsabile, supporti o gruppo della settimana), senza ripetizioni. */
@@ -97,7 +190,8 @@ export type Duty =
   | { kind: "substitute"; profileId: string; replacingId: string }
   /** Nessun responsabile indicato: tocca al primo supporto in turno. */
   | { kind: "support"; profileId: string }
-  /** Assegnazione settimanale: la fanno gli assegnati in turno (o tutti, se i turni non sono noti). */
+  /** Assegnazione settimanale: la fanno gli assegnati del giorno che sono in turno (o tutti gli
+   *  assegnati del giorno, se i turni non sono noti). */
   | { kind: "team"; profileIds: string[] }
   /** Attività per tutti: la fa chiunque sia in turno. */
   | { kind: "all_staff" }
@@ -123,7 +217,7 @@ export function resolveDuty(
   const present = (id: string) => onShift === null || onShift.has(id);
 
   if (r.weekly) {
-    const team = r.supportIds.filter(present);
+    const team = r.supportIds.filter((id) => isAssignedOn(r, id, date) && present(id));
     return team.length ? { kind: "team", profileIds: team } : { kind: "uncovered" };
   }
 

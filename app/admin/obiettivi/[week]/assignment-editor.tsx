@@ -1,9 +1,10 @@
 "use client";
 
-import { Calculator, Copy, Eraser, Plus, Send, Sparkles } from "lucide-react";
+import { Calculator, Columns3, Copy, Eraser, Send, Sparkles, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
+import { AddColumn } from "@/components/ui/add-column";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -158,10 +159,13 @@ export function AssignmentEditor(props: {
     vista: false,
     sole: false,
   });
-  const [newKpi, setNewKpi] = React.useState<Record<Area, string>>({ vista: "", sole: "" });
-  const [removing, setRemoving] = React.useState<{ area: Area; column: TargetsColumn } | null>(
-    null,
-  );
+  // Finestra «Gestisci colonne» di una tabella e, al suo interno, la colonna da confermare.
+  const [managing, setManaging] = React.useState<Area | null>(null);
+  const [confirmRemove, setConfirmRemove] = React.useState<string | null>(null);
+  const [manageResult, setManageResult] = React.useState<{
+    ok: boolean;
+    message?: string;
+  } | null>(null);
   const [justAdded, setJustAdded] = React.useState<{ area: Area; kpiId: string } | null>(null);
   React.useEffect(() => {
     if (!justAdded) return;
@@ -299,25 +303,18 @@ export function AssignmentEditor(props: {
     setDirty(true);
   };
 
-  const onAddKpi = (area: Area) => (e: React.FormEvent) => {
-    e.preventDefault();
-    const label = newKpi[area];
-    if (!label.trim()) return;
-    startTransition(async () => {
-      const res = await quickAddKpi(label, area);
+  const onAddKpi = async (area: Area, label: string) => {
+    const res = await quickAddKpi(label, area);
+    if (res.ok) {
       setResult(res);
-      if (res.ok) {
-        setNewKpi((n) => ({ ...n, [area]: "" }));
-        if (res.data?.id) setJustAdded({ area, kpiId: res.data.id });
-        // La colonna nuova arriva con il refresh; i numeri già scritti restano.
-        router.refresh();
-      }
-    });
+      if (res.data?.id) setJustAdded({ area, kpiId: res.data.id });
+      // La colonna nuova arriva con il refresh; i numeri già scritti restano.
+      router.refresh();
+    }
+    return res;
   };
 
-  const onRemoveColumn = () => {
-    if (!removing) return;
-    const { area, column } = removing;
+  const onRemoveColumn = (area: Area, column: TargetsColumn) => {
     const members = people.filter((p) => areaOf(p.zone) === area);
     const clear = () => {
       setValues((prev) => {
@@ -326,18 +323,19 @@ export function AssignmentEditor(props: {
         return next;
       });
       setDirty(true);
-      setRemoving(null);
+      setConfirmRemove(null);
     };
     // Una colonna «mista» non fa parte del gruppo: basta svuotarla.
     if (column.mixed) {
       clear();
+      setManageResult({ ok: true, message: `Colonna «${column.label}» svuotata.` });
       return;
     }
     const set = sets.find((s) => s.name === AREA_LABEL[area]);
     if (!set) return;
     startTransition(async () => {
       const res = await removeGroupItem(set.id, column.kpiId);
-      setResult(
+      setManageResult(
         res.ok
           ? {
               ok: true,
@@ -500,6 +498,27 @@ export function AssignmentEditor(props: {
                     checked={showMixed[t.area]}
                     onChange={(e) => setShowMixed((m) => ({ ...m, [t.area]: e.target.checked }))}
                   />
+                  <AddColumn
+                    title={`Nuova colonna ${AREA_LABEL[t.area]}`}
+                    description={`Una voce in più nella tabella ${AREA_LABEL[t.area]}: la vedranno le persone di quest'area. Se esiste già nell'altra tabella, scrivi lo stesso nome per averla anche qui.`}
+                    fieldLabel="Nome della voce"
+                    placeholder="Es. Lenti a contatto"
+                    maxLength={60}
+                    disabled={pending}
+                    onAdd={(name) => onAddKpi(t.area, name)}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={pending || t.columns.length === 0}
+                    onClick={() => {
+                      setManageResult(null);
+                      setConfirmRemove(null);
+                      setManaging(t.area);
+                    }}
+                  >
+                    <Columns3 aria-hidden /> Gestisci colonne
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -529,28 +548,8 @@ export function AssignmentEditor(props: {
                   onCell={onCell}
                   onComment={onComment}
                   onExpandComment={setEditingComment}
-                  onRemoveColumn={(column) => setRemoving({ area: t.area, column })}
                 />
               )}
-              <form onSubmit={onAddKpi(t.area)} className="flex flex-wrap items-center gap-2">
-                <Input
-                  aria-label={`Nome della nuova colonna ${AREA_LABEL[t.area]}`}
-                  placeholder={`Nuova colonna ${AREA_LABEL[t.area]} (es. Lenti a contatto)`}
-                  value={newKpi[t.area]}
-                  maxLength={60}
-                  onChange={(e) => setNewKpi((n) => ({ ...n, [t.area]: e.target.value }))}
-                  disabled={pending}
-                  className="w-full sm:w-80"
-                />
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending || !newKpi[t.area].trim()}
-                >
-                  <Plus aria-hidden /> Aggiungi colonna
-                </Button>
-              </form>
             </section>
           );
         })}
@@ -699,25 +698,78 @@ export function AssignmentEditor(props: {
         </div>
       </details>
 
-      <Dialog open={removing !== null} onOpenChange={(o) => !o && !pending && setRemoving(null)}>
-        {removing ? (
+      <Dialog open={managing !== null} onOpenChange={(o) => !o && !pending && setManaging(null)}>
+        {managing ? (
           <DialogContent
-            title={`Togliere la colonna «${removing.column.label}»?`}
-            description={
-              removing.column.mixed
-                ? `È una voce dell'altra area: si svuotano i suoi obiettivi di questa settimana per le persone del ${AREA_LABEL[removing.area]}.`
-                : `La voce esce dalla tabella ${AREA_LABEL[removing.area]} e dai fogli di chi lavora in quell'area; i suoi obiettivi di questa settimana si svuotano. I numeri già inseriti restano nello storico e puoi rimetterla quando vuoi con «Aggiungi colonna».`
-            }
+            title={`Colonne della tabella ${AREA_LABEL[managing]}`}
+            description="Togli le voci che non ti servono: i numeri già inseriti restano nello storico e puoi rimetterle quando vuoi con «Aggiungi colonna»."
           >
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <DialogClose asChild>
-                <Button variant="ghost" disabled={pending}>
-                  Annulla
-                </Button>
-              </DialogClose>
-              <Button variant="danger" onClick={onRemoveColumn} disabled={pending}>
-                Togli la colonna
-              </Button>
+            <div className="flex flex-col gap-4">
+              <ul className="flex max-h-[55vh] flex-col overflow-y-auto border-t border-line">
+                {(tables.find((t) => t.area === managing)?.columns ?? []).map((c) => (
+                  <li key={c.kpiId} className="border-b border-line py-2.5">
+                    {confirmRemove === c.kpiId ? (
+                      <div className="flex flex-col gap-2">
+                        <p className="text-sm">
+                          <span className="font-medium">Togliere «{c.label}»?</span>{" "}
+                          <span className="text-muted">
+                            {c.mixed
+                              ? `È una voce dell'altra area: si svuotano i suoi obiettivi di questa settimana per le persone del ${AREA_LABEL[managing]}.`
+                              : `Esce dalla tabella e dai fogli di chi lavora nel ${AREA_LABEL[managing]}; i suoi obiettivi di questa settimana si svuotano.`}
+                          </span>
+                        </p>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => onRemoveColumn(managing, c)}
+                          >
+                            <Trash2 aria-hidden /> {c.mixed ? "Sì, svuota" : "Sì, togli"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => setConfirmRemove(null)}
+                          >
+                            No, tienila
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 text-sm">
+                          <span className={cn(c.strong && "font-semibold")}>{c.label}</span>
+                          {c.mixed ? (
+                            <span className="ml-2 text-xs text-subtle">altra area</span>
+                          ) : null}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          aria-label={`${c.mixed ? "Svuota" : "Togli"} la colonna «${c.label}»`}
+                          onClick={() => {
+                            setManageResult(null);
+                            setConfirmRemove(c.kpiId);
+                          }}
+                        >
+                          <Trash2 aria-hidden /> {c.mixed ? "Svuota" : "Togli"}
+                        </Button>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <FormMessage result={manageResult} />
+              <div className="flex justify-end">
+                <DialogClose asChild>
+                  <Button variant="secondary" disabled={pending}>
+                    Fatto
+                  </Button>
+                </DialogClose>
+              </div>
             </div>
           </DialogContent>
         ) : null}

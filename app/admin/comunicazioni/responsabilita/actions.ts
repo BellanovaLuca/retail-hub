@@ -16,7 +16,12 @@ import { attachmentSchema, parseAttachments } from "@/lib/announcements/model";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
 import { getResponsibilities } from "@/lib/data/responsibilities";
 import { notify, notifyEach } from "@/lib/notifications";
-import { assigneeIds, isoWeekdayOf, mondayOf } from "@/lib/responsibilities/assignment";
+import {
+  daysOfPerson,
+  isoWeekdayOf,
+  mondayOf,
+  normalizePersonDays,
+} from "@/lib/responsibilities/assignment";
 import { scheduleLabel } from "@/lib/responsibilities/labels";
 
 function revalidateAll() {
@@ -197,7 +202,10 @@ const weekAssignmentsSchema = z.object({
     .array(
       z.object({
         responsibilityId: z.uuid(),
-        profileIds: z.array(z.uuid()).max(100),
+        /** Per ogni persona, i giorni (1 = lunedì … 7 = domenica) in cui fa l'attività. */
+        personDays: z
+          .record(z.uuid(), z.array(z.number().int().min(1).max(7)).max(7))
+          .refine((r) => Object.keys(r).length <= 100, "Troppe persone."),
       }),
     )
     .min(1, "Nessuna modifica da salvare.")
@@ -207,9 +215,10 @@ const weekAssignmentsSchema = z.object({
 export type WeekAssignmentsInput = z.input<typeof weekAssignmentsSchema>;
 
 /**
- * Salva chi fa cosa nella settimana: per ogni attività cambiata, l'elenco delle persone (una o
- * più, alla pari). L'assegnazione vale anche per le settimane seguenti finché non si cambia.
- * Chi riceve un'attività nuova viene avvisato con un'unica notifica.
+ * Salva chi fa cosa nella settimana, giorno per giorno: per ogni attività cambiata, le persone
+ * (una o più) e i giorni di ciascuna. L'assegnazione vale anche per le settimane seguenti finché
+ * non si cambia. Chi riceve un'attività nuova, o giorni diversi, viene avvisato con un'unica
+ * notifica.
  */
 export async function saveWeekAssignments(
   input: WeekAssignmentsInput,
@@ -217,7 +226,11 @@ export async function saveWeekAssignments(
   return runAction(async () => {
     const parsed = weekAssignmentsSchema.safeParse(input);
     if (!parsed.success) throw new ActionError(parsed.error.issues[0].message);
-    const { weekStart, changes } = parsed.data;
+    const { weekStart } = parsed.data;
+    const changes = parsed.data.changes.map((c) => ({
+      responsibilityId: c.responsibilityId,
+      personDays: normalizePersonDays(c.personDays),
+    }));
     const currentWeek = mondayOf(toISODate(nowInRome()));
     if (weekStart < currentWeek)
       throw new ActionError("Le settimane passate non si possono più modificare.");
@@ -225,7 +238,7 @@ export async function saveWeekAssignments(
       throw new ActionError("Attività ripetute.");
 
     const { supabase } = await adminAction();
-    // Prima del salvataggio: chi era già assegnato quella settimana (per avvisare solo i nuovi).
+    // Prima del salvataggio: chi era già assegnato quella settimana e in quali giorni.
     const before = await getResponsibilities(supabase, { includeInactive: true, week: weekStart });
     const byId = new Map(before.map((r) => [r.id, r]));
     for (const c of changes) {
@@ -238,32 +251,38 @@ export async function saveWeekAssignments(
       changes.map((c) => ({
         responsibility_id: c.responsibilityId,
         week_start: weekStart,
-        profile_ids: [...new Set(c.profileIds)],
+        profile_ids: Object.keys(c.personDays),
+        person_days: c.personDays,
       })),
       { onConflict: "responsibility_id,week_start" },
     );
     if (error) return { ok: false, message: dbErrorMessage(error, "Assegnazioni non salvate.") };
 
-    // Una notifica per persona con le attività nuove della settimana.
-    const news = new Map<string, string[]>();
+    // Una notifica per persona: le attività nuove e quelle con i giorni cambiati.
+    const news = new Map<string, { title: string; days: number[]; isNew: boolean }[]>();
     for (const c of changes) {
       const r = byId.get(c.responsibilityId)!;
-      const old = new Set(assigneeIds(r));
-      for (const id of new Set(c.profileIds)) {
-        if (!old.has(id)) news.set(id, [...(news.get(id) ?? []), r.title]);
+      for (const [id, days] of Object.entries(c.personDays)) {
+        const old = daysOfPerson(r, id);
+        if (old.join() === days.join()) continue;
+        news.set(id, [
+          ...(news.get(id) ?? []),
+          { title: r.title, days, isNew: old.length === 0 },
+        ]);
       }
     }
     const week = `Week ${getISOWeek(parseISO(weekStart))}`;
     await notifyEach(
-      [...news].map(([profileId, titles]) => ({
+      [...news].map(([profileId, list]) => ({
         profileId,
         notification: {
           kind: "assignment_new" as const,
-          title:
-            titles.length === 1
-              ? `${week}: ti occupi di «${titles[0]}»`
-              : `${week}: ti occupi di ${titles.length} attività`,
-          body: titles.join(", "),
+          title: !list.every((x) => x.isNew)
+            ? `${week}: cambiano le tue responsabilità`
+            : list.length === 1
+              ? `${week}: ti occupi di «${list[0].title}»`
+              : `${week}: ti occupi di ${list.length} attività`,
+          body: list.map((x) => `${x.title} (${scheduleLabel(x.days)})`).join(" · "),
           link: "/comunicazioni/responsabilita",
         },
       })),

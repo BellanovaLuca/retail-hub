@@ -22,9 +22,9 @@ import {
 import { normalizeWeekParam } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import {
-  assigneeIds,
   cellState,
   isScheduledOn,
+  personDaysOf,
   shiftDate,
 } from "@/lib/responsibilities/assignment";
 import { createClient } from "@/lib/supabase/server";
@@ -97,7 +97,7 @@ export default async function AdminResponsabilitaPage({
               Chi fa cosa questa settimana
             </h2>
             <p className="mt-1 max-w-2xl text-sm text-muted">
-              Spunta per ogni persona le responsabilità della settimana.
+              Scegli una responsabilità e spunta, per ogni persona, i giorni in cui se ne occupa.
             </p>
           </div>
           <WeekNav
@@ -111,9 +111,11 @@ export default async function AdminResponsabilitaPage({
           key={week}
           weekStart={week}
           editable={week >= currentWeek}
-          columns={planner.columns}
+          items={planner.items}
           people={planner.people}
-          allStaff={planner.allStaff}
+          days={days}
+          today={today}
+          onShift={onShiftByDay}
         />
       </section>
 
@@ -156,7 +158,7 @@ export default async function AdminResponsabilitaPage({
             title: r.title,
             scheduleDays: r.scheduleDays,
             allStaff: r.allStaff,
-            assigneeIds: r.allStaff ? [] : assigneeIds(r),
+            personDays: personDaysOf(r),
           }))}
           checks={Object.fromEntries(
             Object.entries(board.checks).map(([id, byDate]) => [
@@ -178,9 +180,8 @@ export default async function AdminResponsabilitaPage({
           Attività
         </h2>
         <p className="mb-4 max-w-2xl text-sm text-muted">
-          L&apos;ordine è quello del tabellone: trascina o usa le frecce. Apri un&apos;attività per
-          cambiare giorni, procedura e responsabile «fisso» (vale finché un&apos;attività non viene
-          assegnata con la griglia qui sopra).
+          L&apos;ordine è quello degli elenchi: trascina o usa le frecce. Apri un&apos;attività per
+          cambiare la procedura, gli allegati o per rimetterla in elenco dopo averla tolta.
         </p>
         <ResponsibilityOrder
           rows={all.map((r) => ({

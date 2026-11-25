@@ -100,29 +100,46 @@ export default async function ObiettiviPage({
         </p>
       </header>
 
-      {/* Per prima cosa il commento sulla settimana appena trascorsa, poi quello di questa. */}
-      {previous.general || previous.voices.length ? (
-        <CommentBox
-          id="commento-settimana-trascorsa"
-          title={`Commento della settimana trascorsa · Week ${weekNumber(parseISO(prev))}`}
-          general={previous.general}
-          voices={previous.voices}
-          more={{
-            href: `/obiettivi?settimana=${prev}`,
-            label: "Vedi i numeri di quella settimana",
-          }}
-        />
-      ) : null}
-      {week.generalComment || voiceComments.length ? (
-        <CommentBox
-          id="commento-settimana"
-          title={
-            isCurrent ? "Commento di questa settimana" : `Commento della Week ${week.weekNumber}`
-          }
-          general={week.generalComment}
-          voices={voiceComments.map((r) => ({ kpiId: r.kpiId, label: r.label, body: r.comment }))}
-        />
-      ) : null}
+      {/* Sempre per primo il commento settimanale del responsabile: quello di questa settimana
+          e, sotto, quello sulla settimana appena trascorsa. */}
+      <section
+        aria-labelledby="commento-settimanale"
+        className="mb-8 rounded-lg border-2 border-foreground p-5 sm:p-6"
+      >
+        <h2 id="commento-settimanale" className="mb-3 flex items-center gap-2 eyebrow">
+          <MessageSquareText className="size-4 stroke-[1.5]" aria-hidden />
+          Commento settimanale · Week {week.weekNumber}
+        </h2>
+        {week.generalComment || voiceComments.length ? (
+          <CommentBody
+            general={week.generalComment}
+            voices={voiceComments.map((r) => ({
+              kpiId: r.kpiId,
+              label: r.label,
+              body: r.comment,
+            }))}
+          />
+        ) : (
+          <p className="font-display text-xl font-light text-subtle">
+            {isCurrent
+              ? "Il responsabile non ha ancora scritto il commento di questa settimana."
+              : "Nessun commento del responsabile per questa settimana."}
+          </p>
+        )}
+        {previous.general || previous.voices.length ? (
+          <div className="mt-6 border-t border-line pt-4">
+            <h3 className="mb-2 eyebrow">
+              Settimana trascorsa · Week {weekNumber(parseISO(prev))}
+            </h3>
+            <CommentBody general={previous.general} voices={previous.voices} small />
+            <p className="mt-3 text-sm">
+              <Link href={`/obiettivi?settimana=${prev}`} className="link-underline text-muted">
+                Vedi i numeri di quella settimana
+              </Link>
+            </p>
+          </div>
+        ) : null}
+      </section>
 
       {week.rows.length === 0 ? (
         <p className="py-12 font-display text-2xl font-light text-subtle">
@@ -155,35 +172,34 @@ export default async function ObiettiviPage({
   );
 }
 
-/** Riquadro in evidenza con il commento del responsabile (generale e sulle singole voci). */
-function CommentBox({
-  id,
-  title,
+/** Testo del commento del responsabile: generale e sulle singole voci. */
+function CommentBody({
   general,
   voices,
-  more,
+  small,
 }: {
-  id: string;
-  title: string;
   general: string | null;
   voices: { kpiId: string; label: string; body: string }[];
-  more?: { href: string; label: string };
+  /** Carattere più piccolo (commento della settimana trascorsa). */
+  small?: boolean;
 }) {
   return (
-    <section aria-labelledby={id} className="mb-8 rounded-lg border-2 border-foreground p-5 sm:p-6">
-      <h2 id={id} className="mb-3 flex items-center gap-2 eyebrow">
-        <MessageSquareText className="size-4 stroke-[1.5]" aria-hidden />
-        {title}
-      </h2>
+    <>
       {general ? (
-        <p className="font-display text-xl leading-snug font-light whitespace-pre-line sm:text-2xl">
+        <p
+          className={
+            small
+              ? "text-base leading-relaxed whitespace-pre-line"
+              : "font-display text-xl leading-snug font-light whitespace-pre-line sm:text-2xl"
+          }
+        >
           {general}
         </p>
       ) : null}
       {voices.length ? (
         <dl
           className={
-            general ? "mt-5 divide-y divide-line border-t border-line" : "divide-y divide-line"
+            general ? "mt-4 divide-y divide-line border-t border-line" : "divide-y divide-line"
           }
         >
           {voices.map((v) => (
@@ -197,13 +213,6 @@ function CommentBox({
           ))}
         </dl>
       ) : null}
-      {more ? (
-        <p className="mt-4 text-sm">
-          <Link href={more.href} className="link-underline text-muted">
-            {more.label}
-          </Link>
-        </p>
-      ) : null}
-    </section>
+    </>
   );
 }

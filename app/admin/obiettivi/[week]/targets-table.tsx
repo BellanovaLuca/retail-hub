@@ -1,6 +1,6 @@
 "use client";
 
-import { Maximize2, X } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import * as React from "react";
 import { PersonDot } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -130,7 +130,6 @@ export function TargetsTable({
   onCell,
   onComment,
   onExpandComment,
-  onRemoveColumn,
   ariaLabel,
 }: {
   /** Identifica la tabella nella pagina (per muoversi tra i campi con la tastiera). */
@@ -149,13 +148,12 @@ export function TargetsTable({
   onCell: (profileId: string, kpiId: string, text: string) => boolean;
   onComment: (profileId: string, text: string) => void;
   onExpandComment: (profileId: string) => void;
-  onRemoveColumn: (column: TargetsColumn) => void;
   ariaLabel: string;
 }) {
   const th = "border-b border-l border-line px-2 py-2 text-center align-bottom text-sm font-medium";
 
   return (
-    <div className="overflow-x-auto rounded-md border border-line">
+    <div className="relative overflow-x-auto rounded-md border border-line">
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">{ariaLabel}</caption>
         <thead>
@@ -197,18 +195,6 @@ export function TargetsTable({
                     altra area
                   </span>
                 ) : null}
-                <span className="mt-1 flex justify-center">
-                  <button
-                    type="button"
-                    className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface hover:text-danger disabled:opacity-40"
-                    aria-label={`Togli la colonna «${c.label}»`}
-                    title="Togli questa colonna"
-                    disabled={disabled}
-                    onClick={() => onRemoveColumn(c)}
-                  >
-                    <X className="size-4 stroke-[1.5]" aria-hidden />
-                  </button>
-                </span>
               </th>
             ))}
           </tr>

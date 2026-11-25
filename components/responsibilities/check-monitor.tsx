@@ -8,9 +8,9 @@ import * as React from "react";
 import { PersonDot } from "@/components/ui/table";
 import { formatInRome } from "@/lib/dates";
 import { toggleResponsibilityCheck } from "@/lib/responsibilities/actions";
-import { isScheduledOn } from "@/lib/responsibilities/assignment";
+import { isoWeekdayOf, isScheduledOn } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
-import { DayLettersInline } from "./week-grid";
+import { DayLettersInline } from "./day-letters";
 
 export type MonitorPerson = { id: string; name: string; color: string | null };
 export type MonitorColumn = {
@@ -18,8 +18,8 @@ export type MonitorColumn = {
   title: string;
   scheduleDays: number[];
   allStaff: boolean;
-  /** Assegnati della settimana (vuoto per le attività «per tutti»). */
-  assigneeIds: string[];
+  /** Giorni (1–7) di ciascun assegnato nella settimana (vuoto per le attività «per tutti»). */
+  personDays: Record<string, number[]>;
 };
 export type MonitorCheck = { doneById: string | null; doneByName: string | null; doneAt: string };
 type Checks = Record<string, Record<string, MonitorCheck>>;
@@ -57,9 +57,11 @@ export function CheckMonitor({
   const [pending, startTransition] = React.useTransition();
 
   const scheduled = (c: MonitorColumn, d: string) => isScheduledOn(c.scheduleDays, d);
-  const isAssigned = (c: MonitorColumn, personId: string) =>
-    c.allStaff || c.assigneeIds.includes(personId);
-  const hasAssignees = (c: MonitorColumn) => c.allStaff || c.assigneeIds.length > 0;
+  /** La persona ha l'attività in quel giorno? */
+  const isAssigned = (c: MonitorColumn, personId: string, d: string) =>
+    c.allStaff || (c.personDays[personId]?.includes(isoWeekdayOf(d)) ?? false);
+  const hasAssignees = (c: MonitorColumn) =>
+    c.allStaff || Object.values(c.personDays).some((x) => x.length > 0);
   /** Attività assegnate, previste in un giorno e non spuntate. */
   const missingOn = (d: string) =>
     columns.filter((c) => hasAssignees(c) && scheduled(c, d) && !checks[c.id]?.[d]);
@@ -162,7 +164,7 @@ export function CheckMonitor({
               ? "tutte le attività previste sono spuntate"
               : `${missingToday.length} ${missingToday.length === 1 ? "attività non ancora spuntata" : "attività non ancora spuntate"}`}
           {unassigned
-            ? ` · ${unassigned} senza nessuno assegnato (assegnale nella griglia qui sopra)`
+            ? ` · ${unassigned} senza nessuno assegnato (assegnale qui sopra)`
             : ""}
           {shift === null && !isFuture ? " · turni del giorno non pubblicati" : ""}
         </span>
@@ -171,7 +173,7 @@ export function CheckMonitor({
         {error}
       </p>
 
-      <div className="overflow-x-auto rounded-md border border-line">
+      <div className="relative overflow-x-auto rounded-md border border-line">
         <table className="w-max min-w-full border-collapse text-sm">
           <caption className="sr-only">Spunte delle responsabilità di {dayLong}</caption>
           <thead>
@@ -216,7 +218,7 @@ export function CheckMonitor({
                     ) : null}
                   </th>
                   {columns.map((c) => {
-                    const assigned = isAssigned(c, p.id);
+                    const assigned = isAssigned(c, p.id, day);
                     const check = checks[c.id]?.[day];
                     const mine = !!check && check.doneById === p.id;
                     const on = scheduled(c, day);
@@ -348,10 +350,10 @@ export function CheckMonitor({
       </div>
 
       <p className="max-w-3xl text-xs text-muted">
-        Ogni casella è una responsabilità assegnata alla persona per questa settimana: nera con
+        Ogni casella è una responsabilità assegnata alla persona in questo giorno: nera con
         l&apos;ora = l&apos;ha spuntata lei; con il nome di un collega = l&apos;ha fatta
         l&apos;altro assegnato; rossa = non svolta a giornata finita. Le caselle vuote non sono
-        assegnate. Con un clic segni tu l&apos;attività come fatta dalla persona, o togli la spunta.
+        assegnate in questo giorno. Con un clic segni tu l&apos;attività come fatta dalla persona, o togli la spunta.
       </p>
     </div>
   );
