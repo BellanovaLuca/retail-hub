@@ -32,7 +32,7 @@ export function CredentialsDialog({
       {credentials ? (
         <DialogContent
           title={`Accesso di ${credentials.displayName}`}
-          description="Il PIN provvisorio si vede solo adesso: mandalo subito al dipendente. Al primo accesso dovrà sceglierne uno suo."
+          description="Il PIN provvisorio si vede solo adesso e vale 7 giorni: mandalo subito al dipendente. Al primo accesso dovrà sceglierne uno suo."
         >
           <dl className="mb-6 grid grid-cols-2 gap-4 border-y border-line py-5">
             <div>

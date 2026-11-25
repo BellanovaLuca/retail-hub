@@ -7,7 +7,15 @@
  * torna in coda, senza coprire modifiche più recenti alle stesse celle, e viene riprovato da
  * solo; finché resta qualcosa in coda `busy()` è vero e il foglio tiene a schermo i valori scritti.
  */
-export type QueuedCell = { profileId: string; date: string; value: string };
+import type { RestoreRow } from "../day-rows";
+
+export type QueuedCell = {
+  profileId: string;
+  date: string;
+  value: string;
+  /** Annulla/Ripeti: la giornata com'era quando la cella mostrava questo testo (vedi cell-restore). */
+  restore?: RestoreRow[];
+};
 
 export type CellSaveHandlers = {
   save: (batch: QueuedCell[]) => Promise<{ ok: boolean; message?: string }>;

@@ -347,7 +347,10 @@ export async function getPublishedDays(
   return (data ?? []).map(toPublishedShift);
 }
 
-/** Assenze come le vede chiunque: "Ferie" o "Assente", mai il motivo. */
+/**
+ * Assenze come le vede chiunque: "Ferie" o "Assente", mai il motivo. `hours` = ore dell'assenza
+ * (null = giornata intera): un'assenza di poche ore si mostra insieme al turno.
+ */
 export async function getPublicLeaves(db: Db, from: string, to: string) {
   const { data } = await db.from("leaves_public").select("*").gte("date", from).lte("date", to);
   return (data ?? []).map((l) => ({
@@ -355,5 +358,6 @@ export async function getPublicLeaves(db: Db, from: string, to: string) {
     date: l.date!,
     kind: l.kind as "ferie" | "assente",
     status: l.status as "tentative" | "confirmed",
+    hours: l.hours ?? null,
   }));
 }

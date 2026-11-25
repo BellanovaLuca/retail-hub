@@ -40,6 +40,9 @@ insert into public.performance_goals (profile_id, period_id, pillar, slot, title
   ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-000000000901', 'achievement', 1, 'Obiettivo', true);
 insert into public.kpi_definitions (id, code, label) values
   ('00000000-0000-0000-0000-000000000801', 'TEST_KPI', 'Voce di prova');
+-- La voce di prova è nei fogli di entrambe le aree (i numeri si accettano solo sulle voci del foglio).
+insert into public.kpi_set_items (set_id, kpi_id, sort_order)
+select s.id, '00000000-0000-0000-0000-000000000801', 999 from public.kpi_sets s;
 insert into public.daily_entries (profile_id, date, kpi_id, value) values
   ('00000000-0000-0000-0000-0000000000e2', public.today_rome(), '00000000-0000-0000-0000-000000000801', 3);
 update public.store_settings set share_individual_monitoring = true;

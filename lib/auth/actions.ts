@@ -122,6 +122,8 @@ export async function changePin(input: z.infer<typeof changePinSchema>): Promise
     .from("profiles")
     .update({
       must_change_pin: false,
+      // Non è più un PIN provvisorio: nessuna scadenza.
+      pin_issued_at: null,
       privacy_accepted_at: profile.privacy_accepted_at ?? new Date().toISOString(),
     })
     .eq("id", profile.id);

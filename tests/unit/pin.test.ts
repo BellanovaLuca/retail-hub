@@ -5,6 +5,8 @@ import {
   isTrivialPin,
   nextEmployeeCode,
   normalizeEmployeeCode,
+  PROVISIONAL_PIN_DAYS,
+  provisionalPinExpired,
   syntheticEmail,
   validateNewPin,
 } from "@/lib/auth/pin";
@@ -90,5 +92,35 @@ describe("conferma dell'eliminazione con il nome", () => {
     expect(sameName("Fra  R.", "Fra R.")).toBe(true);
     expect(sameName("Robert", "Roberta")).toBe(false);
     expect(sameName("", "")).toBe(false);
+  });
+});
+
+describe("scadenza del PIN provvisorio", () => {
+  const now = new Date("2026-11-30T10:00:00Z");
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+
+  it("scade dopo i giorni di validità", () => {
+    expect(PROVISIONAL_PIN_DAYS).toBe(7);
+    expect(provisionalPinExpired({ must_change_pin: true, pin_issued_at: daysAgo(6) }, now)).toBe(
+      false,
+    );
+    expect(provisionalPinExpired({ must_change_pin: true, pin_issued_at: daysAgo(8) }, now)).toBe(
+      true,
+    );
+  });
+
+  it("non riguarda il PIN scelto dalla persona né quelli senza data", () => {
+    expect(provisionalPinExpired({ must_change_pin: false, pin_issued_at: daysAgo(90) }, now)).toBe(
+      false,
+    );
+    // Promozione ad admin: deve cambiare PIN, ma il suo non è provvisorio.
+    expect(provisionalPinExpired({ must_change_pin: true, pin_issued_at: null }, now)).toBe(false);
+    expect(provisionalPinExpired({ must_change_pin: true, pin_issued_at: "boh" }, now)).toBe(false);
+  });
+
+  it("il messaggio per il dipendente dice quanto vale", () => {
+    expect(
+      credentialsMessage({ appUrl: "https://x", displayName: "Anna", code: "CRD-001", pin: "1" }),
+    ).toContain("vale 7 giorni");
   });
 });

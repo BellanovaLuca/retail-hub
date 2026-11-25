@@ -31,7 +31,14 @@ describe("export ferie", () => {
 
   it("nel planning pubblico non compare il motivo", () => {
     const pub = { ...data, audience: "public" as const };
-    expect(namesByDate(pub).get("2026-08-10")).toEqual(["Marta (assente)", "Luca?"]);
+    // Il motivo (permesso) non si vede; le ore sì (scelta del 29/11/2026: «anche di poche ore»).
+    expect(namesByDate(pub).get("2026-08-10")).toEqual(["Marta (assente 4 h)", "Luca?"]);
+    expect(
+      exportCellCode(
+        { profileId: "a", date: "x", type: "assente", hours: 4.5, status: "tentative" },
+        "public",
+      ),
+    ).toBe("A4,5?");
     expect(
       exportCellCode(
         { profileId: "a", date: "x", type: "malattia", hours: null, status: "confirmed" },

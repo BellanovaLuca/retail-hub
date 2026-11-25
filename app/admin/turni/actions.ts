@@ -26,9 +26,11 @@ import type { Tables } from "@/lib/supabase/types";
 import {
   buildDayRows,
   planCopyRows,
+  restoredDayRows,
   type CopySource,
   type DayRow,
   type ExistingShift,
+  type RestoreRow,
 } from "./day-rows";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
@@ -91,15 +93,38 @@ async function replaceDays(
   if (error) throw new ActionError(dbErrorMessage(error, "Turno non salvato."));
 }
 
+/** Riga di una giornata com'era, mandata dal foglio con Annulla/Ripeti (vedi `restoredDayRows`). */
+const restoreRowSchema = z.object({
+  template_id: z.uuid().nullable(),
+  start_time: time.nullable(),
+  end_time: time.nullable(),
+  break_minutes: z.number().int().min(0).max(240),
+  working_as_department_id: z.uuid().nullable(),
+  zone: z.enum(["vista", "sole"]).nullable(),
+  is_back_office: z.boolean().nullable(),
+  note: z.string().max(200).nullable(),
+});
+
 const cellChangesSchema = z
-  .array(z.object({ profileId: z.uuid(), date: isoDate, value: z.string().max(60) }))
+  .array(
+    z.object({
+      profileId: z.uuid(),
+      date: isoDate,
+      value: z.string().max(60),
+      restore: z.array(restoreRowSchema).max(4).optional(),
+    }),
+  )
   .min(1)
   .max(2000);
 
-/** Salvataggio dal foglio (digitazione, incolla, riempimento): una chiamata per operazione. */
+/**
+ * Salvataggio dal foglio (digitazione, incolla, riempimento): una chiamata per operazione.
+ * Con Annulla/Ripeti ogni cella porta anche la giornata com'era (`restore`): se corrisponde al
+ * testo, torna identica — orari, pausa, nota, area, reparto, back office, turno rapido.
+ */
 export async function saveShiftCells(
   weekId: string,
-  changes: { profileId: string; date: string; value: string }[],
+  changes: { profileId: string; date: string; value: string; restore?: RestoreRow[] }[],
 ): Promise<ActionResult<{ errors: { profileId: string; date: string; message: string }[] }>> {
   return runAction(async () => {
     const { supabase } = await adminAction();
@@ -124,6 +149,9 @@ export async function saveShiftCells(
     }));
     const tplByCode = new Map(templates.map((t) => [t.code, t]));
     const zoneOf = new Map(people.map((p) => [p.id, p.homeZone]));
+    const departmentsOf = new Map(people.map((p) => [p.id, new Set(p.departmentIds)]));
+    const templateIds = new Set(templates.map((t) => t.id));
+    const noDepartments = new Set<string>();
     const existingByDay = new Map<string, ExistingShift[]>();
     for (const s of existingRows) {
       const k = dayKey(s.profile_id, s.date);
@@ -146,6 +174,14 @@ export async function saveShiftCells(
       }
       const existing = existingByDay.get(k) ?? [];
       const homeZone = zoneOf.get(change.profileId);
+      // Annulla/Ripeti: la giornata com'era, se dice la stessa cosa del testo della cella.
+      const restored = (expected: Parameters<typeof restoredDayRows>[2]) =>
+        change.restore
+          ? restoredDayRows(change.profileId, change.date, expected, change.restore, {
+              templateIds,
+              departmentIds: departmentsOf.get(change.profileId) ?? noDepartments,
+            })
+          : null;
       let rows: DayRow[];
       if (parsed.kind === "empty") {
         rows = [];
@@ -155,23 +191,27 @@ export async function saveShiftCells(
           tpl.isAbsence || !tpl.startTime || !tpl.endTime
             ? []
             : [{ start: tpl.startTime, end: tpl.endTime }];
-        rows = buildDayRows(
-          change.profileId,
-          change.date,
-          existing,
-          segments,
-          { templateId: tpl.id, breakMinutes: tpl.breakMinutes, keepDetailsIfSameTimes: true },
-          homeZone,
-        );
+        rows =
+          restored({ templateId: tpl.id, segments }) ??
+          buildDayRows(
+            change.profileId,
+            change.date,
+            existing,
+            segments,
+            { templateId: tpl.id, breakMinutes: tpl.breakMinutes, keepDetailsIfSameTimes: true },
+            homeZone,
+          );
       } else {
-        rows = buildDayRows(
-          change.profileId,
-          change.date,
-          existing,
-          parsed.segments,
-          { templateId: null, breakMinutes: 0, keepDetailsIfSameTimes: true },
-          homeZone,
-        );
+        rows =
+          restored({ templateId: null, segments: parsed.segments }) ??
+          buildDayRows(
+            change.profileId,
+            change.date,
+            existing,
+            parsed.segments,
+            { templateId: null, breakMinutes: 0, keepDetailsIfSameTimes: true },
+            homeZone,
+          );
       }
       writes.set(k, { profile_id: change.profileId, date: change.date, rows });
     }

@@ -1,7 +1,7 @@
 import "server-only";
 import { addDays, format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
-import { swapConflicts, type DayOccupation } from "@/lib/requests";
+import { shiftTimesText, swapConflicts, swapSignature, type DayOccupation } from "@/lib/requests";
 import { evaluateRules } from "@/lib/rules/registry";
 import type { Violation } from "@/lib/rules/types";
 import type { createClient } from "@/lib/supabase/server";
@@ -31,6 +31,8 @@ export async function swapContext(
     start_date: string;
     target_date: string | null;
     status?: string;
+    /** Firma degli orari salvata quando il collega ha accettato (null = nessuna). */
+    swap_signature?: string | null;
   },
   names: Map<string, string>,
 ): Promise<SwapContext | null> {
@@ -71,33 +73,46 @@ export async function swapContext(
   ];
   const name = (id: string) => names.get(id) ?? "—";
 
-  // Lo scambio è stato chiesto (e accettato dal collega) sui turni PUBBLICATI, ma l'approvazione
-  // sposta quelli del foglio di lavoro: se nel frattempo sono cambiati, l'admin deve saperlo.
+  // Avvisi sugli orari, finché lo scambio è aperto.
   const drift: string[] = [];
   if (!r.status || r.status === "pending" || r.status === "peer_accepted") {
+    const working = (shifts ?? []).map((x) => ({
+      profileId: x.profile_id,
+      date: x.date,
+      start: x.start_time,
+      end: x.end_time,
+    }));
+    // 1. Il collega ha accettato degli orari precisi (firma): se da allora un turno è cambiato
+    //    l'approvazione non passa e la richiesta torna in attesa del collega.
+    const current = swapSignature({
+      shifts: working,
+      requesterId: r.profile_id,
+      startDate: r.start_date,
+      targetId: r.target_profile_id,
+      targetDate: r.target_date,
+    });
+    if (r.status === "peer_accepted" && r.swap_signature && r.swap_signature !== current) {
+      drift.push(
+        `Attenzione: il turno dello scambio è cambiato dopo l'accettazione di ${name(r.target_profile_id)}. All'approvazione la richiesta tornerà in attesa del collega, che dovrà accettare di nuovo.`,
+      );
+    }
+    // 2. Lo scambio si chiede e si accetta guardando i turni PUBBLICATI, ma si scambiano quelli
+    //    del foglio di lavoro: se sono diversi, i due colleghi non vedono ciò che riceveranno.
     const published = await getPublishedDays(db, people, dates);
-    const times = (list: { start: string | null; end: string | null }[]) =>
-      list
-        .filter((x) => x.start && x.end)
-        .map((x) => `${x.start!.slice(0, 5)}–${x.end!.slice(0, 5)}`)
-        .sort()
-        .join(" · ");
     const check = (profileId: string, date: string | null) => {
       if (!date) return;
-      const working = times(
-        (shifts ?? [])
-          .filter((x) => x.profile_id === profileId && x.date === date)
-          .map((x) => ({ start: x.start_time, end: x.end_time })),
+      const inSheet = shiftTimesText(
+        working.filter((x) => x.profileId === profileId && x.date === date),
       );
-      const shown = times(
+      const shown = shiftTimesText(
         published
           .filter((x) => x.profile_id === profileId && x.date === date && !x.is_absence)
           .map((x) => ({ start: x.start_time, end: x.end_time })),
       );
-      if (working === shown) return;
+      if (inSheet === shown) return;
       const day = format(parseISO(date), "EEE d MMM", { locale: it });
       drift.push(
-        `Attenzione: il turno di ${name(profileId)} di ${day} nel foglio turni (${working || "nessun turno"}) è diverso da quello pubblicato (${shown || "nessun turno"}) su cui è stato chiesto lo scambio. Approvando si scambia quello del foglio turni.`,
+        `Attenzione: il turno di ${name(profileId)} di ${day} nel foglio turni (${inSheet || "nessun turno"}) è diverso da quello pubblicato (${shown || "nessun turno"}), che è quello che vedono i due colleghi. Si scambia quello del foglio turni: meglio ripubblicare la settimana prima di approvare.`,
       );
     };
     check(r.profile_id, r.start_date);

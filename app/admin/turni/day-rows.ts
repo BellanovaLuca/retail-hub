@@ -178,6 +178,76 @@ export function buildDayRows(
   }));
 }
 
+/* ------------------------------------------------------------ annulla / ripeti */
+
+/** Una riga di `shifts` com'era, senza persona e giorno: quello che Annulla deve riportare. */
+export type RestoreRow = Omit<DayRow, "profile_id" | "date">;
+
+/**
+ * Giornata ripristinata da Annulla/Ripeti nel foglio: il testo della cella non dice pausa, nota,
+ * area, reparto e back office, quindi il foglio manda insieme al testo le righe com'erano
+ * (`restore`). Valgono solo se dicono la stessa cosa del testo (`expected`: stesso turno rapido
+ * di assenza, oppure le stesse fasce): altrimenti null, e si procede dal solo testo. I
+ * riferimenti a turni rapidi o reparti che non esistono più vengono tolti.
+ */
+export function restoredDayRows(
+  profileId: string,
+  date: string,
+  expected: { templateId: string | null; segments: { start: string; end: string }[] },
+  restore: RestoreRow[],
+  known: { templateIds: ReadonlySet<string>; departmentIds: ReadonlySet<string> },
+): DayRow[] | null {
+  if (restore.length === 0) return null;
+  const rows = [...restore].sort(byStart);
+  const department = (id: string | null) => (id && known.departmentIds.has(id) ? id : null);
+
+  if (expected.segments.length === 0) {
+    // Turno rapido di assenza (R, F…): una sola riga, senza orario, con quel turno rapido.
+    const [row] = rows;
+    if (rows.length !== 1 || row.start_time || row.end_time) return null;
+    if (!expected.templateId || row.template_id !== expected.templateId) return null;
+    return [
+      {
+        profile_id: profileId,
+        date,
+        template_id: row.template_id,
+        start_time: null,
+        end_time: null,
+        break_minutes: 0,
+        working_as_department_id: department(row.working_as_department_id),
+        zone: row.zone,
+        is_back_office: row.is_back_office,
+        note: row.note,
+      },
+    ];
+  }
+
+  const segments = [...expected.segments].sort((a, b) => a.start.localeCompare(b.start));
+  if (rows.length !== segments.length) return null;
+  const same = rows.every(
+    (r, i) =>
+      r.start_time !== null &&
+      r.end_time !== null &&
+      hhmm(r.start_time) === hhmm(segments[i].start) &&
+      hhmm(r.end_time) === hhmm(segments[i].end),
+  );
+  if (!same) return null;
+  // Il codice di un turno rapido («MAN») vale solo se la riga era proprio quel turno rapido.
+  if (expected.templateId && rows[0].template_id !== expected.templateId) return null;
+  return rows.map((r) => ({
+    profile_id: profileId,
+    date,
+    template_id: r.template_id && known.templateIds.has(r.template_id) ? r.template_id : null,
+    start_time: hhmm(r.start_time!),
+    end_time: hhmm(r.end_time!),
+    break_minutes: Math.max(0, Math.round(r.break_minutes)),
+    working_as_department_id: department(r.working_as_department_id),
+    zone: r.zone,
+    is_back_office: r.is_back_office,
+    note: r.note,
+  }));
+}
+
 /* ------------------------------------------------------------ copia di settimane */
 
 /** Turno sorgente di una copia (settimana precedente o modello di settimana). */

@@ -18,6 +18,7 @@ import {
   SpreadsheetGrid,
   type CellChange,
   type CellState,
+  type ChangeMeta,
   type FooterRow,
   type GridColumn,
   type GridRow,
@@ -68,6 +69,7 @@ import {
 import { formatShiftCompact, parseShiftCell } from "@/lib/shifts/parse";
 import { cn } from "@/lib/utils";
 import { saveShiftCells, saveShiftDay } from "../actions";
+import { createCellMemory, snapshotOf } from "./cell-restore";
 import { createCellSaveQueue, type CellSaveHandlers } from "./cell-save-queue";
 import { DayDialog } from "./day-dialog";
 import { PublishDialog } from "./publish-dialog";
@@ -348,18 +350,40 @@ export function ShiftEditor(props: EditorProps) {
     [templates],
   );
 
+  // Annulla/Ripeti: la cella mostra solo gli orari, ma la giornata ha anche pausa, nota, area,
+  // reparto e back office. Prima che una cella cambi si ricorda com'era la giornata; quando
+  // Annulla riporta quel testo, le righe ricordate partono insieme e tornano identiche.
+  const [cellMemory] = useState(() => createCellMemory());
   const onChange = useCallback(
-    (changes: CellChange[]) => {
+    (changes: CellChange[], meta?: ChangeMeta) => {
+      for (const c of changes) {
+        const k = key(c.rowId, c.colId);
+        // Con un salvataggio in sospeso sulla cella i turni caricati non sono quelli a schermo.
+        if (pending.has(k)) continue;
+        const dayShifts = byDay.get(k) ?? [];
+        const person = peopleById.get(c.rowId);
+        cellMemory.remember(
+          k,
+          cellText(dayShifts, tplById, (s) => resolveBackOffice(s, person)),
+          snapshotOf(dayShifts),
+        );
+      }
+      const restoring = meta?.source === "undo" || meta?.source === "redo";
       setPending((prev) => {
         const next = new Map(prev);
         for (const c of changes) next.set(key(c.rowId, c.colId), c.value);
         return next;
       });
       saveQueue.enqueue(
-        changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
+        changes.map((c) => ({
+          profileId: c.rowId,
+          date: c.colId,
+          value: c.value,
+          restore: restoring ? cellMemory.recall(key(c.rowId, c.colId), c.value) : undefined,
+        })),
       );
     },
-    [saveQueue],
+    [saveQueue, cellMemory, pending, byDay, tplById, peopleById],
   );
 
   // Comando rapido: con una o più celle selezionate che hanno un'assenza compare «Togli

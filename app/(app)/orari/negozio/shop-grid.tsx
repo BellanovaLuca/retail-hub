@@ -13,6 +13,7 @@ import {
 } from "@/components/spreadsheet";
 import { Select } from "@/components/ui/form";
 import { toMinutes } from "@/lib/domain/time";
+import { leavePublicText } from "@/lib/leaves/parse";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift, SchedulePerson } from "@/lib/schedule/types";
 import { dayHeader, groupPeopleByDepartment, isWeekend, key } from "@/lib/schedule/view";
@@ -27,7 +28,31 @@ export type DaySummary = {
   copOtt: boolean;
 };
 
-type PublicLeave = { profileId: string; date: string; kind: "ferie" | "assente"; status: string };
+type PublicLeave = {
+  profileId: string;
+  date: string;
+  kind: "ferie" | "assente";
+  status: string;
+  /** Ore dell'assenza; null = giornata intera. */
+  hours: number | null;
+};
+
+/** Assenza a giornata intera: prevale sul turno rimasto nell'orario pubblicato. */
+const isFullDay = (leave: PublicLeave | undefined): boolean => leave !== undefined && !leave.hours;
+const isWork = (s: PublishedShift) => !s.is_absence && Boolean(s.start_time);
+
+/**
+ * Testo della casella persona × giorno: il turno, l'assenza, o tutti e due quando l'assenza è
+ * di poche ore («10–19 · Assente 2 h»: la persona è presente, ma non per tutto il turno).
+ */
+export function shopCellText(list: PublishedShift[], leave: PublicLeave | undefined): string {
+  if (leave && isFullDay(leave)) return leavePublicText(leave.kind, null);
+  const text = list.length ? publishedDayText(list) : "";
+  if (!leave) return text;
+  const away = leavePublicText(leave.kind, leave.hours);
+  // Un riposo o un'altra assenza scritta nel foglio non si somma all'assenza di poche ore.
+  return list.some(isWork) ? `${text} · ${away}` : away;
+}
 
 /** Griglia generale del negozio in sola lettura (§6.1), con vista per giorno su telefono. */
 export function ShopGrid({
@@ -111,7 +136,8 @@ export function ShopGrid({
           sublabel: holiday?.storeClosed ? `${h.sublabel} · chiuso` : h.sublabel,
           highlight: d === today,
           shaded: isWeekend(d) || Boolean(holiday),
-          width: 120,
+          // Un po' più larga: «10–19 · Assente 2 h» deve leggersi per intero.
+          width: 148,
         };
       }),
     [days, today, holidayByDate],
@@ -120,11 +146,7 @@ export function ShopGrid({
   const getValue = useCallback(
     (profileId: string, date: string) => {
       const k = key(profileId, date);
-      const list = byDay.get(k) ?? [];
-      const leave = leaveByDay.get(k);
-      if (list.length) return publishedDayText(list);
-      if (leave) return leave.kind === "ferie" ? "Ferie" : "Assente";
-      return "";
+      return shopCellText(byDay.get(k) ?? [], leaveByDay.get(k));
     },
     [byDay, leaveByDay],
   );
@@ -133,9 +155,21 @@ export function ShopGrid({
     (profileId: string, date: string): CellState | undefined => {
       const k = key(profileId, date);
       const leave = leaveByDay.get(k);
-      if (!byDay.get(k)?.length && leave)
-        return { tone: leave.status === "tentative" ? "dashed" : "hatched" };
-      if (byDay.get(k)?.some((s) => s.is_absence)) return { tone: "muted" };
+      const list = byDay.get(k) ?? [];
+      const work = list.filter(isWork);
+      // Assenza a giornata intera: tratteggio anche se il turno è ancora nell'orario pubblicato.
+      if (leave && (isFullDay(leave) || work.length === 0)) {
+        return {
+          tone: leave.status === "tentative" ? "dashed" : "hatched",
+          title:
+            isFullDay(leave) && work.length
+              ? `Assente per l'intera giornata (nell'orario pubblicato c'è ancora il turno ${publishedDayText(work)})`
+              : undefined,
+        };
+      }
+      if (leave)
+        return { title: `In turno, ${leavePublicText(leave.kind, leave.hours).toLowerCase()}` };
+      if (list.some((s) => s.is_absence)) return { tone: "muted" };
       return undefined;
     },
     [byDay, leaveByDay],
@@ -272,16 +306,25 @@ function DayView({
   byDay: Map<string, PublishedShift[]>;
   leaveByDay: Map<string, PublicLeave>;
 }) {
+  // In turno: chi ha un turno con orario e non è assente per l'intera giornata. Un'assenza di
+  // poche ore si mostra accanto all'orario.
   const working = people
     .map((p) => ({
       person: p,
-      list: (byDay.get(key(p.id, day)) ?? []).filter((s) => !s.is_absence && s.start_time),
+      leave: leaveByDay.get(key(p.id, day)),
+      list: (byDay.get(key(p.id, day)) ?? []).filter(isWork),
     }))
-    .filter((x) => x.list.length > 0)
+    .filter((x) => x.list.length > 0 && !isFullDay(x.leave))
     .sort((a, b) => (a.list[0].start_time ?? "").localeCompare(b.list[0].start_time ?? ""));
-  const away = people.filter(
-    (p) => leaveByDay.has(key(p.id, day)) && !byDay.get(key(p.id, day))?.length,
-  );
+  const inTurn = new Set(working.map((x) => x.person.id));
+  // Assenti: tutte le altre assenze, con le ore se sono di poche ore.
+  const away = people.flatMap((p) => {
+    const leave = leaveByDay.get(key(p.id, day));
+    if (!leave || inTurn.has(p.id)) return [];
+    return [
+      leave.hours ? `${p.displayName} (${String(leave.hours).replace(".", ",")} h)` : p.displayName,
+    ];
+  });
   const span = TIMELINE_TO - TIMELINE_FROM;
 
   return (
@@ -308,11 +351,11 @@ function DayView({
         <span>20:00</span>
       </div>
       <ul className="divide-y divide-line border-y border-line">
-        {working.map(({ person, list }) => (
+        {working.map(({ person, list, leave }) => (
           <li key={person.id} className={cn("py-3", person.id === me && "bg-surface")}>
             <div className="mb-1.5 flex items-center justify-between text-sm">
               <span className="font-medium">{person.displayName}</span>
-              <span className="text-muted nums">{publishedDayText(list)}</span>
+              <span className="text-muted nums">{shopCellText(list, leave)}</span>
             </div>
             <div className="relative h-2 bg-surface" aria-hidden>
               {list.map((s) => {
@@ -340,11 +383,7 @@ function DayView({
           <li className="py-6 text-sm text-muted">Nessuno in turno.</li>
         ) : null}
       </ul>
-      {away.length ? (
-        <p className="mt-4 text-sm text-muted">
-          Assenti: {away.map((p) => p.displayName).join(", ")}
-        </p>
-      ) : null}
+      {away.length ? <p className="mt-4 text-sm text-muted">Assenti: {away.join(", ")}</p> : null}
     </div>
   );
 }

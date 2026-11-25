@@ -143,6 +143,7 @@ export async function checkRequest(input: {
         .select("profile_id, date")
         .eq("kind", "ferie")
         .eq("status", "confirmed")
+        .is("hours", null)
         .gte("date", input.startDate)
         .lte("date", input.endDate),
       supabase.from("public_profiles").select("id, department_ids"),
@@ -450,7 +451,8 @@ export async function uploadRequestAttachment(
     if (today.length >= MAX_UPLOADS_PER_DAY) {
       return {
         ok: false,
-        message: "Hai caricato troppi allegati oggi: riprova domani o consegna il documento a mano.",
+        message:
+          "Hai caricato troppi allegati oggi: riprova domani o consegna il documento a mano.",
       };
     }
     // Upload con la service role nella cartella dell'utente: lo Storage resta privato.

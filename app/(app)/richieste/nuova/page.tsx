@@ -28,7 +28,7 @@ export default async function NuovaRichiestaPage({
     getPublicPeople(supabase),
     supabase
       .from("leaves_public")
-      .select("profile_id, date, kind, status")
+      .select("profile_id, date, kind, status, hours")
       .gte("date", today)
       .lte("date", horizon),
   ]);
@@ -46,7 +46,7 @@ export default async function NuovaRichiestaPage({
       profileId: l.profile_id!,
       date: l.date!,
       kind: "assenza" as const,
-      text: `${l.kind === "ferie" ? "in ferie" : "assente"}${l.status === "tentative" ? " (da confermare)" : ""}`,
+      text: `${l.kind === "ferie" ? "in ferie" : "assente"}${l.hours ? ` per ${String(l.hours).replace(".", ",")} h` : ""}${l.status === "tentative" ? " (da confermare)" : ""}`,
     })),
   ];
 

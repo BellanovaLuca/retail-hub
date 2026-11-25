@@ -1053,6 +1053,7 @@ export type Database = {
           updated_at: string;
           ical_token: string;
           notification_prefs: Json;
+          pin_issued_at: string | null;
         };
         Insert: {
           id: string;
@@ -1077,6 +1078,7 @@ export type Database = {
           updated_at?: string;
           ical_token?: string;
           notification_prefs?: Json;
+          pin_issued_at?: string | null;
         };
         Update: {
           id?: string;
@@ -1101,6 +1103,7 @@ export type Database = {
           updated_at?: string;
           ical_token?: string;
           notification_prefs?: Json;
+          pin_issued_at?: string | null;
         };
         Relationships: [];
       };
@@ -1207,6 +1210,7 @@ export type Database = {
           decision_note: string | null;
           created_at: string;
           updated_at: string;
+          swap_signature: string | null;
         };
         Insert: {
           id?: string;
@@ -1230,6 +1234,7 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
+          swap_signature?: string | null;
         };
         Update: {
           id?: string;
@@ -1253,6 +1258,7 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
+          swap_signature?: string | null;
         };
         Relationships: [
           {
@@ -2017,6 +2023,7 @@ export type Database = {
           status: string | null;
           source: string | null;
           kind: string | null;
+          hours: number | null;
         };
         Relationships: [];
       };
@@ -2123,6 +2130,7 @@ export type Database = {
       set_extra_task_done: { Args: { p_task_id: string; p_done: boolean }; Returns: undefined };
       set_performance_note: { Args: { p_goal_id: string; p_note: string }; Returns: undefined };
       store_weekly_assigned: { Args: { p_week: string }; Returns: Json };
+      swap_signature: { Args: { p_profile_id: string; p_date: string; p_target_profile_id: string; p_target_date: string }; Returns: string };
       today_rome: { Args: Record<PropertyKey, never>; Returns: string };
     };
     Enums: Record<string, never>;

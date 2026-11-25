@@ -162,7 +162,14 @@ export async function createEmployee(
     const { count } = await supabase.from("profiles").select("id", { count: "exact", head: true });
     const { error } = await supabase
       .from("profiles")
-      .insert({ id, ...profileRow(v), must_change_pin: true, sort_order: (count ?? 0) + 1 });
+      .insert({
+        id,
+        ...profileRow(v),
+        must_change_pin: true,
+        // Da qui partono i giorni di validità del PIN provvisorio.
+        pin_issued_at: new Date().toISOString(),
+        sort_order: (count ?? 0) + 1,
+      });
     if (error) {
       await admin.auth.admin.deleteUser(id);
       return { ok: false, message: dbErrorMessage(error, "Dipendente non creato.") };
@@ -288,7 +295,7 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
     }
     const { data: person } = await supabase
       .from("profiles")
-      .select("display_name, employee_code, role, must_change_pin")
+      .select("display_name, employee_code, role, must_change_pin, pin_issued_at")
       .eq("id", id)
       .single();
     if (!person) return { ok: false, message: "Dipendente non trovato." };
@@ -297,7 +304,7 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
     // il PIN: così non esiste mai un PIN provvisorio senza obbligo di cambiarlo.
     const { error: flagError } = await supabase
       .from("profiles")
-      .update({ must_change_pin: true })
+      .update({ must_change_pin: true, pin_issued_at: new Date().toISOString() })
       .eq("id", id);
     if (flagError) return { ok: false, message: dbErrorMessage(flagError, "PIN non aggiornato.") };
 
@@ -306,13 +313,12 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
       password: authPassword(id, pin),
     });
     if (error) {
-      if (!person.must_change_pin) {
-        const { error: undoError } = await supabase
-          .from("profiles")
-          .update({ must_change_pin: false })
-          .eq("id", id);
-        if (undoError) console.error("reset PIN: ripristino non riuscito", undoError);
-      }
+      // Il PIN è rimasto quello di prima: tornano com'erano anche obbligo di cambio e scadenza.
+      const { error: undoError } = await supabase
+        .from("profiles")
+        .update({ must_change_pin: person.must_change_pin, pin_issued_at: person.pin_issued_at })
+        .eq("id", id);
+      if (undoError) console.error("reset PIN: ripristino non riuscito", undoError);
       return { ok: false, message: "PIN non aggiornato. Riprova." };
     }
 

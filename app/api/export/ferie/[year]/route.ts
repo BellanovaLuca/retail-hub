@@ -44,7 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         profileId: l.profileId,
         date: l.date,
         type: l.kind === "ferie" ? "ferie" : "assente",
-        hours: null,
+        hours: l.hours,
         status: l.status,
       }));
 

@@ -16,15 +16,19 @@ import { publishSnapshot } from "@/lib/schedule/publish";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
 import { ownAttachmentPaths } from "./attachments";
 import { chunk, fetchAllRows } from "@/lib/data/paginate";
+import { namesById } from "@/lib/data/requests";
 import {
   awaitsAdmin,
   DELETABLE_STATUSES,
   deleteGroupStatuses,
   formatRange,
+  isSwapChangedError,
   REQUEST_TYPES,
   RESET_CONFIRM_WORD,
   requestTypeLabel,
+  SWAP_REOPENED_MESSAGE,
   swapErrorMessage,
+  swapShiftLines,
   type RequestStatus,
 } from "@/lib/requests";
 
@@ -60,6 +64,83 @@ async function publishSwap(
       if (!res.ok) throw new Error(res.message);
     }
   }
+}
+
+/**
+ * Il turno di uno scambio è cambiato dopo l'accettazione del collega (lo dice il database, che
+ * rifiuta l'approvazione): la richiesta torna «in attesa» senza firma e il collega deve accettare
+ * di nuovo. I due colleghi vengono avvisati con gli orari di adesso, e nei commenti della
+ * richiesta resta scritto cos'è successo. false = nel frattempo la richiesta è cambiata.
+ */
+async function reopenSwap(
+  db: Awaited<ReturnType<typeof adminAction>>["supabase"],
+  actorId: string,
+  r: {
+    id: string;
+    profile_id: string;
+    target_profile_id: string | null;
+    start_date: string;
+    target_date: string | null;
+  },
+): Promise<boolean> {
+  if (!r.target_profile_id) return false;
+  const { data: back, error } = await db
+    .from("requests")
+    .update({ status: "pending", swap_signature: null })
+    .eq("id", r.id)
+    .eq("status", "peer_accepted")
+    .select("id");
+  if (error || !back?.length) return false;
+
+  // Da qui in poi nulla deve far fallire l'operazione: la richiesta è già tornata in attesa.
+  try {
+    const dates = [r.start_date, r.target_date].filter((d): d is string => Boolean(d));
+    const [names, { data: rows }] = await Promise.all([
+      namesById(db),
+      db
+        .from("shifts")
+        .select("profile_id, date, start_time, end_time")
+        .in("profile_id", [r.profile_id, r.target_profile_id])
+        .in("date", dates),
+    ]);
+    const requester = { id: r.profile_id, name: names.get(r.profile_id) ?? "chi chiede" };
+    const target = {
+      id: r.target_profile_id,
+      name: names.get(r.target_profile_id) ?? "il collega",
+    };
+    const lines = swapShiftLines({
+      shifts: (rows ?? []).map((s) => ({
+        profileId: s.profile_id,
+        date: s.date,
+        start: s.start_time,
+        end: s.end_time,
+      })),
+      requester,
+      target,
+      startDate: r.start_date,
+      targetDate: r.target_date,
+    }).join("\n");
+    await db.from("request_comments").insert({
+      request_id: r.id,
+      author_id: actorId,
+      body: `Il turno dello scambio è cambiato dopo l'accettazione di ${target.name}: la richiesta è tornata in attesa della sua conferma.\n${lines}`,
+    });
+    await notify([target.id], {
+      kind: "swap_proposed",
+      title: "Scambio da confermare di nuovo",
+      body: `Il turno dello scambio con ${requester.name} è cambiato dopo la tua accettazione.\n${lines}\nSe ti va ancora bene, accetta di nuovo.`,
+      link: `/richieste/${r.id}`,
+    });
+    await notify([requester.id], {
+      kind: "request_decided",
+      title: "Scambio di nuovo in attesa del collega",
+      body: `Il turno dello scambio è cambiato dopo l'accettazione di ${target.name}: deve accettare di nuovo.\n${lines}`,
+      link: `/richieste/${r.id}`,
+    });
+  } catch (notifyError) {
+    console.error(notifyError);
+  }
+  return true;
 }
 
 /** Approva o rifiuta una o più richieste (§6.2). Gli effetti su ferie e turni li applica il DB. */
@@ -100,6 +181,17 @@ export async function decideRequests(
         .select("id");
       if (error) {
         failed++;
+        // Turno cambiato dopo l'accettazione del collega: lo scambio non si approva, la
+        // richiesta torna in attesa e il collega deve accettare di nuovo.
+        if (
+          decision === "approved" &&
+          r.type === "scambio_turno" &&
+          isSwapChangedError(error) &&
+          (await reopenSwap(supabase, profile.id, r))
+        ) {
+          lastError = SWAP_REOPENED_MESSAGE;
+          continue;
+        }
         lastError = swapErrorMessage(error) ?? dbErrorMessage(error, "Decisione non salvata.");
         continue;
       }

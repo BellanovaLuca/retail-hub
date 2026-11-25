@@ -3,6 +3,7 @@ export type {
   CellChange,
   CellState,
   CellTone,
+  ChangeMeta,
   Density,
   FooterRow,
   GridColumn,

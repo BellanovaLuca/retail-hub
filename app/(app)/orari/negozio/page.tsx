@@ -50,7 +50,12 @@ export default async function NegozioPage({
   ]);
 
   const deps = departments.map((d) => ({ id: d.id, name: d.name }));
-  const inputs = publishedToInputs(shifts);
+  // Chi è assente per l'intera giornata non conta tra i presenti né nella copertura, anche se il
+  // suo turno è ancora nell'orario pubblicato. Un'assenza di poche ore non toglie la presenza.
+  const awayAllDay = new Set(leaves.filter((l) => !l.hours).map((l) => `${l.profileId}|${l.date}`));
+  const inputs = publishedToInputs(shifts).filter(
+    (s) => !awayAllDay.has(`${s.profileId}|${s.date}`),
+  );
   const personInputs = peopleToInputs(people);
 
   // Riepilogo per giorno, solo nell'orario di apertura (§7.2).

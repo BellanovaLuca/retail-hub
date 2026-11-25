@@ -19,6 +19,8 @@ export type StaffRow = {
   weeklyHours: number | null;
   active: boolean;
   mustChangePin: boolean;
+  /** PIN provvisorio più vecchio dei giorni di validità. */
+  pinExpired: boolean;
   primaryDepartment: string;
   otherDepartments: string[];
 };
@@ -140,7 +142,11 @@ export function StaffList({
                 <Badge tone={zoneTone[row.zone]}>{zoneLabel[row.zone]}</Badge>
                 {row.role === "admin" ? <Badge tone="solid">Admin</Badge> : null}
                 {row.mustChangePin && row.active ? (
-                  <Badge tone="warning">PIN provvisorio</Badge>
+                  row.pinExpired ? (
+                    <Badge tone="danger">PIN scaduto</Badge>
+                  ) : (
+                    <Badge tone="warning">PIN provvisorio</Badge>
+                  )
                 ) : null}
               </span>
               <span className="text-sm nums sm:text-right">

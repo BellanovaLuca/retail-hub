@@ -24,6 +24,8 @@ export type PublicPlanLeave = {
   date: string;
   kind: "ferie" | "assente";
   status: LeaveStatus;
+  /** Ore dell'assenza; null = giornata intera. */
+  hours: number | null;
 };
 
 const yearBounds = (year: number) => ({ from: `${year}-01-01`, to: `${year}-12-31` });
@@ -70,7 +72,7 @@ export async function getYearPublicLeaves(db: Db, year: number): Promise<PublicP
   for (let page = 0; ; page++) {
     const { data, error } = await db
       .from("leaves_public")
-      .select("profile_id, date, kind, status")
+      .select("profile_id, date, kind, status, hours")
       .gte("date", from)
       .lte("date", to)
       .order("date")
@@ -83,6 +85,7 @@ export async function getYearPublicLeaves(db: Db, year: number): Promise<PublicP
         date: l.date!,
         kind: l.kind === "ferie" ? "ferie" : "assente",
         status: l.status === "tentative" ? "tentative" : "confirmed",
+        hours: l.hours ?? null,
       });
     }
     if (!data || data.length < PAGE) break;
