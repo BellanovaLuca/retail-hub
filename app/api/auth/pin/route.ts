@@ -5,7 +5,7 @@ import { z } from "zod";
 import { beginLoginAttempt, clientIp, markAttemptSucceeded } from "@/lib/auth/attempts";
 import { lockoutMessage } from "@/lib/auth/lockout";
 import { registerLoginSession } from "@/lib/auth/login-sessions";
-import { normalizeEmployeeCode, syntheticEmail } from "@/lib/auth/pin";
+import { normalizeEmployeeCode, provisionalPinExpired, syntheticEmail } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
 import { adminIds, notify } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
 
   const { data: profile } = await admin
     .from("profiles")
-    .select("active, must_change_pin, privacy_accepted_at")
+    .select("active, must_change_pin, privacy_accepted_at, pin_issued_at")
     .eq("id", data.user.id)
     .maybeSingle();
 
@@ -113,6 +113,18 @@ export async function POST(request: NextRequest) {
     await supabase.auth.signOut({ scope: "local" });
     return NextResponse.json(
       { error: "Questo account è disattivato. Rivolgiti a un responsabile." },
+      { status: 403 },
+    );
+  }
+
+  // PIN provvisorio scaduto: lo si dice solo a chi lo ha digitato giusto.
+  if (provisionalPinExpired(profile)) {
+    await supabase.auth.signOut({ scope: "local" });
+    return NextResponse.json(
+      {
+        error:
+          "Il PIN provvisorio è scaduto. Chiedi a un responsabile di generarne uno nuovo.",
+      },
       { status: 403 },
     );
   }

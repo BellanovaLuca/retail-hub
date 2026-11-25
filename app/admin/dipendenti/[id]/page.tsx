@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/feedback";
+import { provisionalPinExpired } from "@/lib/auth/pin";
 import { requireAdmin } from "@/lib/auth/session";
 import { getDepartments, primaryDepartmentId } from "@/lib/data/people";
 import { createClient } from "@/lib/supabase/server";
@@ -47,7 +48,11 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
           <span className="flex flex-wrap gap-2">
             {!person.active ? <Badge tone="danger">Disattivato</Badge> : null}
             {person.must_change_pin && person.active ? (
-              <Badge tone="warning">PIN provvisorio da cambiare</Badge>
+              provisionalPinExpired(person) ? (
+                <Badge tone="danger">PIN provvisorio scaduto: generane uno nuovo</Badge>
+              ) : (
+                <Badge tone="warning">PIN provvisorio da cambiare</Badge>
+              )
             ) : null}
             {person.role === "admin" ? <Badge tone="solid">Amministratore</Badge> : null}
           </span>

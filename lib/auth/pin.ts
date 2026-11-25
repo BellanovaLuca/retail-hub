@@ -94,6 +94,23 @@ export function generatePin(role: Role): string {
   }
 }
 
+/** Giorni di validità del PIN provvisorio: oltre, un admin deve generarne uno nuovo. */
+export const PROVISIONAL_PIN_DAYS = 7;
+
+/**
+ * Il PIN provvisorio è scaduto? `issuedAt` = quando è stato generato (`profiles.pin_issued_at`);
+ * null = nessuna scadenza (PIN scelto dalla persona, o generato prima che esistesse la scadenza).
+ */
+export function provisionalPinExpired(
+  profile: { must_change_pin: boolean; pin_issued_at: string | null },
+  now: Date = new Date(),
+): boolean {
+  if (!profile.must_change_pin || !profile.pin_issued_at) return false;
+  const issued = Date.parse(profile.pin_issued_at);
+  if (Number.isNaN(issued)) return false;
+  return now.getTime() - issued > PROVISIONAL_PIN_DAYS * 86_400_000;
+}
+
 /** Testo da mandare al dipendente con il link al sito, il codice e il PIN provvisorio. */
 export function credentialsMessage(opts: {
   appUrl: string;
@@ -107,5 +124,6 @@ export function credentialsMessage(opts: {
     `Codice: ${opts.code}`,
     `PIN provvisorio: ${opts.pin}`,
     `Al primo accesso ti verrà chiesto di scegliere un PIN personale.`,
+    `Il PIN provvisorio vale ${PROVISIONAL_PIN_DAYS} giorni.`,
   ].join("\n");
 }

@@ -59,6 +59,9 @@ insert into public.responsibility_assignees (responsibility_id, profile_id, role
 
 insert into public.kpi_definitions (id, code, label) values
   ('00000000-0000-0000-0000-000000000801', 'TEST_KPI', 'Voce di prova');
+-- La voce di prova è nei fogli di entrambe le aree (i numeri si accettano solo sulle voci del foglio).
+insert into public.kpi_set_items (set_id, kpi_id, sort_order)
+select s.id, '00000000-0000-0000-0000-000000000801', 999 from public.kpi_sets s;
 
 -- ---- service role (cron e server): le viste pubbliche rispondono senza auth.uid() ----
 set local role service_role;

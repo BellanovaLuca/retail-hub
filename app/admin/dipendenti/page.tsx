@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/feedback";
+import { provisionalPinExpired } from "@/lib/auth/pin";
 import { requireAdmin } from "@/lib/auth/session";
 import { getDepartments, getStaff, primaryDepartmentId } from "@/lib/data/people";
 import { createClient } from "@/lib/supabase/server";
@@ -37,6 +38,7 @@ export default async function DipendentiPage({
       weeklyHours: p.weekly_hours,
       active: p.active,
       mustChangePin: p.must_change_pin,
+      pinExpired: provisionalPinExpired(p),
       primaryDepartment: primary ? (deptName.get(primary) ?? "") : "",
       otherDepartments: p.memberships
         .filter((m) => m.departmentId !== primary)
