@@ -1,7 +1,7 @@
 "use client";
 
 import { formatInRome } from "@/lib/dates";
-import { Check, X } from "lucide-react";
+import { Check, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -11,6 +11,7 @@ import { FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { RequestStatus } from "@/lib/requests";
 import { decideRequests } from "./actions";
+import { DeleteRequestDialog, type DeletableRequest } from "./delete-request-dialog";
 
 export type AdminRequestRow = {
   id: string;
@@ -27,6 +28,8 @@ export type AdminRequestRow = {
   message: string | null;
   createdAt: string;
   decidable: boolean;
+  /** Già decisa (approvata, rifiutata, annullata): si può eliminare dall'elenco. */
+  deletable?: boolean;
 };
 
 export function RequestsTable({
@@ -41,6 +44,7 @@ export function RequestsTable({
   const [note, setNote] = useState("");
   const [result, setResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  const [toDelete, setToDelete] = useState<DeletableRequest | null>(null);
   const decidable = rows.filter((r) => r.decidable);
 
   function decide(ids: string[], decision: "approved" | "rejected") {
@@ -57,7 +61,13 @@ export function RequestsTable({
   }
 
   if (rows.length === 0) {
-    return <p className="py-16 font-display text-2xl font-light text-subtle">Nessuna richiesta.</p>;
+    return (
+      <div>
+        {/* Resta visibile l'esito dell'ultima eliminazione anche quando l'elenco si svuota. */}
+        <FormMessage result={result} />
+        <p className="py-16 font-display text-2xl font-light text-subtle">Nessuna richiesta.</p>
+      </div>
+    );
   }
 
   return (
@@ -177,11 +187,42 @@ export function RequestsTable({
                     </Button>
                   </span>
                 ) : null}
+                {r.deletable ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted hover:text-danger"
+                    aria-label={`Elimina la richiesta di ${r.person}`}
+                    title="Elimina la richiesta"
+                    disabled={pending}
+                    onClick={() =>
+                      setToDelete({
+                        id: r.id,
+                        person: r.person,
+                        title: s.title,
+                        detail: s.detail,
+                        type: r.type,
+                        status: r.status,
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                ) : null}
               </span>
             </li>
           );
         })}
       </ul>
+      <DeleteRequestDialog
+        request={toDelete}
+        onClose={() => setToDelete(null)}
+        onDeleted={(message) => {
+          setToDelete(null);
+          setResult({ ok: true, message });
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

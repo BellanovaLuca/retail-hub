@@ -1,6 +1,7 @@
 import { addDays, format, parseISO } from "date-fns";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { requestSummary } from "@/components/requests/request-parts";
 import { requireAdmin } from "@/lib/auth/session";
 import { getDepartments } from "@/lib/data/people";
 import {
@@ -14,6 +15,8 @@ import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { computeCoverage } from "@/lib/coverage";
 import { evaluateWeek } from "@/lib/data/rules";
+import { createsLeaves } from "@/lib/requests";
+import type { LeaveRequestInfo } from "@/lib/schedule/leave-cells";
 import { openingFor } from "@/lib/schedule/opening";
 import { EditorWithRules, type DayCoverage } from "./editor-with-rules";
 
@@ -73,6 +76,34 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
   );
   const { data: ruleRows } = await supabase.from("planning_rules").select("id, name");
 
+  // Richieste approvate da cui nascono le assenze della settimana: il dettaglio della giornata
+  // dice da quale richiesta viene l'assenza e permette di toglierla tutta.
+  const leaveRequestIds = [
+    ...new Set(data.leaves.flatMap((l) => (l.requestId ? [l.requestId] : []))),
+  ];
+  const { data: leaveRequestRows } = leaveRequestIds.length
+    ? await supabase
+        .from("requests")
+        .select(
+          "id, type, status, start_date, end_date, start_time, end_time, hours, recurring_weekdays",
+        )
+        .in("id", leaveRequestIds)
+    : { data: [] };
+  const leaveRequests: Record<string, LeaveRequestInfo> = Object.fromEntries(
+    (leaveRequestRows ?? []).map((r) => {
+      const s = requestSummary(r);
+      return [
+        r.id,
+        {
+          id: r.id,
+          title: s.title,
+          detail: s.detail,
+          revocable: r.status === "approved" && createsLeaves(r.type),
+        },
+      ];
+    }),
+  );
+
   // Copertura minima per giorno nell'orario di apertura (riga "Copertura" in fondo al foglio).
   const coverage: DayCoverage = {};
   for (const date of data.days) {
@@ -110,6 +141,7 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
       today={toISODate(nowInRome())}
       shifts={data.shifts}
       leaves={data.leaves}
+      leaveRequests={leaveRequests}
       people={people}
       templates={templates}
       departments={departments.map((d) => ({ id: d.id, name: d.name }))}

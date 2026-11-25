@@ -1,43 +1,38 @@
 "use client";
 
-import { formatInRome } from "@/lib/dates";
-import { Calculator, Copy, Plus, Send } from "lucide-react";
+import { Calculator, Copy, Eraser, Plus, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import {
-  SpreadsheetGrid,
-  type CellChange,
-  type CellState,
-  type FooterRow,
-  type GridColumn,
-  type GridGroup,
-  type GridRow,
-} from "@/components/spreadsheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { FormMessage, Textarea } from "@/components/ui/form";
+import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { Checkbox, FormMessage, Textarea } from "@/components/ui/form";
 import { Input, Label } from "@/components/ui/input";
+import { formatInRome } from "@/lib/dates";
 import {
-  buildAssignmentPreview,
-  cellKey,
-  formatAmount,
-  formatEurPerHour,
-  overridesFromSaved,
-  parseAmount,
-} from "@/lib/kpi/assignment";
+  AREA_LABEL,
+  areaColumns,
+  areaOf,
+  fillProposals,
+  type Area,
+  type AreaSet,
+} from "@/lib/kpi/area-tables";
+import { cellKey, formatAmount, formatEurPerHour, parseAmount } from "@/lib/kpi/assignment";
 import { formatCount, parseCount } from "@/lib/kpi/sheet";
 import {
-  assignmentKpisFor,
-  extraKpisFromSaved,
-  isCalculationOn,
-  withExtraKpis,
-} from "@/lib/kpi/simple-assignment";
-import type { DefaultTargetRule, StoreWeeklyTargets, TargetZone } from "@/lib/targets";
+  PRODUCTIVITY_TARGET,
+  productivityLevel,
+  totalProductivity,
+  totalRevenue,
+  type DefaultTargetRule,
+  type StoreWeeklyTargets,
+  type TargetZone,
+} from "@/lib/targets";
 import { cn } from "@/lib/utils";
-import { confirmAssignment, getPreviousAssignment, quickAddKpi } from "../actions";
+import { confirmAssignment, getPreviousAssignment, quickAddKpi, removeGroupItem } from "../actions";
+import { TargetsTable, type TargetsColumn, type TargetsRow } from "./targets-table";
 
 type Person = {
   profileId: string;
@@ -46,30 +41,34 @@ type Person = {
   zone: TargetZone;
   plannedHours: number;
   hasShifts: boolean;
-  kpis: { kpiId: string; code: string; label: string }[];
 };
 
 type Kpi = { kpiId: string; code: string; label: string; defaultTargetRule: DefaultTargetRule };
 
-type StoreField = keyof StoreWeeklyTargets;
+type StoreField = keyof Required<StoreWeeklyTargets>;
+type FieldGroup = "ore" | "vista" | "sole" | "lac" | "altro";
 
-const FIELDS: {
-  key: StoreField;
-  label: string;
-  suffix?: string;
-  group: "vista" | "sole" | "ore";
-}[] = [
-  { key: "totalHours", label: "Ore totali", suffix: "h", group: "ore" },
-  { key: "vistaValueEur", label: "Generato vista", suffix: "€", group: "vista" },
-  { key: "vistaAvgPrice", label: "PM vista", suffix: "€", group: "vista" },
-  { key: "vistaWo", label: "WO", group: "vista" },
-  { key: "solePieces", label: "Pezzi sole", group: "sole" },
-  { key: "soleValueEur", label: "Valore sole", suffix: "€", group: "sole" },
-  { key: "soleAvgPrice", label: "PM sole", suffix: "€", group: "sole" },
+const FIELDS: { key: StoreField; label: string; suffix?: string; group: FieldGroup }[] = [
+  { key: "totalHours", label: "Ore lavorate", suffix: "h", group: "ore" },
+  { key: "vistaValueEur", label: "Fatturato", suffix: "€", group: "vista" },
+  { key: "vistaAvgPrice", label: "Prezzo medio", suffix: "€", group: "vista" },
+  { key: "vistaWo", label: "Numero WO", group: "vista" },
+  { key: "soleValueEur", label: "Fatturato", suffix: "€", group: "sole" },
+  { key: "soleAvgPrice", label: "Prezzo medio", suffix: "€", group: "sole" },
+  { key: "solePieces", label: "Numero pezzi", group: "sole" },
+  { key: "lacValueEur", label: "Fatturato", suffix: "€", group: "lac" },
+  { key: "lacAvgPrice", label: "Prezzo medio", suffix: "€", group: "lac" },
+  { key: "lacPieces", label: "Numero", group: "lac" },
+  { key: "otherValueEur", label: "Fatturato", suffix: "€", group: "altro" },
 ];
-
-const HOURS = "__ore";
-const COMMENT = "__commento";
+const GROUP_TITLE: Record<FieldGroup, string> = {
+  ore: "Ore",
+  vista: "Vista",
+  sole: "Sole",
+  lac: "Lenti a contatto",
+  altro: "Mondo altro",
+};
+const AREAS: Area[] = ["vista", "sole"];
 
 export function AssignmentEditor(props: {
   weekStart: string;
@@ -78,27 +77,34 @@ export function AssignmentEditor(props: {
   scheduleStatus: "draft" | "published" | null;
   store: (StoreWeeklyTargets & { confirmedAt: string | null }) | null;
   people: Person[];
+  /** Voci attive. */
   kpis: Kpi[];
-  savedTargets: { profileId: string; kpiId: string; target: number; overridden: boolean }[];
+  /** Gruppi di voci «Vista» e «Sole»: le colonne di ciascuna tabella. */
+  sets: AreaSet[];
+  savedTargets: { profileId: string; kpiId: string; target: number }[];
   /** Commento generale della settimana per persona (lo vede in cima alla pagina Obiettivi). */
   comments: { profileId: string; body: string; published: boolean }[];
-  /** Persone senza ore in vendita (e senza obiettivi salvati): nessuna proposta automatica. */
-  withoutHours: string[];
 }) {
-  const { weekStart, kpis } = props;
+  const { weekStart, kpis, sets, people } = props;
   const router = useRouter();
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null);
   const [pending, startTransition] = React.useTransition();
   const [dirty, setDirty] = React.useState(false);
 
-  const initialStore: StoreWeeklyTargets = props.store ?? {
-    totalHours: props.plannedTotal,
-    vistaValueEur: 0,
-    vistaAvgPrice: 0,
-    vistaWo: 0,
-    solePieces: 0,
-    soleValueEur: 0,
-    soleAvgPrice: 0,
+  /* ------------------------------------------------- numeri del negozio */
+
+  const initialStore: Required<StoreWeeklyTargets> = {
+    totalHours: props.store?.totalHours ?? props.plannedTotal,
+    vistaValueEur: props.store?.vistaValueEur ?? 0,
+    vistaAvgPrice: props.store?.vistaAvgPrice ?? 0,
+    vistaWo: props.store?.vistaWo ?? 0,
+    solePieces: props.store?.solePieces ?? 0,
+    soleValueEur: props.store?.soleValueEur ?? 0,
+    soleAvgPrice: props.store?.soleAvgPrice ?? 0,
+    lacAvgPrice: props.store?.lacAvgPrice ?? 0,
+    lacPieces: props.store?.lacPieces ?? 0,
+    lacValueEur: props.store?.lacValueEur ?? 0,
+    otherValueEur: props.store?.otherValueEur ?? 0,
   };
   const [text, setText] = React.useState<Record<StoreField, string>>(
     () =>
@@ -115,20 +121,20 @@ export function AssignmentEditor(props: {
     [text],
   );
   const invalid = FIELDS.filter((f) => parseAmount(text[f.key]) === null).map((f) => f.key);
+  const [calcInitiallyOpen] = React.useState(() => totalRevenue(initialStore) > 0);
+  const productivity = totalProductivity(store);
+  const level = productivityLevel(productivity);
+  const perHour = (value: number) => (store.totalHours > 0 ? value / store.totalHours : 0);
 
-  // Calcolo dalla produttività oraria: solo se sono stati inseriti i valori del negozio.
-  // Altrimenti gli obiettivi si scrivono a mano (restano le regole fisse e le "% di …").
-  const calcOn = isCalculationOn(store);
-  const [calcInitiallyOpen] = React.useState(() => isCalculationOn(initialStore));
-  const calcKpis = React.useMemo(() => assignmentKpisFor(kpis, calcOn), [kpis, calcOn]);
+  /* ------------------------------------------------- obiettivi (solo valori scritti) */
 
-  // Voci scritte fuori dal foglio della persona: alla conferma si aggiungono al suo foglio.
-  const [extra, setExtra] = React.useState<Record<string, string[]>>(() =>
-    extraKpisFromSaved(props.people, props.savedTargets),
-  );
-  const people = React.useMemo(
-    () => withExtraKpis(props.people, extra, kpis),
-    [props.people, extra, kpis],
+  const activeKpiIds = React.useMemo(() => new Set(kpis.map((k) => k.kpiId)), [kpis]);
+  const [values, setValues] = React.useState<Record<string, number>>(() =>
+    Object.fromEntries(
+      props.savedTargets
+        .filter((t) => people.some((p) => p.profileId === t.profileId))
+        .map((t) => [cellKey(t.profileId, t.kpiId), t.target]),
+    ),
   );
 
   const initialComments = React.useMemo(
@@ -137,62 +143,60 @@ export function AssignmentEditor(props: {
   );
   const [comments, setComments] = React.useState<Record<string, string>>(initialComments);
   const [editingComment, setEditingComment] = React.useState<string | null>(null);
-  const [newKpi, setNewKpi] = React.useState("");
-  const onAddKpi = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newKpi.trim()) return;
-    startTransition(async () => {
-      const res = await quickAddKpi(newKpi);
-      setResult(res);
-      if (res.ok) {
-        setNewKpi("");
-        // La colonna nuova arriva con il refresh; le celle già scritte restano.
-        router.refresh();
-      }
-    });
-  };
   const unpublishedComments = props.comments.filter((c) => c.body && !c.published).length;
-
-  const [overrides, setOverrides] = React.useState<Record<string, number | null>>(() => {
-    const base = buildAssignmentPreview({
-      store: initialStore,
-      people,
-      kpis: assignmentKpisFor(kpis, isCalculationOn(initialStore)),
-      overrides: {},
-    });
-    return overridesFromSaved(props.savedTargets, base.cells);
-  });
-
-  const preview = React.useMemo(
-    () => buildAssignmentPreview({ store, people, kpis: calcKpis, overrides }),
-    [store, people, calcKpis, overrides],
+  const changedComments = React.useMemo(
+    () =>
+      new Set(
+        people
+          .filter((p) => (comments[p.profileId] ?? "") !== (initialComments[p.profileId] ?? ""))
+          .map((p) => p.profileId),
+      ),
+    [people, comments, initialComments],
   );
 
-  /* ---------------------------------------------------------- griglia */
+  const [showMixed, setShowMixed] = React.useState<Record<Area, boolean>>({
+    vista: false,
+    sole: false,
+  });
+  const [newKpi, setNewKpi] = React.useState<Record<Area, string>>({ vista: "", sole: "" });
+  const [removing, setRemoving] = React.useState<{ area: Area; column: TargetsColumn } | null>(
+    null,
+  );
+  const [justAdded, setJustAdded] = React.useState<{ area: Area; kpiId: string } | null>(null);
+  React.useEffect(() => {
+    if (!justAdded) return;
+    document
+      .getElementById(`tab-${justAdded.area}-col-${justAdded.kpiId}`)
+      ?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  }, [justAdded, kpis, sets]);
 
-  // Tutte le voci attive: una cella fuori dal foglio della persona resta scrivibile.
-  const usedKpis = kpis;
-  const personKpi = React.useMemo(() => {
-    const m = new Map<string, string>();
-    for (const p of people) for (const k of p.kpis) m.set(cellKey(p.profileId, k.kpiId), k.label);
-    return m;
-  }, [people]);
-
-  const groups: GridGroup[] = [
-    { id: "vista", label: "Vista · Jolly" },
-    { id: "sole", label: "Sole" },
-  ];
-  const rows: GridRow[] = React.useMemo(
+  const tables = React.useMemo(
     () =>
-      [...people]
-        .sort(
-          (a, b) =>
-            Number(a.zone === "sole") - Number(b.zone === "sole") ||
-            Number(a.plannedHours === 0) - Number(b.plannedHours === 0),
-        )
-        .map((p) => ({
-          id: p.profileId,
-          label: p.name,
+      AREAS.map((area) => {
+        const members = people
+          .filter((p) => areaOf(p.zone) === area)
+          .sort((a, b) => Number(a.plannedHours === 0) - Number(b.plannedHours === 0));
+        const usedKpiIds = new Set(
+          Object.keys(values)
+            .filter((key) => members.some((p) => key.startsWith(`${p.profileId}|`)))
+            .map((key) => key.split("|")[1]),
+        );
+        const columns: TargetsColumn[] = areaColumns({
+          area,
+          sets,
+          kpis,
+          showMixed: showMixed[area],
+          usedKpiIds,
+        }).map((c) => ({
+          kpiId: c.kpiId,
+          label: c.label,
+          mixed: c.mixed,
+          strong: !c.mixed && (c.code === "WO" || c.code === "PZ_SOLE"),
+        }));
+        const rows: TargetsRow[] = members.map((p) => ({
+          profileId: p.profileId,
+          name: p.name,
+          color: p.color,
           sublabel:
             p.plannedHours === 0
               ? p.hasShifts
@@ -201,148 +205,165 @@ export function AssignmentEditor(props: {
               : p.zone === "jolly"
                 ? "Jolly"
                 : undefined,
-          groupId: p.zone === "sole" ? "sole" : "vista",
-          accentColor: p.color ?? undefined,
-        })),
-    [people],
-  );
-  const columns: GridColumn[] = React.useMemo(
-    () => [
-      // Il commento subito accanto al nome: così si vede e non resta in fondo.
-      { id: COMMENT, label: "Commento", sublabel: "lo vede in cima", width: 240 },
-      { id: HOURS, label: "Ore", sublabel: "pianificate", width: 76 },
-      ...usedKpis.map((k) => ({
-        id: k.kpiId,
-        label: k.label,
-        width: Math.max(76, Math.min(120, k.label.length * 8 + 20)),
-        className: k.code === "WO" || k.code === "PZ_SOLE" ? "font-semibold" : undefined,
-      })),
-    ],
-    [usedKpis],
-  );
-  const hoursById = React.useMemo(
-    () => new Map(people.map((p) => [p.profileId, p.plannedHours])),
-    [people],
+          hours: formatCount(p.plannedHours),
+        }));
+        const byKpi: Record<string, string> = {};
+        for (const c of columns) {
+          const list = members
+            .map((p) => values[cellKey(p.profileId, c.kpiId)])
+            .filter((v): v is number => typeof v === "number");
+          if (list.length) byKpi[c.kpiId] = formatCount(list.reduce((a, b) => a + b, 0));
+        }
+        const storeByKpi: Record<string, string> = {};
+        for (const k of kpis) {
+          if (area === "vista" && k.code === "WO" && store.vistaWo > 0)
+            storeByKpi[k.kpiId] = formatCount(store.vistaWo);
+          if (area === "sole" && k.code === "PZ_SOLE" && store.solePieces > 0)
+            storeByKpi[k.kpiId] = formatCount(store.solePieces);
+        }
+        return {
+          area,
+          members,
+          rows,
+          columns,
+          totals: {
+            hours: formatCount(members.reduce((s, p) => s + p.plannedHours, 0)),
+            byKpi,
+          },
+          storeTargets: Object.keys(storeByKpi).length ? storeByKpi : null,
+        };
+      }),
+    [people, values, sets, kpis, showMixed, store.vistaWo, store.solePieces],
   );
 
-  const getValue = React.useCallback(
-    (profileId: string, col: string) => {
-      if (col === HOURS) return formatCount(hoursById.get(profileId) ?? 0);
-      if (col === COMMENT) return comments[profileId] ?? "";
-      const cell = preview.cells.get(cellKey(profileId, col));
-      return cell?.value === null || !cell ? "" : formatCount(cell.value);
+  const getText = React.useCallback(
+    (profileId: string, kpiId: string) => {
+      const v = values[cellKey(profileId, kpiId)];
+      return typeof v === "number" ? formatCount(v) : "";
     },
-    [preview, hoursById, comments],
+    [values],
   );
-  const getCellState = React.useCallback(
-    (profileId: string, col: string): CellState | undefined => {
-      if (col === HOURS)
-        return {
-          readOnly: true,
-          tone: "muted",
-          title: "Ore dai turni della settimana: si cambiano dal foglio Turni.",
-        };
-      if (col === COMMENT) {
-        const body = comments[profileId] ?? "";
-        return {
-          className: "justify-start text-left whitespace-nowrap",
-          tone: body !== (initialComments[profileId] ?? "") ? "warning" : undefined,
-          title: body
-            ? `${body}\n\nDoppio clic per il testo lungo.`
-            : "Scrivi un commento per la persona (doppio clic per il testo lungo).",
-        };
+
+  /** Scrive (o toglie, se vuoto) l'obiettivo di una persona per una voce. */
+  const onCell = React.useCallback((profileId: string, kpiId: string, raw: string): boolean => {
+    const v = parseCount(raw);
+    if (v === "invalid") {
+      setResult({ ok: false, message: "Negli obiettivi scrivi un numero (es. 12)." });
+      return false;
+    }
+    setValues((prev) => {
+      const next = { ...prev };
+      if (v === null) delete next[cellKey(profileId, kpiId)];
+      else next[cellKey(profileId, kpiId)] = v;
+      return next;
+    });
+    setResult(null);
+    setDirty(true);
+    return true;
+  }, []);
+
+  const onComment = React.useCallback((profileId: string, body: string) => {
+    setComments((prev) => ({ ...prev, [profileId]: body.slice(0, 4000) }));
+    setDirty(true);
+  }, []);
+
+  /* ------------------------------------------------- azioni */
+
+  const onPropose = () => {
+    const out = fillProposals({ store, people, kpis, sets, values });
+    setValues(out.values);
+    if (out.filled) setDirty(true);
+    setResult({
+      ok: true,
+      message: out.filled
+        ? `Riempite ${out.filled} ${out.filled === 1 ? "cella vuota" : "celle vuote"} con la proposta automatica: controlla, correggi o cancella quello che non ti serve, poi conferma.`
+        : "Nessuna cella vuota da proporre. Le proposte usano i valori fissi delle voci, le «% di …» sui numeri già scritti e, se li hai inseriti, i numeri della produttività oraria.",
+    });
+  };
+
+  const onClearArea = (area: Area) => {
+    const members = people.filter((p) => areaOf(p.zone) === area);
+    if (
+      !confirm(
+        `Svuotare tutti gli obiettivi della tabella ${AREA_LABEL[area]} per questa settimana? Diventa definitivo solo con «Conferma e avvisa».`,
+      )
+    )
+      return;
+    setValues((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(
+          ([key]) => !members.some((p) => key.startsWith(`${p.profileId}|`)),
+        ),
+      ),
+    );
+    setDirty(true);
+  };
+
+  const onAddKpi = (area: Area) => (e: React.FormEvent) => {
+    e.preventDefault();
+    const label = newKpi[area];
+    if (!label.trim()) return;
+    startTransition(async () => {
+      const res = await quickAddKpi(label, area);
+      setResult(res);
+      if (res.ok) {
+        setNewKpi((n) => ({ ...n, [area]: "" }));
+        if (res.data?.id) setJustAdded({ area, kpiId: res.data.id });
+        // La colonna nuova arriva con il refresh; i numeri già scritti restano.
+        router.refresh();
       }
-      const key = cellKey(profileId, col);
-      // Nessuna cella bloccata: una voce fuori dal foglio della persona si scrive lo stesso
-      // (alla conferma entra nel suo foglio).
-      if (!personKpi.has(key)) return { title: "Scrivi un obiettivo anche per questa voce." };
-      const cell = preview.cells.get(key);
-      if (cell?.overridden && cell.computed !== null && cell.computed !== cell.value)
-        return {
-          className: "font-semibold underline decoration-1 underline-offset-4 bg-foreground/[0.06]",
-          title: `Corretto a mano · proposta: ${cell.computed === null ? "nessuna" : formatCount(cell.computed)}. Svuota la cella per tornare alla proposta.`,
-        };
-      return { title: personKpi.get(key) };
-    },
-    [preview, personKpi, comments, initialComments],
-  );
-  const onChange = React.useCallback(
-    (changes: CellChange[]) => {
-      const numbers = changes.filter((c) => c.colId !== HOURS && c.colId !== COMMENT);
-      const texts = changes.filter((c) => c.colId === COMMENT);
-      if (texts.length)
-        setComments((prev) => {
-          const next = { ...prev };
-          for (const c of texts) next[c.rowId] = c.value.slice(0, 4000);
-          return next;
-        });
-      const bad = numbers.some((c) => parseCount(c.value) === "invalid");
-      if (bad) setResult({ ok: false, message: "Negli obiettivi scrivi un numero (es. 12)." });
-      // Una voce fuori dal foglio diventa parte del foglio della persona.
-      const added = numbers.filter(
-        (c) => !personKpi.has(cellKey(c.rowId, c.colId)) && typeof parseCount(c.value) === "number",
-      );
-      // …e se poi la si svuota, torna fuori dal foglio (niente proposta automatica al suo posto).
-      const cleared = numbers.filter((c) => parseCount(c.value) === null);
-      if (added.length || cleared.length)
-        setExtra((prev) => {
-          const next = { ...prev };
-          for (const c of added) next[c.rowId] = [...new Set([...(next[c.rowId] ?? []), c.colId])];
-          for (const c of cleared)
-            if (next[c.rowId]?.includes(c.colId))
-              next[c.rowId] = next[c.rowId].filter((id) => id !== c.colId);
-          return next;
-        });
-      setOverrides((prev) => {
+    });
+  };
+
+  const onRemoveColumn = () => {
+    if (!removing) return;
+    const { area, column } = removing;
+    const members = people.filter((p) => areaOf(p.zone) === area);
+    const clear = () => {
+      setValues((prev) => {
         const next = { ...prev };
-        for (const c of numbers) {
-          const key = cellKey(c.rowId, c.colId);
-          const v = parseCount(c.value);
-          if (v === "invalid") continue;
-          if (v === null) delete next[key];
-          else next[key] = v;
-        }
+        for (const p of members) delete next[cellKey(p.profileId, column.kpiId)];
         return next;
       });
       setDirty(true);
-    },
-    [personKpi],
-  );
-
-  const footerRows: FooterRow[] = React.useMemo(() => {
-    const assigned: Record<string, React.ReactNode> = {
-      [HOURS]: formatCount(people.reduce((s, p) => s + p.plannedHours, 0)),
+      setRemoving(null);
     };
-    const target: Record<string, React.ReactNode> = { [HOURS]: formatCount(store.totalHours) };
-    for (const k of usedKpis) {
-      assigned[k.kpiId] = formatCount(preview.assignedByKpi[k.kpiId] ?? 0);
-      if (k.code === "WO") target[k.kpiId] = formatCount(store.vistaWo);
-      if (k.code === "PZ_SOLE") target[k.kpiId] = formatCount(store.solePieces);
+    // Una colonna «mista» non fa parte del gruppo: basta svuotarla.
+    if (column.mixed) {
+      clear();
+      return;
     }
-    return [
-      { id: "assegnati", label: "Assegnati", cells: assigned },
-      ...(calcOn ? [{ id: "negozio", label: "Obiettivo negozio", cells: target }] : []),
-    ];
-  }, [people, usedKpis, preview, store, calcOn]);
-
-  /* ---------------------------------------------------------- azioni */
+    const set = sets.find((s) => s.name === AREA_LABEL[area]);
+    if (!set) return;
+    startTransition(async () => {
+      const res = await removeGroupItem(set.id, column.kpiId);
+      setResult(
+        res.ok
+          ? {
+              ok: true,
+              message: `Colonna «${column.label}» tolta dalla tabella ${AREA_LABEL[area]}.`,
+            }
+          : res,
+      );
+      if (res.ok) {
+        clear();
+        router.refresh();
+      }
+    });
+  };
 
   const onConfirm = () => {
     if (invalid.length) {
-      setResult({ ok: false, message: "Controlla i numeri del negozio." });
+      setResult({ ok: false, message: "Controlla i numeri della produttività oraria." });
       return;
     }
-    const cells = people.flatMap((p) =>
-      p.kpis
-        .map((k) => ({ k, cell: preview.cells.get(cellKey(p.profileId, k.kpiId)) }))
-        .filter(({ cell }) => cell && cell.value !== null)
-        .map(({ k, cell }) => ({
-          profileId: p.profileId,
-          kpiId: k.kpiId,
-          target: cell!.value!,
-          overridden: cell!.overridden,
-        })),
-    );
+    const here = new Set(people.map((p) => p.profileId));
+    const cells = Object.entries(values)
+      .map(([key, target]) => {
+        const [profileId, kpiId] = key.split("|");
+        return { profileId, kpiId, target, overridden: true };
+      })
+      .filter((c) => here.has(c.profileId) && activeKpiIds.has(c.kpiId));
     startTransition(async () => {
       const res = await confirmAssignment({
         weekStart,
@@ -350,13 +371,14 @@ export function AssignmentEditor(props: {
           ...store,
           vistaWo: Math.round(store.vistaWo),
           solePieces: Math.round(store.solePieces),
+          lacPieces: Math.round(store.lacPieces),
         },
         cells,
         profileIds: people.map((p) => p.profileId),
         comments: people
           .filter(
             (p) =>
-              (comments[p.profileId] ?? "") !== (initialComments[p.profileId] ?? "") ||
+              changedComments.has(p.profileId) ||
               props.comments.some((c) => c.profileId === p.profileId && c.body && !c.published),
           )
           .map((p) => ({ profileId: p.profileId, body: comments[p.profileId] ?? "" })),
@@ -385,23 +407,16 @@ export function AssignmentEditor(props: {
           ...Object.fromEntries(
             FIELDS.filter((f) => f.key !== "totalHours").map((f) => [
               f.key,
-              s[f.key] ? formatAmount(s[f.key]) : "",
+              s[f.key] ? formatAmount(s[f.key] ?? 0) : "",
             ]),
           ),
         }));
       }
-      // Si copiano i valori così com'erano, per le persone ancora in elenco.
-      const here = new Set(props.people.map((p) => p.profileId));
-      const targets = prev.targets.filter((t) => here.has(t.profileId));
-      setExtra((e) => {
-        const next = { ...e };
-        for (const [id, list] of Object.entries(extraKpisFromSaved(props.people, targets)))
-          next[id] = [...new Set([...(next[id] ?? []), ...list])];
-        return next;
-      });
-      setOverrides(
-        Object.fromEntries(targets.map((t) => [cellKey(t.profileId, t.kpiId), t.target])),
+      const here = new Set(people.map((p) => p.profileId));
+      const targets = prev.targets.filter(
+        (t) => here.has(t.profileId) && activeKpiIds.has(t.kpiId),
       );
+      setValues(Object.fromEntries(targets.map((t) => [cellKey(t.profileId, t.kpiId), t.target])));
       setDirty(true);
       const n = new Set(targets.map((t) => t.profileId)).size;
       setResult({
@@ -411,16 +426,8 @@ export function AssignmentEditor(props: {
     });
   };
 
-  const sole = people.filter((p) => p.zone === "sole");
-  const adv = people
-    .filter((p) => p.zone !== "sole")
-    .reduce((s, p) => {
-      const k = p.kpis.find((x) => x.code === "PZ_SOLE");
-      return s + (k ? (preview.cells.get(cellKey(p.profileId, k.kpiId))?.value ?? 0) : 0);
-    }, 0);
-
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-12">
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -428,12 +435,10 @@ export function AssignmentEditor(props: {
               Obiettivi della settimana
             </h2>
             <p className="mt-1 max-w-2xl text-sm text-muted">
-              Una riga per persona: tutte le celle sono libere, scrivi direttamente cosa deve fare
-              in settimana e, nella colonna «Commento» un messaggio per la persona (lo vedrà in
-              evidenza in cima alla sua pagina Obiettivi). Poi «Conferma e avvisa».
-              {calcOn
-                ? " Le celle vuote prendono la proposta del calcolo automatico; quelle corrette a mano restano sottolineate."
-                : ""}
+              Due tabelle, Vista e Sole, ciascuna con le proprie voci: clicca su un campo e scrivi
+              il numero, svuotalo per togliere l&apos;obiettivo (Tab passa al campo a destra, Invio
+              a quello sotto). Ognuno vede solo le voci della sua area, più gli obiettivi «misti»
+              che gli assegni. Alla fine «Conferma e avvisa».
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -456,90 +461,113 @@ export function AssignmentEditor(props: {
             <Button variant="secondary" size="sm" onClick={onCopy} disabled={pending}>
               <Copy aria-hidden /> Copia dalla settimana precedente
             </Button>
+            <Button variant="secondary" size="sm" onClick={onPropose} disabled={pending}>
+              <Sparkles aria-hidden /> Proponi in automatico
+            </Button>
             <Button size="sm" onClick={onConfirm} disabled={pending || people.length === 0}>
               <Send aria-hidden /> Conferma e avvisa
             </Button>
           </div>
         </div>
+        <FormMessage result={result} />
 
         {people.length === 0 ? (
           <p className="py-10 font-display text-2xl font-light text-subtle">
             Nessuna persona attiva: aggiungile da Amministrazione → Dipendenti.
           </p>
-        ) : (
-          <SpreadsheetGrid
-            ariaLabel={`Obiettivi della week ${props.weekNumber}`}
-            rows={rows}
-            columns={columns}
-            groups={groups}
-            getValue={getValue}
-            getCellState={getCellState}
-            onChange={onChange}
-            onCellActivate={(rowId, colId) => {
-              if (colId === COMMENT) setEditingComment(rowId);
-            }}
-            footerRows={footerRows}
-            rowHeaderLabel="Persona"
-            showDensityToggle
-          />
-        )}
+        ) : null}
 
-        <form onSubmit={onAddKpi} className="flex flex-wrap items-center gap-2">
-          <Input
-            aria-label="Nome della nuova voce"
-            placeholder="Nuova voce (es. Lenti a contatto)"
-            value={newKpi}
-            maxLength={60}
-            onChange={(e) => setNewKpi(e.target.value)}
-            disabled={pending}
-            className="w-full sm:w-72"
-          />
-          <Button type="submit" variant="secondary" size="sm" disabled={pending || !newKpi.trim()}>
-            <Plus aria-hidden /> Aggiungi colonna
-          </Button>
-          <Link
-            href={`/admin/obiettivi/${weekStart}/voci`}
-            className="ml-1 link-underline text-sm text-muted"
-          >
-            Rinomina, riordina o togli le voci
+        {tables.map((t) => {
+          const other: Area = t.area === "vista" ? "sole" : "vista";
+          return (
+            <section
+              key={t.area}
+              aria-labelledby={`tab-${t.area}`}
+              className="mt-4 flex flex-col gap-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 id={`tab-${t.area}`} className="flex items-center gap-2">
+                  <Badge tone={t.area}>{AREA_LABEL[t.area]}</Badge>
+                  <span className="text-sm text-muted">
+                    {t.area === "vista" ? "Vista e jolly · " : ""}
+                    {t.rows.length} {t.rows.length === 1 ? "persona" : "persone"}
+                  </span>
+                </h3>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <Checkbox
+                    className="min-h-9 py-1"
+                    label={`Mostra anche le voci del ${AREA_LABEL[other]} (obiettivi misti)`}
+                    checked={showMixed[t.area]}
+                    onChange={(e) => setShowMixed((m) => ({ ...m, [t.area]: e.target.checked }))}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={pending || Object.keys(t.totals.byKpi).length === 0}
+                    onClick={() => onClearArea(t.area)}
+                  >
+                    <Eraser aria-hidden /> Svuota la tabella
+                  </Button>
+                </div>
+              </div>
+              {t.rows.length === 0 ? (
+                <p className="rounded-md border border-line px-4 py-6 text-sm text-muted">
+                  Nessuna persona in quest&apos;area.
+                </p>
+              ) : (
+                <TargetsTable
+                  tableId={`tab-${t.area}`}
+                  ariaLabel={`Obiettivi ${AREA_LABEL[t.area]} della week ${props.weekNumber}`}
+                  rows={t.rows}
+                  columns={t.columns}
+                  getText={getText}
+                  comments={comments}
+                  changedComments={changedComments}
+                  totals={t.totals}
+                  storeTargets={t.storeTargets}
+                  disabled={pending}
+                  onCell={onCell}
+                  onComment={onComment}
+                  onExpandComment={setEditingComment}
+                  onRemoveColumn={(column) => setRemoving({ area: t.area, column })}
+                />
+              )}
+              <form onSubmit={onAddKpi(t.area)} className="flex flex-wrap items-center gap-2">
+                <Input
+                  aria-label={`Nome della nuova colonna ${AREA_LABEL[t.area]}`}
+                  placeholder={`Nuova colonna ${AREA_LABEL[t.area]} (es. Lenti a contatto)`}
+                  value={newKpi[t.area]}
+                  maxLength={60}
+                  onChange={(e) => setNewKpi((n) => ({ ...n, [t.area]: e.target.value }))}
+                  disabled={pending}
+                  className="w-full sm:w-80"
+                />
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending || !newKpi[t.area].trim()}
+                >
+                  <Plus aria-hidden /> Aggiungi colonna
+                </Button>
+              </form>
+            </section>
+          );
+        })}
+
+        <p className="text-xs text-muted">
+          Le ore vengono dai turni della settimana
+          {props.scheduleStatus !== "published"
+            ? " (non ancora pubblicati: potrebbero cambiare)"
+            : ""}
+          . Per rinominare o riordinare le voci, o cambiare la regola delle proposte:{" "}
+          <Link href={`/admin/obiettivi/${weekStart}/voci`} className="link-underline">
+            scheda Voci
           </Link>
-        </form>
-
-        <dl className="grid gap-4 border-t border-line pt-4 text-sm sm:grid-cols-3">
-          <Summary
-            label="WO assegnati"
-            value={preview.woAssigned}
-            target={store.vistaWo}
-            hidden={!calcOn && !store.vistaWo}
-          />
-          <Summary
-            label="Pezzi sole assegnati (Sole)"
-            value={preview.solePiecesAssigned}
-            target={store.solePieces}
-            extra={adv ? `+ ${formatCount(adv)} pz sole x ADV` : undefined}
-            hidden={(sole.length === 0 || !calcOn) && !store.solePieces}
-          />
-          <Summary
-            label="Ore pianificate"
-            value={people.reduce((s, p) => s + p.plannedHours, 0)}
-            target={store.totalHours}
-            unit="h"
-          />
-        </dl>
-        {props.withoutHours.length ? (
-          <p className="text-xs text-muted">
-            Senza ore in vendita nei turni di questa settimana: {props.withoutHours.join(", ")}. Gli
-            obiettivi si calcolano sulle ore dei turni, quindi per loro non c&apos;è una proposta:
-            scrivili a mano nelle celle oppure inserisci prima i turni in Turni.
-          </p>
-        ) : null}
-        {props.scheduleStatus !== "published" ? (
-          <p className="text-xs text-warning">
-            I turni di questa settimana non sono ancora pubblicati: le ore potrebbero cambiare.
-          </p>
-        ) : null}
-        <FormMessage result={result} />
+          .
+        </p>
       </section>
+
       <details
         className="group rounded-lg border border-line"
         open={calcInitiallyOpen || undefined}
@@ -547,101 +575,153 @@ export function AssignmentEditor(props: {
         <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
           <Calculator className="size-5 stroke-[1.5]" aria-hidden />
           <span className="flex-1">
-            <span className="block font-medium">
-              Calcolo automatico con la produttività oraria (facoltativo)
-            </span>
+            <span className="block font-medium">Produttività oraria del negozio</span>
             <span className="block text-sm text-muted">
-              {calcOn
-                ? `Attivo: ${formatEurPerHour(preview.assignment.eurPerHourVista)} vista · ${formatEurPerHour(preview.assignment.eurPerHourSole)} sole. Propone WO e pezzi sole in base alle ore.`
-                : "Inserisci generato vista e valore sole del negozio per farti proporre WO e pezzi sole in base alle ore di ciascuno."}
+              {productivity > 0
+                ? `${formatEurPerHour(productivity)} · fatturato totale ÷ ore lavorate (riferimento ${PRODUCTIVITY_TARGET.min}–${PRODUCTIVITY_TARGET.max} €/h)`
+                : "Inserisci ore e fatturato di vista, sole, lenti a contatto e altro: fatturato totale ÷ ore lavorate."}
             </span>
           </span>
           <span className="text-sm text-muted group-open:hidden">Apri</span>
           <span className="hidden text-sm text-muted group-open:inline">Chiudi</span>
         </summary>
-        <div className="border-t border-line p-5">
-          <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
-            <Card>
-              <CardTitle>Obiettivi del negozio</CardTitle>
-              <div className="grid gap-x-6 gap-y-5 sm:grid-cols-3">
-                {(["ore", "vista", "sole"] as const).map((group) => (
-                  <fieldset key={group} className="flex flex-col gap-4">
-                    <legend className="mb-3 flex items-center gap-2 text-sm font-medium">
-                      {group === "ore" ? (
-                        "Ore"
-                      ) : (
-                        <Badge tone={group}>{group === "vista" ? "Vista" : "Sole"}</Badge>
-                      )}
-                    </legend>
-                    {FIELDS.filter((f) => f.group === group).map((f) => (
-                      <div key={f.key} className="flex flex-col gap-1.5">
-                        <Label htmlFor={`f-${f.key}`}>
-                          {f.label}
-                          {f.suffix ? ` (${f.suffix})` : ""}
-                        </Label>
-                        <Input
-                          id={`f-${f.key}`}
-                          inputMode="decimal"
-                          autoComplete="off"
-                          className="nums"
-                          value={text[f.key]}
-                          aria-invalid={invalid.includes(f.key) || undefined}
-                          onChange={(e) => {
-                            setText((t) => ({ ...t, [f.key]: e.target.value }));
-                            setDirty(true);
-                          }}
-                        />
-                        {f.key === "totalHours" ? (
-                          <p className="text-xs text-muted">
-                            Dai turni: {formatCount(props.plannedTotal)} h
-                            {store.totalHours !== props.plannedTotal ? (
-                              <>
-                                {" · "}
-                                <button
-                                  type="button"
-                                  className="underline underline-offset-2"
-                                  onClick={() => {
-                                    setText((t) => ({
-                                      ...t,
-                                      totalHours: formatAmount(props.plannedTotal),
-                                    }));
-                                    setDirty(true);
-                                  }}
-                                >
-                                  usa questo
-                                </button>
-                              </>
-                            ) : null}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                  </fieldset>
-                ))}
-              </div>
-            </Card>
+        <div className="grid gap-6 border-t border-line p-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <Card>
+            <CardTitle>Numeri della settimana</CardTitle>
+            <div className="grid gap-x-6 gap-y-6 sm:grid-cols-2 xl:grid-cols-3">
+              {(["ore", "vista", "sole", "lac", "altro"] as const).map((group) => (
+                <fieldset key={group} className="flex flex-col gap-4">
+                  <legend className="mb-3 flex items-center gap-2 text-sm font-medium">
+                    {group === "vista" || group === "sole" ? (
+                      <Badge tone={group}>{GROUP_TITLE[group]}</Badge>
+                    ) : (
+                      GROUP_TITLE[group]
+                    )}
+                  </legend>
+                  {FIELDS.filter((f) => f.group === group).map((f) => (
+                    <div key={f.key} className="flex flex-col gap-1.5">
+                      <Label htmlFor={`f-${f.key}`}>
+                        {f.label}
+                        {f.suffix ? ` (${f.suffix})` : ""}
+                      </Label>
+                      <Input
+                        id={`f-${f.key}`}
+                        inputMode="decimal"
+                        autoComplete="off"
+                        className="nums"
+                        value={text[f.key]}
+                        aria-invalid={invalid.includes(f.key) || undefined}
+                        onChange={(e) => {
+                          setText((t) => ({ ...t, [f.key]: e.target.value }));
+                          setDirty(true);
+                        }}
+                      />
+                      {f.key === "totalHours" ? (
+                        <p className="text-xs text-muted">
+                          Dai turni: {formatCount(props.plannedTotal)} h
+                          {store.totalHours !== props.plannedTotal ? (
+                            <>
+                              {" · "}
+                              <button
+                                type="button"
+                                className="underline underline-offset-2"
+                                onClick={() => {
+                                  setText((t) => ({
+                                    ...t,
+                                    totalHours: formatAmount(props.plannedTotal),
+                                  }));
+                                  setDirty(true);
+                                }}
+                              >
+                                usa questo
+                              </button>
+                            </>
+                          ) : null}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </fieldset>
+              ))}
+            </div>
+          </Card>
 
-            <Card className="flex flex-col gap-5">
-              <CardTitle className="mb-0">Valore per ora</CardTitle>
-              <div>
-                <p className="eyebrow">€/ora vista</p>
-                <p className="mt-1 font-display text-3xl font-light nums">
-                  {formatEurPerHour(preview.assignment.eurPerHourVista)}
-                </p>
-              </div>
-              <div>
-                <p className="eyebrow">€/ora sole</p>
-                <p className="mt-1 font-display text-3xl font-light nums">
-                  {formatEurPerHour(preview.assignment.eurPerHourSole)}
-                </p>
-              </div>
-              <p className="text-xs text-muted">
-                Generato ÷ ore totali. Per ogni persona: €/ora × ore pianificate ÷ PM, arrotondato.
+          <Card className="flex flex-col gap-5">
+            <CardTitle className="mb-0">Produttività oraria</CardTitle>
+            <div>
+              <p className="eyebrow">Totale negozio</p>
+              <p className="mt-1 font-display text-4xl font-light nums">
+                {formatEurPerHour(productivity)}
               </p>
-            </Card>
-          </section>
+              <p
+                className={cn(
+                  "mt-1 text-sm",
+                  level === "below"
+                    ? "text-warning"
+                    : level === "none"
+                      ? "text-muted"
+                      : "text-success",
+                )}
+              >
+                {level === "none"
+                  ? `Una buona produttività è intorno a ${PRODUCTIVITY_TARGET.min}–${PRODUCTIVITY_TARGET.max} €/h.`
+                  : level === "below"
+                    ? `Sotto il riferimento di ${PRODUCTIVITY_TARGET.min}–${PRODUCTIVITY_TARGET.max} €/h.`
+                    : level === "ok"
+                      ? `In linea con il riferimento di ${PRODUCTIVITY_TARGET.min}–${PRODUCTIVITY_TARGET.max} €/h.`
+                      : `Sopra il riferimento di ${PRODUCTIVITY_TARGET.min}–${PRODUCTIVITY_TARGET.max} €/h.`}
+              </p>
+              <p className="mt-1 text-xs text-muted nums">
+                {formatAmount(totalRevenue(store))} € di fatturato ÷ {formatCount(store.totalHours)}{" "}
+                ore
+              </p>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3 border-t border-line pt-4 text-sm">
+              {(
+                [
+                  ["Vista", store.vistaValueEur],
+                  ["Sole", store.soleValueEur],
+                  ["Lenti a contatto", store.lacValueEur],
+                  ["Altro", store.otherValueEur],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt className="eyebrow">{label}</dt>
+                  <dd className="mt-0.5 nums">{formatEurPerHour(perHour(value))}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-muted">
+              «Proponi in automatico» usa €/ora di vista e sole: per ciascuno, €/ora × ore dei suoi
+              turni ÷ prezzo medio.
+            </p>
+          </Card>
         </div>
       </details>
+
+      <Dialog open={removing !== null} onOpenChange={(o) => !o && !pending && setRemoving(null)}>
+        {removing ? (
+          <DialogContent
+            title={`Togliere la colonna «${removing.column.label}»?`}
+            description={
+              removing.column.mixed
+                ? `È una voce dell'altra area: si svuotano i suoi obiettivi di questa settimana per le persone del ${AREA_LABEL[removing.area]}.`
+                : `La voce esce dalla tabella ${AREA_LABEL[removing.area]} e dai fogli di chi lavora in quell'area; i suoi obiettivi di questa settimana si svuotano. I numeri già inseriti restano nello storico e puoi rimetterla quando vuoi con «Aggiungi colonna».`
+            }
+          >
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <DialogClose asChild>
+                <Button variant="ghost" disabled={pending}>
+                  Annulla
+                </Button>
+              </DialogClose>
+              <Button variant="danger" onClick={onRemoveColumn} disabled={pending}>
+                Togli la colonna
+              </Button>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
 
       <Dialog open={editingComment !== null} onOpenChange={(o) => !o && setEditingComment(null)}>
         {editingComment ? (
@@ -691,44 +771,5 @@ function CommentForm({ initial, onSubmit }: { initial: string; onSubmit: (body: 
         <Button type="submit">Fatto</Button>
       </div>
     </form>
-  );
-}
-
-function Summary({
-  label,
-  value,
-  target,
-  unit,
-  extra,
-  hidden,
-}: {
-  label: string;
-  value: number;
-  target: number;
-  unit?: string;
-  extra?: string;
-  hidden?: boolean;
-}) {
-  if (hidden) return <div />;
-  const diff = value - target;
-  return (
-    <div>
-      <dt className="eyebrow">{label}</dt>
-      <dd className="mt-1 nums">
-        <span className="font-display text-2xl font-light">{formatCount(value)}</span>
-        <span className="text-muted">
-          {" "}
-          / {formatCount(target)}
-          {unit ? ` ${unit}` : ""}
-        </span>
-        {target > 0 && diff !== 0 ? (
-          <span className={cn("ml-2 text-xs", diff < 0 ? "text-warning" : "text-muted")}>
-            {diff > 0 ? "+" : ""}
-            {formatCount(Math.round(diff * 100) / 100)}
-          </span>
-        ) : null}
-        {extra ? <span className="mt-0.5 block text-xs text-muted">{extra}</span> : null}
-      </dd>
-    </div>
   );
 }

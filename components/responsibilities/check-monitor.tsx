@@ -10,6 +10,7 @@ import { formatInRome } from "@/lib/dates";
 import { toggleResponsibilityCheck } from "@/lib/responsibilities/actions";
 import { isScheduledOn } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
+import { DayLettersInline } from "./week-grid";
 
 export type MonitorPerson = { id: string; name: string; color: string | null };
 export type MonitorColumn = {
@@ -188,6 +189,7 @@ export function CheckMonitor({
                   className="w-28 min-w-28 border-b border-l border-line px-2 py-2 text-center align-bottom font-medium"
                 >
                   <span className="line-clamp-3 leading-tight">{c.title}</span>
+                  <DayLettersInline days={c.scheduleDays} className="mt-1.5" />
                   {c.allStaff ? (
                     <span className="mt-1 block text-[0.6875rem] font-normal text-subtle">
                       per tutti

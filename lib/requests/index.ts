@@ -314,3 +314,48 @@ export function attachmentError(file: { size: number; type: string }): string | 
 
 /** Parola da scrivere per confermare «Azzera tutte le richieste». */
 export const RESET_CONFIRM_WORD = "AZZERA";
+
+/**
+ * Stati in cui una richiesta è già decisa (o chiusa): l'admin la può eliminare dall'elenco.
+ * Quelle in attesa non si eliminano così: prima vanno approvate o rifiutate.
+ */
+export const DELETABLE_STATUSES = [
+  "approved",
+  "rejected",
+  "peer_declined",
+  "cancelled",
+] as const satisfies readonly RequestStatus[];
+
+export function isDeletable(status: RequestStatus) {
+  return (DELETABLE_STATUSES as readonly RequestStatus[]).includes(status);
+}
+
+/** Gruppi di «Elimina tutte le approvate / rifiutate» (schede di /admin/richieste). */
+export type DeleteGroup = "approved" | "rejected";
+
+/**
+ * Stati eliminati da «Elimina tutte le …»: le rifiutate comprendono gli scambi rifiutati dal
+ * collega (come nella scheda) e, solo se l'admin lo chiede, le richieste annullate dai dipendenti.
+ */
+export function deleteGroupStatuses(group: DeleteGroup, includeCancelled = false): RequestStatus[] {
+  if (group === "approved") return ["approved"];
+  return includeCancelled
+    ? ["rejected", "peer_declined", "cancelled"]
+    : ["rejected", "peer_declined"];
+}
+
+/** Tipi di richiesta che, approvati, creano assenze nel calendario (trigger del database). */
+export const LEAVE_REQUEST_TYPES = [
+  "ferie",
+  "permesso",
+  "malattia",
+  "giorno_libero",
+  "indisponibilita",
+] as const satisfies readonly RequestType[];
+
+export function createsLeaves(type: string) {
+  return (LEAVE_REQUEST_TYPES as readonly string[]).includes(type);
+}
+
+/** Nota di decisione di una richiesta revocata dal foglio turni. */
+export const REVOKED_FROM_SCHEDULE_NOTE = "Tolta dal foglio turni";

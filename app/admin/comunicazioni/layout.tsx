@@ -3,8 +3,8 @@ import { PageHeader } from "@/components/ui/feedback";
 import { requireAdmin } from "@/lib/auth/session";
 
 const tabs = [
-  { href: "/admin/comunicazioni", label: "Comunicazioni" },
   { href: "/admin/comunicazioni/responsabilita", label: "Responsabilità" },
+  { href: "/admin/comunicazioni", label: "Comunicazioni" },
 ];
 
 export default async function AdminComunicazioniLayout({
@@ -15,7 +15,7 @@ export default async function AdminComunicazioniLayout({
   await requireAdmin();
   return (
     <>
-      <PageHeader eyebrow="Bacheca e responsabilità" title="Comunicazioni" />
+      <PageHeader eyebrow="Negozio" title="Responsabilità e Comunicazioni" />
       <SubNav items={tabs} exact={["/admin/comunicazioni"]} fallbackHref="/admin/comunicazioni" />
       {children}
     </>

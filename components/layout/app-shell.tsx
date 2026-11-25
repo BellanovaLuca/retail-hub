@@ -171,7 +171,7 @@ function SidebarLink({ item, active }: { item: NavItem; active: boolean }) {
       href={item.href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex min-h-10 items-center gap-3 rounded-md px-3 text-sm transition-colors",
+        "relative flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm leading-tight transition-colors",
         active
           ? "font-medium text-foreground"
           : "text-muted hover:bg-surface hover:text-foreground",
@@ -180,7 +180,7 @@ function SidebarLink({ item, active }: { item: NavItem; active: boolean }) {
       {active ? (
         <span className="absolute inset-y-2 left-0 w-0.5 bg-foreground" aria-hidden />
       ) : null}
-      <Icon className="size-4 stroke-[1.5]" aria-hidden />
+      <Icon className="size-4 shrink-0 stroke-[1.5]" aria-hidden />
       {item.label}
     </Link>
   );

@@ -361,6 +361,30 @@ export async function setResponsibilityActive(id: string, active: boolean): Prom
   });
 }
 
+const daysSchema = z
+  .array(z.number().int().min(1).max(7))
+  .min(1, "Scegli almeno un giorno.")
+  .max(7);
+
+/** Cambia i giorni della settimana in cui la responsabilità è prevista (1 = lunedì … 7 = domenica). */
+export async function setResponsibilityDays(id: string, days: number[]): Promise<ActionResult> {
+  return runAction(async () => {
+    if (!idSchema.safeParse(id).success) throw new ActionError("Attività non valida.");
+    const parsed = daysSchema.safeParse(days);
+    if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
+    const { supabase } = await adminAction();
+    const { data, error } = await supabase
+      .from("responsibilities")
+      .update({ schedule_days: [...new Set(parsed.data)].sort() })
+      .eq("id", id)
+      .select("id");
+    if (error) return { ok: false, message: dbErrorMessage(error, "Giorni non salvati.") };
+    if (!data?.length) return { ok: false, message: "Attività non trovata: ricarica la pagina." };
+    revalidateAll();
+    return { ok: true, message: "Giorni aggiornati." };
+  });
+}
+
 export async function reorderResponsibilities(orderedIds: string[]): Promise<ActionResult> {
   return runAction(async () => {
     const parsed = z.array(z.uuid()).max(200).safeParse(orderedIds);

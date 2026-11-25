@@ -1,8 +1,14 @@
 import "server-only";
-import { requestShiftDays, type RequestStatus, type ShiftDay } from "@/lib/requests";
+import {
+  requestShiftDays,
+  type RequestStatus,
+  type RequestType,
+  type ShiftDay,
+} from "@/lib/requests";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/lib/supabase/types";
+import { fetchAllRows } from "./paginate";
 import { getPublishedDays } from "./schedule";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
@@ -75,6 +81,30 @@ export async function getRequestDetail(db: Db, id: string): Promise<RequestDetai
     targetShift: shiftText(days.targetShift),
     attachmentUrl,
   };
+}
+
+/**
+ * Tutte le richieste, di ogni stato, che toccano l'intervallo `from`–`to` (calendario del mese):
+ * quelle il cui periodo lo attraversa e gli scambi il cui turno preso in cambio cade lì dentro.
+ * Lettura a pagine: in un mese possono superare le 1000 righe.
+ */
+export async function getRequestsBetween(
+  db: Db,
+  from: string,
+  to: string,
+  filters: { type?: RequestType; profileId?: string } = {},
+): Promise<RequestRow[]> {
+  return fetchAllRows<RequestRow>((start, end) => {
+    let query = db
+      .from("requests")
+      .select("*", { count: "exact" })
+      .or(
+        `and(start_date.lte.${to},end_date.gte.${from}),and(target_date.gte.${from},target_date.lte.${to})`,
+      );
+    if (filters.type) query = query.eq("type", filters.type);
+    if (filters.profileId) query = query.eq("profile_id", filters.profileId);
+    return query.order("start_date").order("id").range(start, end);
+  });
 }
 
 export function asStatus(s: string) {

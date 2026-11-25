@@ -99,9 +99,9 @@ describe("Timesheet", () => {
     expect(firstDay.indexOf("GIULIA")).toBeLessThan(firstDay.indexOf("MARCO"));
     expect(screen.getByLabelText("Francy, lun 19, 10:00–10:30: presente")).toBeTruthy();
     expect(screen.getByLabelText("Francy, lun 19, 12:00–12:30: vuoto")).toBeTruthy();
-    // Ferie: celle bloccate.
+    // Ferie: la colonna è segnata ma non bloccata (richiesta del 27/11/2026: ci si scrive sopra).
     const ferie = screen.getByLabelText("Giulia, mar 20, 10:00–10:30: vuoto (Ferie)");
-    expect(ferie.getAttribute("aria-disabled")).toBe("true");
+    expect(ferie.getAttribute("aria-disabled")).toBeNull();
     expect(
       screen.getByLabelText(/^Francy, mer 21, 10:00–10:30: vuoto \(Richiesta in attesa\)/),
     ).toBeTruthy();

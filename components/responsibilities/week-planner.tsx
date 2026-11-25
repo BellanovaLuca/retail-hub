@@ -10,6 +10,7 @@ import {
   quickAddResponsibility,
   saveWeekAssignments,
   setResponsibilityActive,
+  setResponsibilityDays,
 } from "@/app/admin/comunicazioni/responsabilita/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { PersonDot } from "@/components/ui/table";
 import type { WeekPlannerColumn } from "@/lib/data/responsibilities";
 import { cn } from "@/lib/utils";
+import { DAY_LETTERS, scheduleLabel } from "./format";
 
 type Person = { id: string; name: string; color: string | null };
 
@@ -53,6 +55,20 @@ export function WeekPlanner({
   const [pending, startTransition] = React.useTransition();
   const [removing, setRemoving] = React.useState<WeekPlannerColumn | null>(null);
   const [newTitle, setNewTitle] = React.useState("");
+  // Giorni della settimana di una responsabilità (finestra di modifica).
+  const [daysOf, setDaysOf] = React.useState<{ column: WeekPlannerColumn; days: number[] } | null>(
+    null,
+  );
+  // La colonna appena aggiunta finisce in fondo a destra: la si porta in vista e la si evidenzia.
+  const [justAdded, setJustAdded] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!justAdded) return;
+    const el = document.getElementById(`resp-col-${justAdded}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const timer = setTimeout(() => setJustAdded(null), 4000);
+    return () => clearTimeout(timer);
+  }, [justAdded, columns]);
 
   /** Aggiunge o toglie una colonna (responsabilità): le spunte non ancora salvate restano. */
   const manage = (run: () => Promise<{ ok: boolean; message?: string }>, after?: () => void) =>
@@ -71,10 +87,22 @@ export function WeekPlanner({
       onSubmit={(e) => {
         e.preventDefault();
         if (!newTitle.trim()) return;
-        manage(
-          () => quickAddResponsibility(newTitle),
-          () => setNewTitle(""),
-        );
+        startTransition(async () => {
+          const res = await quickAddResponsibility(newTitle);
+          setResult(
+            res.ok
+              ? {
+                  ok: true,
+                  message: `${res.message} È l'ultima colonna a destra: spunta chi se ne occupa.`,
+                }
+              : res,
+          );
+          if (res.ok) {
+            setNewTitle("");
+            setJustAdded(res.data?.id ?? null);
+            router.refresh();
+          }
+        });
       }}
     >
       <Input
@@ -141,6 +169,7 @@ export function WeekPlanner({
 
   return (
     <div className="flex flex-col gap-4">
+      {addForm}
       <div className="overflow-x-auto rounded-md border border-line">
         <table className="w-max min-w-full border-collapse text-sm">
           <caption className="sr-only">Attività di ciascuna persona nella week {week}</caption>
@@ -158,13 +187,36 @@ export function WeekPlanner({
                 return (
                   <th
                     key={c.id}
+                    id={`resp-col-${c.id}`}
                     scope="col"
                     className={cn(
                       "w-28 min-w-28 border-b border-l border-line px-2 py-2 text-center align-bottom font-medium",
                       isChanged && "bg-surface",
+                      justAdded === c.id &&
+                        "bg-foreground/[0.08] shadow-[inset_0_3px_0_var(--foreground)]",
                     )}
                   >
                     <span className="line-clamp-3 leading-tight">{c.title}</span>
+                    <button
+                      type="button"
+                      className="mx-auto mt-1.5 flex gap-[3px] rounded-sm px-1 py-0.5 text-[0.625rem] font-semibold hover:bg-surface disabled:opacity-60"
+                      aria-label={`Giorni di «${c.title}»: ${scheduleLabel(c.scheduleDays)}. Modifica`}
+                      title={`${scheduleLabel(c.scheduleDays)} · clicca per cambiare i giorni`}
+                      disabled={pending}
+                      onClick={() => setDaysOf({ column: c, days: c.scheduleDays })}
+                    >
+                      {DAY_LETTERS.map((letter, i) => (
+                        <span
+                          key={i}
+                          aria-hidden
+                          className={
+                            c.scheduleDays.includes(i + 1) ? "text-foreground" : "text-line-strong"
+                          }
+                        >
+                          {letter}
+                        </span>
+                      ))}
+                    </button>
                     {note ? (
                       <span className="mt-1 block text-[0.6875rem] font-normal text-subtle">
                         {note}
@@ -174,8 +226,8 @@ export function WeekPlanner({
                       <Link
                         href={`/admin/comunicazioni/responsabilita/${c.id}`}
                         className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface hover:text-foreground"
-                        aria-label={`Modifica «${c.title}» (giorni e procedura)`}
-                        title="Modifica giorni e procedura"
+                        aria-label={`Apri la scheda di «${c.title}» (procedura e allegati)`}
+                        title="Apri la scheda: procedura e allegati"
                       >
                         <Pencil className="size-3.5 stroke-[1.5]" aria-hidden />
                       </Link>
@@ -303,8 +355,81 @@ export function WeekPlanner({
           Settimana passata: le assegnazioni restano in sola lettura.
         </p>
       )}
-      {addForm}
       <FormMessage result={result} />
+
+      <Dialog open={daysOf !== null} onOpenChange={(o) => !o && !pending && setDaysOf(null)}>
+        {daysOf ? (
+          <DialogContent
+            title={`Giorni di «${daysOf.column.title}»`}
+            description="In quali giorni della settimana va fatta: negli altri la casella non è prevista."
+          >
+            <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-7 gap-1.5" role="group" aria-label="Giorni previsti">
+                {["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].map((label, i) => {
+                  const day = i + 1;
+                  const on = daysOf.days.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={pending}
+                      onClick={() =>
+                        setDaysOf((d) =>
+                          d
+                            ? {
+                                ...d,
+                                days: on
+                                  ? d.days.filter((x) => x !== day)
+                                  : [...d.days, day].sort(),
+                              }
+                            : d,
+                        )
+                      }
+                      className={cn(
+                        "flex min-h-11 items-center justify-center rounded-md border text-sm",
+                        on
+                          ? "border-foreground bg-foreground font-medium text-background"
+                          : "border-line text-muted hover:border-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => setDaysOf((d) => (d ? { ...d, days: [1, 2, 3, 4, 5, 6, 7] } : d))}
+                >
+                  Tutti i giorni
+                </Button>
+                <div className="flex gap-3">
+                  <DialogClose asChild>
+                    <Button variant="ghost" disabled={pending}>
+                      Annulla
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    disabled={pending || daysOf.days.length === 0}
+                    onClick={() =>
+                      manage(
+                        () => setResponsibilityDays(daysOf.column.id, daysOf.days),
+                        () => setDaysOf(null),
+                      )
+                    }
+                  >
+                    Salva i giorni
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
 
       <Dialog open={removing !== null} onOpenChange={(o) => !o && !pending && setRemoving(null)}>
         {removing ? (

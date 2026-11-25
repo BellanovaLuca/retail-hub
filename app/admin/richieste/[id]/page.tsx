@@ -15,9 +15,10 @@ import { PageHeader } from "@/components/ui/feedback";
 import { requireAdmin } from "@/lib/auth/session";
 import { requestCoverageImpact, swapContext } from "@/lib/data/request-impact";
 import { getRequestDetail, namesById } from "@/lib/data/requests";
-import { awaitsAdmin, type RequestStatus } from "@/lib/requests";
+import { awaitsAdmin, isDeletable, type RequestStatus } from "@/lib/requests";
 import { leaveLabelAdmin } from "@/lib/schedule/view";
 import { createClient } from "@/lib/supabase/server";
+import { DeleteRequestButton } from "../delete-request-dialog";
 import { DecisionPanel } from "./decision-panel";
 
 export const metadata: Metadata = { title: "Richiesta" };
@@ -71,7 +72,21 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
       </Link>
       <div className="mt-6">
         <PageHeader eyebrow={`${r.requesterName} · ${s.title}`} title={s.detail}>
-          <StatusBadge status={r.status} />
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusBadge status={r.status} />
+            {isDeletable(r.status as RequestStatus) ? (
+              <DeleteRequestButton
+                request={{
+                  id: r.id,
+                  person: r.requesterName,
+                  title: s.title,
+                  detail: s.detail,
+                  type: r.type,
+                  status: r.status as RequestStatus,
+                }}
+              />
+            ) : null}
+          </div>
         </PageHeader>
       </div>
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">

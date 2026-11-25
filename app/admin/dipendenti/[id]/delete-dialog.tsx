@@ -139,7 +139,7 @@ export function DeleteEmployeeDialog({
                 <p>
                   Resteranno <strong className="font-medium">senza responsabile</strong>:{" "}
                   {footprint.ownedResponsibilities.join(", ")}. Dopo l&apos;eliminazione assegnale a
-                  qualcun altro da Comunicazioni → Responsabilità.
+                  qualcun altro da Responsabilità e Comunicazioni → Responsabilità.
                 </p>
               ) : null}
               {footprint.supportedResponsibilities.length ? (

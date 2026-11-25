@@ -23,7 +23,38 @@ export type StoreWeeklyTargets = {
   solePieces: number;
   soleValueEur: number;
   soleAvgPrice: number;
+  /** Lenti a contatto: prezzo medio, numero e fatturato. */
+  lacAvgPrice?: number;
+  lacPieces?: number;
+  lacValueEur?: number;
+  /** «Mondo altro»: solo il fatturato. */
+  otherValueEur?: number;
 };
+
+/** Una buona produttività totale del negozio sta intorno a questi valori (€ per ora lavorata). */
+export const PRODUCTIVITY_TARGET = { min: 130, max: 140 } as const;
+
+/** Fatturato totale della settimana: vista + sole + lenti a contatto + altro. */
+export function totalRevenue(store: StoreWeeklyTargets): number {
+  return (
+    (store.vistaValueEur || 0) +
+    (store.soleValueEur || 0) +
+    (store.lacValueEur || 0) +
+    (store.otherValueEur || 0)
+  );
+}
+
+/** Produttività oraria totale: fatturato totale ÷ ore lavorate (0 se le ore sono 0). */
+export function totalProductivity(store: StoreWeeklyTargets): number {
+  return store.totalHours > 0 ? totalRevenue(store) / store.totalHours : 0;
+}
+
+/** Dove sta la produttività rispetto al riferimento di 130–140 €/ora. */
+export function productivityLevel(eurPerHour: number): "none" | "below" | "ok" | "above" {
+  if (!(eurPerHour > 0)) return "none";
+  if (eurPerHour < PRODUCTIVITY_TARGET.min) return "below";
+  return eurPerHour > PRODUCTIVITY_TARGET.max ? "above" : "ok";
+}
 
 export type TargetZone = "vista" | "sole" | "jolly";
 

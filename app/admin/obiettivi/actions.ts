@@ -41,6 +41,10 @@ const storeSchema = z.object({
   solePieces: z.number().int().min(0).max(100_000),
   soleValueEur: num(10_000_000),
   soleAvgPrice: num(100_000),
+  lacAvgPrice: num(100_000).default(0),
+  lacPieces: z.number().int().min(0).max(100_000).default(0),
+  lacValueEur: num(10_000_000).default(0),
+  otherValueEur: num(10_000_000).default(0),
 });
 
 const assignmentSchema = z.object({
@@ -65,33 +69,6 @@ const assignmentSchema = z.object({
     .optional(),
   notify: z.boolean().default(true),
 });
-
-/** Aggiunge al foglio delle persone le voci a cui è stato dato un obiettivo (se mancano). */
-async function addMissingProfileKpis(db: Db, cells: { profileId: string; kpiId: string }[]) {
-  if (cells.length === 0) return;
-  const profileIds = [...new Set(cells.map((c) => c.profileId))];
-  const { data: existing } = await db
-    .from("profile_kpis")
-    .select("profile_id, kpi_id, sort_order, active")
-    .in("profile_id", profileIds);
-  const has = new Set(
-    (existing ?? []).filter((e) => e.active).map((e) => `${e.profile_id}|${e.kpi_id}`),
-  );
-  const maxOrder = new Map<string, number>();
-  for (const e of existing ?? [])
-    maxOrder.set(e.profile_id, Math.max(maxOrder.get(e.profile_id) ?? 0, e.sort_order));
-  const rows = cells
-    .filter((c) => !has.has(`${c.profileId}|${c.kpiId}`))
-    .map((c) => {
-      const order = (maxOrder.get(c.profileId) ?? 0) + 1;
-      maxOrder.set(c.profileId, order);
-      return { profile_id: c.profileId, kpi_id: c.kpiId, sort_order: order, active: true };
-    });
-  if (rows.length === 0) return;
-  // Le voci disattivate tornano attive (in fondo al foglio).
-  const { error } = await db.from("profile_kpis").upsert(rows, { onConflict: "profile_id,kpi_id" });
-  if (error) throw new ActionError(dbErrorMessage(error, "Voci delle persone non salvate."));
-}
 
 /**
  * Salva e pubblica i commenti generali della settimana; restituisce chi ha un commento nuovo o
@@ -142,7 +119,10 @@ async function saveGeneralComments(
   return changed;
 }
 
-/** Copia le voci del gruppo della sua area a chi non ha ancora voci proprie (§8.3). */
+/**
+ * Copia le voci del gruppo della sua area a chi non ha ancora voci proprie: serve solo quando
+ * l'admin personalizza il foglio di una singola persona dalla scheda Voci.
+ */
 async function ensureProfileKpis(db: Db, profileIds: string[]) {
   if (profileIds.length === 0) return;
   const [{ data: existing }, { data: profiles }, { data: sets }, { data: items }] =
@@ -197,6 +177,10 @@ export async function confirmAssignment(
         sole_pieces: store.solePieces,
         sole_value_eur: store.soleValueEur,
         sole_avg_price: store.soleAvgPrice,
+        lac_avg_price: store.lacAvgPrice,
+        lac_pieces: store.lacPieces,
+        lac_value_eur: store.lacValueEur,
+        other_value_eur: store.otherValueEur,
         confirmed_at: new Date().toISOString(),
       },
       { onConflict: "week_start" },
@@ -257,9 +241,8 @@ export async function confirmAssignment(
       }
     }
 
-    // Prima le voci del gruppo per chi non ne ha, poi quelle scritte fuori dal suo foglio.
-    await ensureProfileKpis(supabase, [...withTargets]);
-    await addMissingProfileKpis(supabase, cells);
+    // Il foglio di ciascuno segue il gruppo della sua area (Vista o Sole); un obiettivo «misto»
+    // si vede nella settimana in cui è assegnato, senza entrare stabilmente nel suo foglio.
     const commented = await saveGeneralComments(supabase, profile.id, weekStart, comments);
 
     // Si avvisa solo chi ha obiettivi nuovi o cambiati (chi li aveva già uguali non riceve nulla).
@@ -348,6 +331,10 @@ export async function getPreviousAssignment(
               solePieces: n(store.sole_pieces),
               soleValueEur: n(store.sole_value_eur),
               soleAvgPrice: n(store.sole_avg_price),
+              lacAvgPrice: n(store.lac_avg_price),
+              lacPieces: n(store.lac_pieces),
+              lacValueEur: n(store.lac_value_eur),
+              otherValueEur: n(store.other_value_eur),
             }
           : null,
         targets: (targets ?? []).map((t) => ({
@@ -705,39 +692,80 @@ function kpiCodeFromLabel(label: string, used: Set<string>): string {
 }
 
 /**
- * Aggiunge al volo una voce dalla tabella dell'Assegnazione: obiettivo scritto a mano (nessuna
- * regola automatica), in fondo all'elenco. Regola e gruppi si rifiniscono poi dalla scheda Voci.
+ * Aggiunge al volo una colonna alla tabella Vista o Sole dell'Assegnazione. Se la voce non esiste
+ * la crea (obiettivo scritto a mano, nessuna regola automatica); se esiste già (anche disattivata,
+ * o usata solo dall'altra area) la mette nel gruppo dell'area indicata.
  */
-export async function quickAddKpi(label: string): Promise<ActionResult<{ id: string }>> {
+export async function quickAddKpi(
+  label: string,
+  area: "vista" | "sole",
+): Promise<ActionResult<{ id: string }>> {
   return runAction(async () => {
     const { supabase } = await adminAction();
     const parsed = quickKpiSchema.safeParse(label);
     if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
-    const { data: all } = await supabase
-      .from("kpi_definitions")
-      .select("code, label, active, sort_order");
-    const same = (all ?? []).find((k) => k.label.toLowerCase() === parsed.data.toLowerCase());
-    if (same)
+    if (area !== "vista" && area !== "sole") throw new ActionError("Area non valida.");
+    const setName = area === "sole" ? "Sole" : "Vista";
+    const [{ data: all }, { data: set }] = await Promise.all([
+      supabase.from("kpi_definitions").select("id, code, label, active, sort_order"),
+      supabase.from("kpi_sets").select("id").eq("name", setName).maybeSingle(),
+    ]);
+    if (!set) throw new ActionError(`Gruppo ${setName} non trovato.`);
+    const { data: items } = await supabase
+      .from("kpi_set_items")
+      .select("kpi_id, label_override, sort_order")
+      .eq("set_id", set.id);
+
+    const wanted = parsed.data.toLowerCase();
+    let kpi = (all ?? []).find(
+      (k) =>
+        k.label.toLowerCase() === wanted ||
+        (items ?? []).some(
+          (i) => i.kpi_id === k.id && (i.label_override ?? "").toLowerCase() === wanted,
+        ),
+    );
+    if (kpi && kpi.active && (items ?? []).some((i) => i.kpi_id === kpi!.id))
       return {
         ok: false,
-        message: same.active
-          ? `La voce «${same.label}» esiste già.`
-          : `La voce «${same.label}» esiste ma è disattivata: riattivala dalla scheda Voci.`,
+        message: `La colonna «${parsed.data}» c'è già nella tabella ${setName}.`,
       };
-    const code = kpiCodeFromLabel(parsed.data, new Set((all ?? []).map((k) => k.code)));
-    const { data, error } = await supabase
-      .from("kpi_definitions")
-      .insert({
-        code,
-        label: parsed.data,
-        default_target_rule: null,
-        sort_order: Math.max(0, ...(all ?? []).map((k) => k.sort_order)) + 1,
-      })
-      .select("id")
-      .single();
-    if (error || !data) return { ok: false, message: dbErrorMessage(error, "Voce non creata.") };
+
+    if (!kpi) {
+      const code = kpiCodeFromLabel(parsed.data, new Set((all ?? []).map((k) => k.code)));
+      const { data, error } = await supabase
+        .from("kpi_definitions")
+        .insert({
+          code,
+          label: parsed.data,
+          default_target_rule: null,
+          sort_order: Math.max(0, ...(all ?? []).map((k) => k.sort_order)) + 1,
+        })
+        .select("id, code, label, active, sort_order")
+        .single();
+      if (error || !data) return { ok: false, message: dbErrorMessage(error, "Voce non creata.") };
+      kpi = data;
+    } else if (!kpi.active) {
+      const { error } = await supabase
+        .from("kpi_definitions")
+        .update({ active: true })
+        .eq("id", kpi.id);
+      if (error) return { ok: false, message: dbErrorMessage(error, "Voce non riattivata.") };
+    }
+
+    if (!(items ?? []).some((i) => i.kpi_id === kpi!.id)) {
+      const { error } = await supabase.from("kpi_set_items").insert({
+        set_id: set.id,
+        kpi_id: kpi.id,
+        sort_order: Math.max(0, ...(items ?? []).map((i) => i.sort_order)) + 1,
+      });
+      if (error) return { ok: false, message: dbErrorMessage(error, "Colonna non aggiunta.") };
+    }
     revalidatePath("/admin/obiettivi", "layout");
-    return { ok: true, message: `Voce «${parsed.data}» aggiunta.`, data: { id: data.id } };
+    return {
+      ok: true,
+      message: `Colonna «${parsed.data}» aggiunta alla tabella ${setName}.`,
+      data: { id: kpi.id },
+    };
   });
 }
 
