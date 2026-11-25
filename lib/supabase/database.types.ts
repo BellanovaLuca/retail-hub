@@ -2077,6 +2077,7 @@ export type Database = {
       respond_to_swap: { Args: { p_request_id: string; p_accept: boolean }; Returns: undefined };
       responsibility_week_team: { Args: { p_responsibility_id: string; p_date: string }; Returns: string[] };
       responsibility_week_teams: { Args: { p_week: string }; Returns: Json };
+      session_fresh: { Args: Record<PropertyKey, never>; Returns: boolean };
       set_default_rule_set: { Args: { p_rule_set_id: string }; Returns: undefined };
       set_extra_task_done: { Args: { p_task_id: string; p_done: boolean }; Returns: undefined };
       set_performance_note: { Args: { p_goal_id: string; p_note: string }; Returns: undefined };

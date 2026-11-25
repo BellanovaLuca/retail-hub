@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
+import { isSessionExpired } from "@/lib/auth/session-age";
 import { SESSION_MAX_AGE_SECONDS, supabaseAnonKey, supabaseUrl } from "./env";
 
 /** Intestazione di risposta con l'id di chi è collegato, letta dal service worker. */
@@ -37,18 +38,46 @@ export async function updateSession(request: NextRequest) {
 
   // Non inserire codice tra createServerClient e getClaims: serve a rinnovare la sessione.
   const { data } = await supabase.auth.getClaims();
-  const userId = data?.claims?.sub;
-  const signedIn = Boolean(userId);
   const { pathname } = request.nextUrl;
+
+  // Sessione più vecchia di 30 giorni dall'accesso (§4): si chiude e si rientra con il PIN.
+  const expired =
+    Boolean(data?.claims?.sub) && isSessionExpired(data?.claims, Math.floor(Date.now() / 1000));
+  if (expired) {
+    await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+    // Se la chiusura non è riuscita (rete…) i cookie della sessione si tolgono comunque.
+    for (const { name } of request.cookies.getAll()) {
+      if (/^sb-.+-auth-token(\.\d+)?$/.test(name)) {
+        request.cookies.delete(name);
+        response.cookies.set(name, "", { path: "/", maxAge: 0 });
+      }
+    }
+  }
+  /** Riporta sulla risposta i cookie cambiati qui sopra (sessione rinnovata o chiusa). */
+  const withCookies = (res: NextResponse) => {
+    for (const cookie of response.cookies.getAll()) res.cookies.set(cookie);
+    return res;
+  };
+
+  const userId = expired ? undefined : data?.claims?.sub;
+  const signedIn = Boolean(userId);
 
   if (!signedIn && !isPublicPath(pathname)) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+      return withCookies(
+        NextResponse.json(
+          { error: expired ? "Sessione scaduta" : "Non autenticato" },
+          { status: 401 },
+        ),
+      );
     }
     const url = request.nextUrl.clone();
     url.pathname = "/accesso";
-    url.search = pathname === "/" ? "" : `?da=${encodeURIComponent(pathname)}`;
-    return NextResponse.redirect(url);
+    const params = new URLSearchParams();
+    if (expired) params.set("scaduta", "1");
+    if (pathname !== "/") params.set("da", pathname);
+    url.search = params.size ? `?${params}` : "";
+    return withCookies(NextResponse.redirect(url));
   }
 
   if (signedIn && pathname === "/accesso") {

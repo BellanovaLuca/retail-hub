@@ -85,7 +85,7 @@ Niente registrazione pubblica, niente email obbligatoria.
 3.  Implementazione: ogni utente Supabase ha un'email sintetica interna `<codice>@staff.cordusio.local` e come password il PIN. L'email sintetica non compare mai in UI. Signup pubblico disabilitato.
 4.  **Admin**: stesso metodo, ma con **PIN di almeno 8 cifre** (hanno accesso a tutto).
 5.  **PIN dimenticato**: lo resetta un admin (nuovo PIN provvisorio, cambio obbligatorio al primo accesso).
-6.  **Sicurezza**: blocco temporaneo dopo 5 tentativi errati (15 minuti), contatore lato server per codice e per IP; sessione lunga (30 giorni) sul telefono personale; logout da tutti i dispositivi dal profilo; un admin può **disattivare** un account (persona uscita): accesso bloccato, storico conservato.
+6.  **Sicurezza**: blocco temporaneo dopo 5 tentativi errati (15 minuti), contatore lato server per codice e per IP; sessione lunga sul telefono personale: **30 giorni dall'accesso con il PIN**, poi si rientra (limite verificato dall'app e dal database, vedi §22); logout da tutti i dispositivi dal profilo; un admin può **disattivare** un account (persona uscita): accesso bloccato, storico conservato.
 7.  **Facoltativo**: il dipendente può aggiungere un'email nel profilo solo per ricevere le notifiche anche via email.
 8.  Primo accesso: onboarding in 3 schermate (cambia PIN → aggiungi l'app alla schermata Home → attiva le notifiche).
 
@@ -963,3 +963,7 @@ Dove toccano le sezioni precedenti, valgono queste.
 - **Riepilogo giorno per giorno.** Sotto l'assegnazione, e nella pagina Responsabilità dei dipendenti al posto della griglia persone × attività, c'è «chi fa cosa, giorno per giorno»: persone in riga, i sette giorni in colonna, in ogni casella le attività di quella persona in quel giorno (in rosso, per l'admin, se quel giorno non è in turno). «Oggi tocca a te», le spunte e il controllo delle spunte seguono i giorni assegnati.
 - **Niente ✕ sulle colonne.** Una responsabilità si toglie con il pulsante «Togli» accanto al suo titolo (stessa scelta tra togliere dall'elenco ed eliminare); accanto c'è «Scheda e procedura». Negli obiettivi le colonne si tolgono da **«Gestisci colonne»** (elenco delle voci della tabella, «Togli» con conferma nella stessa finestra).
 - **Commento settimanale (§8.3).** Nella pagina Obiettivi del dipendente il primo blocco è sempre «Commento settimanale»: il commento della settimana mostrata (o l'avviso che non c'è ancora) e, sotto, quello sulla settimana trascorsa.
+
+## 22. Controllo del 28 novembre 2026 (sessione e audit)
+
+- **Durata della sessione (§4).** Supabase Auth rinnova il token senza limiti e il cookie di 30 giorni si allungava a ogni visita: chi usava l'app con regolarità non usciva mai. Ora la sessione dura **30 giorni dall'accesso con il PIN** (istante nel claim `amr` del token, che i rinnovi non cambiano): il middleware chiude la sessione e rimanda a `/accesso?scaduta=1` («Sessione scaduta…»), le API rispondono 401; nel database `session_fresh()` fa parte di `is_staff()` e `is_admin()`, quindi un token più vecchio non legge e non scrive nulla nemmeno se usato direttamente sulle API. Restano «Esci», «Esci da tutti i dispositivi» e la chiusura delle altre sessioni al cambio PIN.

@@ -9,5 +9,5 @@ export const supabaseUrl = () =>
 export const supabaseAnonKey = () =>
   required("NEXT_PUBLIC_SUPABASE_ANON_KEY", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-/** Sessione lunga sul telefono personale (§4). */
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+/** Sessione lunga sul telefono personale (§4): durata del cookie e limite dall'accesso. */
+export { SESSION_MAX_AGE_SECONDS } from "@/lib/auth/session-age";

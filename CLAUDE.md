@@ -19,7 +19,7 @@
 
 - Server Actions: `"use server"`, validazione zod, `runAction(async () => { const { supabase, profile } = await adminAction() /* o authedAction() */ ... })` da `lib/auth/guards.ts`, risultato `ActionResult<T>` (`{ ok, message, data?, fieldErrors? }`). Dopo le scritture `revalidatePath`.
 - Pagine: Server Components che caricano i dati con il client di `lib/supabase/server.ts`; guardie `requireProfile()` / `requireAdmin()` da `lib/auth/session.ts`. Client component solo dove serve interazione.
-- `authedAction()`/`adminAction()` richiedono il primo accesso completato (PIN personale + informativa). Letture che possono superare 1000 righe: `fetchAllRows` di `lib/data/paginate.ts`.
+- `authedAction()`/`adminAction()` richiedono il primo accesso completato (PIN personale + informativa). Sessione: al massimo 30 giorni dall'accesso con il PIN (`lib/auth/session-age.ts` nel middleware, `session_fresh()` dentro `is_staff()`/`is_admin()` nel DB). Letture che possono superare 1000 righe: `fetchAllRows` di `lib/data/paginate.ts`.
 - Service role (`lib/supabase/admin.ts`) solo lato server e solo quando RLS non basta (creazione utenti, notifiche, cron).
 - Notifiche: `notify(profileIds, { kind, title, body, link })` / `notifyEach` / `adminIds()` da `lib/notifications.ts`.
 - Logica pura (testata): `lib/shifts/*`, `lib/hours.ts`, `lib/coverage.ts`, `lib/rules/*`, `lib/leaves/parse.ts`, `lib/targets.ts`, `lib/schedule/*`, `lib/kpi/*` (obiettivi per area: `area-tables.ts`), `lib/requests/calendar.ts`, `lib/daily-quote.ts`. Caricamento dati: `lib/data/*`.
