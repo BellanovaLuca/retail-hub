@@ -376,5 +376,87 @@ export function swapErrorMessage(error: { code?: string; message?: string }): st
   if (/ha già un turno il /.test(message))
     return `${message}: lo scambio creerebbe due turni nello stesso giorno. Sistema il foglio turni e riprova, oppure rifiuta.`;
   if (message.includes("accettato dal collega")) return `${message}.`;
+  // Turno cambiato dopo l'accettazione (di norma l'area admin riporta la richiesta in attesa).
+  if (message.startsWith("Il turno dello scambio è cambiato")) return `${message}.`;
   return null;
+}
+
+/* ------------------------------------------------- scambio: firma degli orari */
+
+type TimedPiece = { start: string | null; end: string | null };
+
+const hhmm = (t: string) => t.slice(0, 5);
+
+/** Pezzi con orario di una giornata, in ordine d'inizio ("HH:mm"). */
+function timedPieces(pieces: TimedPiece[]): { start: string; end: string }[] {
+  return pieces
+    .flatMap((p) => (p.start && p.end ? [{ start: hhmm(p.start), end: hhmm(p.end) }] : []))
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** Orari di una giornata come si leggono: "10:00–14:00 · 16:00–20:00", oppure "" senza turni. */
+export function shiftTimesText(pieces: TimedPiece[]): string {
+  return timedPieces(pieces)
+    .map((p) => `${p.start}–${p.end}`)
+    .join(" · ");
+}
+
+/**
+ * Firma degli orari di uno scambio, uguale a quella che il database salva in
+ * `requests.swap_signature` quando il collega accetta (funzione SQL `swap_signature`):
+ * "<orari di chi chiede>|<orari del collega>", ogni parte "HH:MM-HH:MM,HH:MM-HH:MM" in ordine
+ * d'inizio. Serve all'area admin per dire PRIMA dell'approvazione che il turno è cambiato; il
+ * controllo che decide resta quello del database.
+ */
+export function swapSignature(i: {
+  /** Turni di lavoro (tabella `shifts`) dei due colleghi nei giorni dello scambio. */
+  shifts: { profileId: string; date: string; start: string | null; end: string | null }[];
+  requesterId: string;
+  startDate: string;
+  targetId: string | null;
+  targetDate: string | null;
+}): string {
+  const part = (profileId: string | null, date: string | null) =>
+    profileId && date
+      ? timedPieces(i.shifts.filter((s) => s.profileId === profileId && s.date === date))
+          .map((p) => `${p.start}-${p.end}`)
+          .join(",")
+      : "";
+  return `${part(i.requesterId, i.startDate)}|${part(i.targetId, i.targetDate)}`;
+}
+
+/** Inizio del messaggio con cui il database rifiuta uno scambio il cui turno è cambiato. */
+const SWAP_CHANGED_ERROR = "Il turno dello scambio è cambiato";
+
+/**
+ * Il database ha rifiutato l'approvazione perché il turno è cambiato dopo l'accettazione del
+ * collega (trigger `apply_approved_request`): la richiesta va riportata in attesa.
+ */
+export function isSwapChangedError(error: { message?: string } | null | undefined): boolean {
+  return Boolean(error?.message?.startsWith(SWAP_CHANGED_ERROR));
+}
+
+/** Esito mostrato all'admin quando uno scambio torna in attesa del collega. */
+export const SWAP_REOPENED_MESSAGE =
+  "Il turno dello scambio è cambiato dopo l'accettazione del collega: la richiesta è tornata in attesa e il collega è stato avvisato di accettare di nuovo.";
+
+/**
+ * Righe «giorno: orari» dei turni di uno scambio come sono adesso nel foglio turni, per avvisare
+ * i due colleghi di cosa stanno (ri)accettando.
+ */
+export function swapShiftLines(i: {
+  shifts: { profileId: string; date: string; start: string | null; end: string | null }[];
+  requester: { id: string; name: string };
+  target: { id: string; name: string };
+  startDate: string;
+  targetDate: string | null;
+}): string[] {
+  const line = (who: { id: string; name: string }, date: string) => {
+    const text = shiftTimesText(i.shifts.filter((s) => s.profileId === who.id && s.date === date));
+    return `Turno di ${who.name} · ${formatRange(date, date)}: ${text || "nessun turno"}`;
+  };
+  return [
+    line(i.requester, i.startDate),
+    ...(i.targetDate ? [line(i.target, i.targetDate)] : []),
+  ];
 }
