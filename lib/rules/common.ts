@@ -17,6 +17,7 @@ import {
   type MinuteRange,
 } from "@/lib/domain/time";
 import type { DepartmentRef, ISODate, PersonInput, ShiftInput } from "@/lib/domain/types";
+import { resolveOpening } from "@/lib/schedule/opening";
 import type { NumberParam, RuleContext, RuleRecord, Variables, Violation } from "./types";
 
 /* ------------------------------------------------------------------ schemi */
@@ -107,12 +108,14 @@ export function ruleAppliesToWeek(rule: RuleRecord, days: ISODate[]): boolean {
 
 /** Orario di apertura effettivo del giorno: eccezioni, festività a negozio chiuso, orario standard. */
 export function openingFor(ctx: RuleContext, date: ISODate): MinuteRange | null {
-  if (ctx.openingExceptions && date in ctx.openingExceptions) {
-    const exc = ctx.openingExceptions[date];
-    return exc ? toRange(exc) : null;
-  }
-  if (ctx.holidays.some((h) => h.date === date && h.storeClosed)) return null;
-  const hours = ctx.openingHours[weekdayOf(date)];
+  const hours = resolveOpening({
+    exception:
+      ctx.openingExceptions && date in ctx.openingExceptions
+        ? ctx.openingExceptions[date]
+        : undefined,
+    closedHoliday: ctx.holidays.some((h) => h.date === date && h.storeClosed),
+    standard: ctx.openingHours[weekdayOf(date)],
+  });
   return hours ? toRange(hours) : null;
 }
 

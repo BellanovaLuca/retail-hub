@@ -15,26 +15,28 @@ import {
   weekDates,
 } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
-import { shiftNetHours } from "@/lib/hours";
+import { dayNetHours } from "@/lib/hours";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
 import { formatHoursIt, leaveLabelAdmin } from "@/lib/schedule/view";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { CalendarFeed } from "./calendar-feed";
+import { parseMonthParam } from "./month-param";
 import { MonthCalendar } from "./month-calendar";
 
 export const metadata: Metadata = { title: "I miei orari" };
 
 function dayHours(list: PublishedShift[]) {
-  return list
-    .filter((s) => s.start_time && s.end_time)
-    .reduce(
-      (sum, s) =>
-        sum +
-        shiftNetHours({ start: s.start_time!, end: s.end_time!, breakMinutes: s.break_minutes }),
-      0,
-    );
+  const byDay = new Map<string, { start: string; end: string; breakMinutes: number }[]>();
+  for (const s of list) {
+    if (!s.start_time || !s.end_time) continue;
+    const pieces = byDay.get(s.date) ?? [];
+    pieces.push({ start: s.start_time, end: s.end_time, breakMinutes: s.break_minutes });
+    byDay.set(s.date, pieces);
+  }
+  // La pausa vale per la giornata (anche con il turno spezzato).
+  return [...byDay.values()].reduce((sum, pieces) => sum + dayNetHours(pieces), 0);
 }
 
 export default async function OrariPage({
@@ -60,10 +62,9 @@ export default async function OrariPage({
   );
 
   if (view === "mese") {
-    const month =
-      params.mese && /^\d{4}-\d{2}$/.test(params.mese)
-        ? parseISO(`${params.mese}-01`)
-        : startOfMonth(now);
+    // Mese non valido (es. 2026-13) → mese corrente, non una pagina di errore.
+    const requested = parseMonthParam(params.mese);
+    const month = requested ? parseISO(requested) : startOfMonth(now);
     const from = toISODate(startOfMonth(month));
     const to = toISODate(endOfMonth(month));
     const [mine, { data: leaves }] = await Promise.all([

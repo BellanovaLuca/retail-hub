@@ -103,6 +103,31 @@ describe("parseCount / formatCount", () => {
     expect(formatCount(2.5)).toBe("2,5");
     expect(formatCount(null)).toBe("");
   });
+  it("rilegge ciò che formatCount scrive, migliaia comprese", () => {
+    expect(formatCount(12345)).toBe("12.345");
+    expect(parseCount("12.345")).toBe(12345);
+    expect(parseCount("1.234,5")).toBe(1234.5);
+    for (const n of [0, 3, 2.5, 0.25, 1234, 1234.5, 12345, 99999]) {
+      expect(parseCount(formatCount(n))).toBe(n);
+    }
+    // Il punto resta decimale quando non è un separatore delle migliaia.
+    expect(parseCount("2.5")).toBe(2.5);
+    expect(parseCount("0.125")).toBe("invalid"); // al massimo 2 decimali
+    expect(parseCount("1.2345")).toBe("invalid");
+  });
+  it("somma della settimana arrotondata: 0,7 + 0,1 raggiunge l'obiettivo 0,8", () => {
+    const [row] = buildPersonSheet({
+      days,
+      kpis: [kpis[0]],
+      entries: [
+        { kpiId: "k-wo", date: days[0], value: 0.7 },
+        { kpiId: "k-wo", date: days[1], value: 0.1 },
+      ],
+      targets: { "k-wo": 0.8 },
+    });
+    expect(row).toMatchObject({ done: 0.8, remaining: 0, reached: true, ratio: 1 });
+    expect(remainingText(row)).toBe("Obiettivo raggiunto ✓");
+  });
   it("barra di avanzamento plafonata", () => {
     expect(progressRatio(20, 10)).toBe(1);
     expect(progressRatio(0, 0)).toBe(1);

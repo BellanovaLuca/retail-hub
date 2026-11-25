@@ -9,15 +9,18 @@ import type { DepartmentRef, Interval, PersonInput, ShiftInput, Zone } from "@/l
 import { residualHoursByDay, totalContractHours } from "@/lib/hours";
 import { resolveBackOffice, resolveZone } from "@/lib/schedule/cells";
 import type { LeaveRecord, SchedulePerson, ShiftRecord } from "@/lib/schedule/types";
+import { isHolidayClosure, openingFor } from "@/lib/schedule/opening";
 import { isFullDayLeave, leaveLabelAdmin } from "@/lib/schedule/view";
 import {
   hourCellValue,
   markedSlotsToSegments,
+  repaintedSegments,
   segmentsToMarkedSlots,
   SLOT_COUNT,
   SLOT_FIRST_HOUR,
   SLOT_LAST_HOUR,
   slotTime,
+  type MarkedSegment,
   type SlotMark,
 } from "@/lib/shifts/slots";
 
@@ -97,7 +100,11 @@ export function marksFromShifts(dayShifts: ShiftInput[]): SlotMark[] {
   );
 }
 
-/** Giornata ridipinta → turni del dominio (per indicatori e ore, prima che il server risponda). */
+/**
+ * Giornata ridipinta → turni del dominio (per indicatori e ore, prima che il server risponda).
+ * Con `original` (i turni com'erano, back office risolto) si applicano solo le mezze celle
+ * cambiate: gli estremi non toccati restano quelli veri (quarti d'ora, ore fuori 07–22).
+ */
 export function shiftsFromMarks(
   marks: SlotMark[],
   base: {
@@ -107,18 +114,31 @@ export function shiftsFromMarks(
     departmentId: string | null;
     breakMinutes: number;
   },
+  original?: MarkedSegment[],
 ): ShiftInput[] {
-  const segments = markedSlotsToSegments(marks);
+  const segments = original ? repaintedSegments(original, marks) : markedSlotsToSegments(marks);
   return segments.map((seg, i) => ({
     profileId: base.profileId,
     date: base.date,
     start: seg.start,
     end: seg.end,
-    breakMinutes: segments.length === 1 && i === 0 ? base.breakMinutes : 0,
+    breakMinutes: i === 0 ? repaintBreak(base.breakMinutes, original, segments.length) : 0,
     zone: base.zone,
     backOffice: seg.backOffice,
     departmentId: base.departmentId,
   }));
+}
+
+/**
+ * Pausa di una giornata ridipinta: resta quella di prima se il numero di pezzi non cambia (si
+ * sono solo spostati gli estremi); se i pezzi cambiano, i vuoti dipinti sono già la pausa.
+ */
+export function repaintBreak(
+  breakMinutes: number,
+  original: MarkedSegment[] | undefined,
+  pieces: number,
+): number {
+  return pieces === (original ? Math.max(1, original.length) : 1) ? breakMinutes : 0;
 }
 
 export function emptyMarks(): SlotMark[] {
@@ -134,15 +154,8 @@ export function leaveFill(leave: Pick<LeaveRecord, "type" | "source">): LeaveFil
   return "other";
 }
 
-/** Orario di apertura del giorno (eccezioni e festivi compresi); null = negozio chiuso. */
-export function openingFor(date: string, calendar: TimesheetCalendar): Interval | null {
-  if (calendar.holidays.some((h) => h.date === date && h.storeClosed)) return null;
-  const hours =
-    date in calendar.exceptions
-      ? calendar.exceptions[date]
-      : calendar.openingHours[String(weekdayOf(date))];
-  return hours ? { start: hours.open, end: hours.close } : null;
-}
+/** Orario di apertura del giorno (eccezione > festivo chiuso > standard); null = negozio chiuso. */
+export { openingFor };
 
 /** true se la mezza cella `slot` cade fuori dall'orario di apertura. */
 export function isSlotOutsideOpening(slot: number, opening: Interval | null): boolean {
@@ -231,7 +244,7 @@ export function buildTimesheetModel(input: {
       date,
       label: `${WEEKDAYS[weekdayOf(date) - 1]} ${d}/${m}`,
       weekday: WEEKDAYS[weekdayOf(date) - 1],
-      closed: Boolean(holiday?.storeClosed),
+      closed: isHolidayClosure(date, calendar),
       holidayLabel: holiday?.label ?? null,
       opening: openingFor(date, calendar),
       residual: ordered.map((p) => residuals.get(p.id)?.[dayIndex]?.before ?? null),

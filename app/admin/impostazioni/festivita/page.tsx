@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { nowInRome } from "@/lib/dates";
 import { HolidaysEditor } from "./holidays-editor";
@@ -10,6 +11,7 @@ export default async function FestivitaPage({
 }: {
   searchParams: Promise<{ anno?: string }>;
 }) {
+  await requireAdmin();
   const { anno } = await searchParams;
   const current = nowInRome().getFullYear();
   const year = Number(anno) >= 2020 && Number(anno) <= 2100 ? Number(anno) : current;

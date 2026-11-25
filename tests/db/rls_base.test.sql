@@ -8,10 +8,14 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000e1', 'crd-001@staff.cordusio.local'),
   ('00000000-0000-0000-0000-0000000000e2', 'crd-002@staff.cordusio.local');
 
-insert into public.profiles (id, first_name, last_name, display_name, employee_code, role, weekly_hours, admin_notes) values
-  ('00000000-0000-0000-0000-00000000000a', 'Anna', 'Admin', 'Anna', 'ADM-001', 'admin', 40, null),
-  ('00000000-0000-0000-0000-0000000000e1', 'Francesca', 'Uno', 'Francesca', 'CRD-001', 'employee', 40, 'riservato 1'),
-  ('00000000-0000-0000-0000-0000000000e2', 'Francesca', 'Due', 'Francy', 'CRD-002', 'employee', 24, 'riservato 2');
+insert into public.profiles (id, first_name, last_name, display_name, employee_code, role, weekly_hours) values
+  ('00000000-0000-0000-0000-00000000000a', 'Anna', 'Admin', 'Anna', 'ADM-001', 'admin', 40),
+  ('00000000-0000-0000-0000-0000000000e1', 'Francesca', 'Uno', 'Francesca', 'CRD-001', 'employee', 40),
+  ('00000000-0000-0000-0000-0000000000e2', 'Francesca', 'Due', 'Francy', 'CRD-002', 'employee', 24);
+-- Le note riservate degli admin stanno in una tabella a parte (solo admin).
+insert into public.profile_admin_notes (profile_id, notes) values
+  ('00000000-0000-0000-0000-0000000000e1', 'riservato 1'),
+  ('00000000-0000-0000-0000-0000000000e2', 'riservato 2');
 
 -- Nome visualizzato univoco, anche cambiando le maiuscole.
 do $$

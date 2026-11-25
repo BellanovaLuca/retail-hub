@@ -1,6 +1,6 @@
 import { format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
-import { shiftNetHours } from "@/lib/hours";
+import { dayNetHours, formatHours } from "@/lib/hours";
 import type { LeaveRecord, SchedulePerson, ShiftRecord, TemplateRecord } from "./types";
 
 export const key = (profileId: string, date: string) => `${profileId}|${date}`;
@@ -47,21 +47,28 @@ export function groupShiftsByDay(shifts: ShiftRecord[]) {
   return map;
 }
 
+/** Ore nette per persona: la pausa vale per la giornata (vedi `dayNetHours`). */
 export function weekHoursByPerson(shifts: ShiftRecord[]) {
-  const out = new Map<string, number>();
+  const days = new Map<string, { start: string; end: string; breakMinutes: number }[]>();
   for (const s of shifts) {
     if (!s.start || !s.end) continue;
-    out.set(
-      s.profileId,
-      (out.get(s.profileId) ?? 0) +
-        shiftNetHours({ start: s.start, end: s.end, breakMinutes: s.breakMinutes }),
-    );
+    const k = key(s.profileId, s.date);
+    const piece = { start: s.start, end: s.end, breakMinutes: s.breakMinutes };
+    const list = days.get(k);
+    if (list) list.push(piece);
+    else days.set(k, [piece]);
+  }
+  const out = new Map<string, number>();
+  for (const [k, pieces] of days) {
+    const profileId = k.split("|")[0];
+    out.set(profileId, (out.get(profileId) ?? 0) + dayNetHours(pieces));
   }
   return out;
 }
 
+/** Ore all'italiana senza arrotondare alla mezz'ora: 7,75 resta "7,75" (come nel foglio orario). */
 export function formatHoursIt(n: number) {
-  return (Math.round(n * 2) / 2).toLocaleString("it-IT", { maximumFractionDigits: 1 });
+  return formatHours(n);
 }
 
 /** Righe raggruppate per reparto principale, nell'ordine dei reparti e poi manuale. */

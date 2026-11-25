@@ -13,6 +13,7 @@ import type { DepartmentRef, ShiftInput, Zone } from "@/lib/domain/types";
 import {
   leaveFill,
   openingFor,
+  repaintBreak,
   shiftsFromMarks,
   timesheetGroups,
   toPersonInput,
@@ -21,8 +22,10 @@ import {
 } from "@/lib/export/timesheet-model";
 import { formatHours, residualHoursByDay, totalContractHours } from "@/lib/hours";
 import type { LeaveRecord, SchedulePerson, ShiftRecord } from "@/lib/schedule/types";
+import { resolveBackOffice } from "@/lib/schedule/cells";
+import { isHolidayClosure } from "@/lib/schedule/opening";
 import { isFullDayLeave, leaveLabelAdmin } from "@/lib/schedule/view";
-import { markedSlotsToSegments, type SlotMark } from "@/lib/shifts/slots";
+import { repaintedSegments, type SlotMark } from "@/lib/shifts/slots";
 import { cn } from "@/lib/utils";
 import {
   tableWidth,
@@ -153,21 +156,29 @@ export function Timesheet({
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
 
-  /** Base comune per i turni ricostruiti dalle mezze celle (reparto, pausa). */
+  /** Base comune per i turni ricostruiti dalle mezze celle (reparto, pausa, turni com'erano). */
   const metaFor = useCallback(
     (profileId: string, date: string) => {
       const records = recordsByKey.get(k(profileId, date)) ?? [];
       const timed = records.filter((r) => r.start && r.end);
       const first = timed[0] ?? records[0];
+      const person = peopleById.get(profileId);
       return {
         first,
         departmentId: first?.departmentId ?? null,
         note: first?.note ?? null,
         zone: (records.find((r) => r.zone)?.zone ?? null) as Zone | null,
-        breakMinutes: timed.length === 1 ? timed[0].breakMinutes : 0,
+        // Pausa della giornata: resta se ridipingendo il numero di pezzi non cambia.
+        breakMinutes: timed.reduce((sum, r) => sum + r.breakMinutes, 0),
+        // Turni salvati (back office risolto): ridipingendo si applicano solo le celle cambiate.
+        original: timed.map((r) => ({
+          start: r.start!,
+          end: r.end!,
+          backOffice: resolveBackOffice(r, person),
+        })),
       };
     },
-    [recordsByKey],
+    [recordsByKey, peopleById],
   );
 
   /** Turni effettivi: salvati, sostituiti dalle giornate ridipinte in attesa di conferma. */
@@ -179,13 +190,17 @@ export function Timesheet({
       const meta = metaFor(profileId, date);
       const person = peopleById.get(profileId);
       out.push(
-        ...shiftsFromMarks(o.marks, {
-          profileId,
-          date,
-          zone: o.zone ?? (person && person.homeZone !== "jolly" ? person.homeZone : null),
-          departmentId: meta.departmentId,
-          breakMinutes: meta.breakMinutes,
-        }),
+        ...shiftsFromMarks(
+          o.marks,
+          {
+            profileId,
+            date,
+            zone: o.zone ?? (person && person.homeZone !== "jolly" ? person.homeZone : null),
+            departmentId: meta.departmentId,
+            breakMinutes: meta.breakMinutes,
+          },
+          meta.original,
+        ),
       );
     }
     return out;
@@ -227,7 +242,7 @@ export function Timesheet({
       const value: DayData = {
         date,
         label: `${WEEKDAYS[weekdayOf(date) - 1]} ${Number(date.slice(8, 10))}`,
-        closed: Boolean(holiday?.storeClosed),
+        closed: isHolidayClosure(date, calendar),
         holidayLabel: holiday?.label ?? null,
         opening: openingFor(date, calendar),
         inputs: effectiveInputs.filter((s) => s.date === date),
@@ -283,7 +298,7 @@ export function Timesheet({
         const person = peopleById.get(profileId);
         const meta = metaFor(profileId, date);
         const defaultBo = person ? !person.countsForCoverage : false;
-        const segments = markedSlotsToSegments(o.marks).map((s) => ({
+        const segments = repaintedSegments(meta.original, o.marks).map((s) => ({
           start: s.start,
           end: s.end,
           // null = valore predefinito del profilo: lo si scrive solo se diverso.
@@ -296,7 +311,7 @@ export function Timesheet({
             date,
             templateId: null,
             segments,
-            breakMinutes: segments.length === 1 ? meta.breakMinutes : 0,
+            breakMinutes: repaintBreak(meta.breakMinutes, meta.original, segments.length),
             departmentId: meta.departmentId,
             zone: o.zone ?? meta.zone,
             note: meta.note,
@@ -322,7 +337,7 @@ export function Timesheet({
   const applyAndSave = useCallback(
     (profileId: string, date: string, marks: SlotMark[], zone: Zone | null, debounceMs: number) => {
       const key = k(profileId, date);
-      if (markedSlotsToSegments(marks).length > MAX_SEGMENTS) {
+      if (repaintedSegments(metaFor(profileId, date).original, marks).length > MAX_SEGMENTS) {
         setMessage(`Al massimo ${MAX_SEGMENTS} fasce per giornata: riempi qualche vuoto.`);
         return;
       }
@@ -343,7 +358,7 @@ export function Timesheet({
         runSave(profileId, date);
       }
     },
-    [runSave],
+    [runSave, metaFor],
   );
 
   useEffect(() => {

@@ -3,7 +3,8 @@
  * PDF A4 orizzontale per la bacheca). Puro: riceve dati già caricati.
  */
 import { weekNumber } from "@/lib/dates";
-import { cellText, publishedDayText } from "@/lib/schedule/cells";
+import { cellText, publishedDayText, resolveBackOffice } from "@/lib/schedule/cells";
+import { isHolidayClosure } from "@/lib/schedule/opening";
 import type {
   LeaveRecord,
   PublishedShift,
@@ -53,7 +54,7 @@ function dayColumns(days: string[], calendar?: TimesheetCalendar) {
       date,
       label: h.label,
       sublabel: holiday ? `${h.sublabel} · ${holiday.label}` : h.sublabel,
-      closed: Boolean(holiday?.storeClosed),
+      closed: calendar ? isHolidayClosure(date, calendar) : false,
     };
   });
 }
@@ -91,7 +92,7 @@ export function buildAdminGridModel(input: {
       cells: columns.map((col) => {
         const k = key(p.id, col.date);
         const dayShifts = byDay.get(k) ?? [];
-        const text = cellText(dayShifts, tplById);
+        const text = cellText(dayShifts, tplById, (s) => resolveBackOffice(s, p));
         const leave = leaveByDay.get(k);
         if (text) {
           const isAbsence = dayShifts.every(

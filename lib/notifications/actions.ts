@@ -3,9 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { authedAction, dbErrorMessage, runAction, type ActionResult } from "@/lib/auth/guards";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isAllowedPushEndpoint, PUSH_ENDPOINT_MAX_LENGTH } from "./push-endpoint";
+
+/** Solo HTTPS verso i servizi push dei browser (vedi push-endpoint.ts). */
+const endpointSchema = z
+  .string()
+  .max(PUSH_ENDPOINT_MAX_LENGTH)
+  .refine(isAllowedPushEndpoint, "Servizio push non riconosciuto.");
 
 const subscriptionSchema = z.object({
-  endpoint: z.url().max(1000),
+  endpoint: endpointSchema,
   keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(8).max(100) }),
 });
 
@@ -14,17 +22,23 @@ export async function savePushSubscription(
   userAgent: string,
 ): Promise<ActionResult> {
   return runAction(async () => {
-    const { supabase, profile } = await authedAction();
+    const { profile } = await authedAction();
     const parsed = subscriptionSchema.safeParse(input);
     if (!parsed.success) return { ok: false, message: "Sottoscrizione non valida." };
-    // Lo stesso dispositivo può passare a un altro utente: si riassegna.
-    await supabase.from("push_subscriptions").delete().eq("endpoint", parsed.data.endpoint);
-    const { error } = await supabase.from("push_subscriptions").insert({
-      profile_id: profile.id,
-      endpoint: parsed.data.endpoint,
-      keys: parsed.data.keys,
-      user_agent: userAgent.slice(0, 200),
-    });
+    // Lo stesso dispositivo può passare a un altro utente: l'indirizzo è unico e si riassegna a
+    // chi è collegato ora. Con la sessione dell'utente RLS non lascerebbe toccare la riga del
+    // precedente (e l'inserimento fallirebbe): qui scrive il server.
+    const { error } = await createAdminClient()
+      .from("push_subscriptions")
+      .upsert(
+        {
+          profile_id: profile.id,
+          endpoint: parsed.data.endpoint,
+          keys: parsed.data.keys,
+          user_agent: String(userAgent ?? "").slice(0, 200),
+        },
+        { onConflict: "endpoint" },
+      );
     if (error) return { ok: false, message: dbErrorMessage(error, "Notifiche non attivate.") };
     return { ok: true, message: "Notifiche attive su questo dispositivo." };
   });
@@ -36,9 +50,30 @@ export async function deletePushSubscription(endpoint: string): Promise<ActionRe
     await supabase
       .from("push_subscriptions")
       .delete()
-      .eq("endpoint", z.string().max(1000).parse(endpoint));
+      .eq("endpoint", z.string().max(PUSH_ENDPOINT_MAX_LENGTH).parse(endpoint));
     return { ok: true, message: "Notifiche disattivate su questo dispositivo." };
   });
+}
+
+/**
+ * La sottoscrizione push di questo browser è registrata a nome di chi è collegato ora?
+ * Il browser la conserva anche dopo un cambio di utente: il toggle non può fidarsi solo di lui.
+ */
+export async function isPushSubscriptionMine(endpoint: string): Promise<boolean> {
+  try {
+    const { supabase, profile } = await authedAction();
+    const parsed = z.string().max(PUSH_ENDPOINT_MAX_LENGTH).safeParse(endpoint);
+    if (!parsed.success) return false;
+    const { data } = await supabase
+      .from("push_subscriptions")
+      .select("id")
+      .eq("endpoint", parsed.data)
+      .eq("profile_id", profile.id)
+      .maybeSingle();
+    return Boolean(data);
+  } catch {
+    return false;
+  }
 }
 
 export async function markNotificationRead(id: string): Promise<ActionResult> {
@@ -120,7 +155,6 @@ export async function saveNotificationSettings(input: {
 
     // notification_prefs non è tra i campi modificabili dal dipendente via RLS (guardia sul profilo):
     // l'aggiornamento passa dal server, solo sulla riga della persona collegata.
-    const { createAdminClient } = await import("@/lib/supabase/admin");
     const { error } = await createAdminClient()
       .from("profiles")
       .update({ notification_prefs: v.prefs, email: v.email || null, phone: v.phone || null })

@@ -8,6 +8,8 @@ import {
   runAction,
   type ActionResult,
 } from "@/lib/auth/guards";
+import { getPeopleKpis } from "@/lib/data/targets";
+import { entriesOutsideSheet, weeksOfDates } from "./entry-rules";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -38,6 +40,27 @@ export async function saveMyEntries(
     const upserts = parsed.data.filter((e) => e.value !== null);
     const deletes = parsed.data.filter((e) => e.value === null);
     if (upserts.length) {
+      // Solo le voci del proprio foglio o con un proprio obiettivo in quella settimana: RLS
+      // controlla persona e giorno, non la voce, e i numeri finiscono nei totali del negozio.
+      const [kpis, { data: targets, error: targetsError }] = await Promise.all([
+        getPeopleKpis(supabase, [{ id: profile.id, zone: profile.home_zone }]),
+        supabase
+          .from("weekly_targets")
+          .select("kpi_id, week_start")
+          .eq("profile_id", profile.id)
+          .in("week_start", weeksOfDates(upserts.map((e) => e.date))),
+      ]);
+      if (targetsError) throw new ActionError("Numeri non salvati. Riprova.");
+      const outside = entriesOutsideSheet(upserts, {
+        sheetKpiIds: (kpis.get(profile.id) ?? []).map((k) => k.kpiId),
+        targets: (targets ?? []).map((t) => ({ kpiId: t.kpi_id, weekStart: t.week_start })),
+      });
+      if (outside.length) {
+        throw new ActionError(
+          "Una voce non è nel tuo foglio di questa settimana: ricarica la pagina e riprova.",
+        );
+      }
+
       const { error } = await supabase.from("daily_entries").upsert(
         upserts.map((e) => ({
           profile_id: profile.id,

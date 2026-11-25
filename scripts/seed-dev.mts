@@ -1,11 +1,21 @@
 // pnpm seed:dev — persone inventate per lo sviluppo (MAI su produzione).
 // Include tre "Francesca" per provare il nome visualizzato univoco.
-import { adminClient, createPerson, loadEnv, type NewPerson } from "./lib";
+import { adminClient, createPerson, isLocalUrl, loadEnv, type NewPerson } from "./lib";
 
 loadEnv();
 
 if (process.env.VERCEL_ENV === "production") {
   console.error("seed:dev non va eseguito in produzione.");
+  process.exit(1);
+}
+// I PIN di prova sono scritti in questo file: mai su un progetto Supabase vero.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+if (!isLocalUrl(supabaseUrl) && process.env.SEED_DEV_ALLOW_REMOTE !== "1") {
+  console.error(
+    `seed:dev crea account con PIN noti e va usato solo sullo stack locale.\n` +
+      `NEXT_PUBLIC_SUPABASE_URL punta a "${supabaseUrl || "(vuoto)"}": non procedo.\n` +
+      `Se è davvero un ambiente di prova, rilancia con SEED_DEV_ALLOW_REMOTE=1.`,
+  );
   process.exit(1);
 }
 

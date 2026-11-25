@@ -73,7 +73,7 @@ export default async function RegistroPage({
         <ol className="border-t border-line">
           {(rows ?? []).map((r) => {
             const subject = subjectProfileId(r.entity, r.entity_id, r.diff);
-            const lines = summarizeDiff(r.action, r.diff);
+            const lines = summarizeDiff(r.action, r.diff, 6, r.entity);
             return (
               <li
                 key={r.id}

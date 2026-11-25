@@ -12,7 +12,7 @@ import { getUnreadAnnouncements } from "@/lib/data/announcements";
 import { getTodayDuties } from "@/lib/data/responsibilities";
 import { getPublicPeople, getPublishedShifts, weekDates } from "@/lib/data/schedule";
 import { formatLong, nowInRome, toISODate, weekNumber, weekStart } from "@/lib/dates";
-import { shiftNetHours } from "@/lib/hours";
+import { dayNetHours } from "@/lib/hours";
 import { groupLeavePeriods } from "@/lib/leaves/plan";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
@@ -28,15 +28,17 @@ function greeting(hour: number) {
   return "Buonasera";
 }
 
-const hours = (list: PublishedShift[]) =>
-  list
-    .filter((s) => s.start_time && s.end_time)
-    .reduce(
-      (n, s) =>
-        n +
-        shiftNetHours({ start: s.start_time!, end: s.end_time!, breakMinutes: s.break_minutes }),
-      0,
-    );
+function hours(list: PublishedShift[]) {
+  const byDay = new Map<string, { start: string; end: string; breakMinutes: number }[]>();
+  for (const s of list) {
+    if (!s.start_time || !s.end_time) continue;
+    const pieces = byDay.get(s.date) ?? [];
+    pieces.push({ start: s.start_time, end: s.end_time, breakMinutes: s.break_minutes });
+    byDay.set(s.date, pieces);
+  }
+  // La pausa vale per la giornata (anche con il turno spezzato).
+  return [...byDay.values()].reduce((sum, pieces) => sum + dayNetHours(pieces), 0);
+}
 
 function dayWord(date: string, today: string) {
   const diff = differenceInCalendarDays(parseISO(date), parseISO(today));
@@ -83,7 +85,10 @@ export default async function HomePage() {
     .sort()
     .find((d) => d > today || (d === today && byDate(d).some((s) => (s.end_time ?? "") > nowTime)));
   const nextShifts = next ? byDate(next).filter((s) => !s.is_absence) : [];
-  const nextStart = nextShifts.map((s) => s.start_time!).sort()[0];
+  // Tutti i pezzi del turno (più di uno se è spezzato): il conto alla rovescia sceglie quello giusto.
+  const nextPieces = nextShifts
+    .filter((s) => s.start_time)
+    .map((s) => ({ start: s.start_time!, end: s.end_time }));
   const weekShifts = mine.filter((s) => s.date >= days[0] && s.date <= days[6]);
   const names = new Map(people.map((p) => [p.id, p.displayName]));
   const todayTeam = [
@@ -112,7 +117,9 @@ export default async function HomePage() {
                 {dayWord(next, today)} ·{" "}
                 <span className="nums">{publishedDayText(nextShifts)}</span>
               </p>
-              {next === today && nextStart ? <Countdown date={next} start={nextStart} /> : null}
+              {next === today && nextPieces.length ? (
+                <Countdown date={next} pieces={nextPieces} />
+              ) : null}
               {nextShifts[0]?.zone ? (
                 <p className="mt-2 text-sm text-muted">
                   {nextShifts[0].zone === "vista" ? "Vista" : "Sole"}

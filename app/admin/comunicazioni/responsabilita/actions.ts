@@ -136,7 +136,14 @@ export async function saveResponsibility(
       const { error } = await supabase
         .from("responsibility_assignees")
         .insert(toAdd.map((a) => ({ ...a, responsibility_id: v.id })));
-      if (error) return { ok: false, message: dbErrorMessage(error, "Assegnazioni non salvate.") };
+      if (error) {
+        // Si rimettono le assegnazioni appena tolte: meglio lo stato di prima che uno a metà.
+        if (toRemove.length > 0)
+          await supabase
+            .from("responsibility_assignees")
+            .insert(toRemove.map((a) => ({ ...a, responsibility_id: v.id })));
+        return { ok: false, message: dbErrorMessage(error, "Assegnazioni non salvate.") };
+      }
     }
 
     if (existing) {
@@ -289,6 +296,71 @@ export async function deleteResponsibility(id: string): Promise<ActionResult> {
   });
 }
 
+const quickTitleSchema = z
+  .string()
+  .trim()
+  .min(1, "Scrivi il nome della responsabilità.")
+  .max(120, "Nome troppo lungo.");
+
+/**
+ * Aggiunge al volo una responsabilità dalla griglia «Chi fa cosa»: prevista tutti i giorni, senza
+ * procedura (si completa poi dalla sua scheda) e senza persone (si spuntano nella griglia).
+ */
+export async function quickAddResponsibility(title: string): Promise<ActionResult<{ id: string }>> {
+  return runAction(async () => {
+    const parsed = quickTitleSchema.safeParse(title);
+    if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
+    const { supabase } = await adminAction();
+    const { data: all } = await supabase
+      .from("responsibilities")
+      .select("title, active, sort_order");
+    const same = (all ?? []).find(
+      (r) => r.title.trim().toLowerCase() === parsed.data.toLowerCase(),
+    );
+    if (same)
+      return {
+        ok: false,
+        message: same.active
+          ? `«${same.title}» c'è già.`
+          : `«${same.title}» esiste ma è stata tolta dal tabellone: rimettila dall'elenco «Attività» qui sotto.`,
+      };
+    const { data, error } = await supabase
+      .from("responsibilities")
+      .insert({
+        title: parsed.data,
+        sort_order: Math.max(0, ...(all ?? []).map((r) => r.sort_order)) + 1,
+      })
+      .select("id")
+      .single();
+    if (error || !data)
+      return { ok: false, message: dbErrorMessage(error, "Responsabilità non aggiunta.") };
+    revalidateAll();
+    return { ok: true, message: `«${parsed.data}» aggiunta.`, data: { id: data.id } };
+  });
+}
+
+/** Toglie dal tabellone (o rimette) una responsabilità conservandone lo storico delle spunte. */
+export async function setResponsibilityActive(id: string, active: boolean): Promise<ActionResult> {
+  return runAction(async () => {
+    if (!idSchema.safeParse(id).success) throw new ActionError("Attività non valida.");
+    const { supabase } = await adminAction();
+    const { data, error } = await supabase
+      .from("responsibilities")
+      .update({ active })
+      .eq("id", id)
+      .select("id");
+    if (error) return { ok: false, message: dbErrorMessage(error, "Operazione non riuscita.") };
+    if (!data?.length) return { ok: false, message: "Attività non trovata: ricarica la pagina." };
+    revalidateAll();
+    return {
+      ok: true,
+      message: active
+        ? "Responsabilità rimessa nel tabellone."
+        : "Responsabilità tolta dal tabellone.",
+    };
+  });
+}
+
 export async function reorderResponsibilities(orderedIds: string[]): Promise<ActionResult> {
   return runAction(async () => {
     const parsed = z.array(z.uuid()).max(200).safeParse(orderedIds);
@@ -351,7 +423,11 @@ export async function createExtraTask(input: ExtraTaskInput): Promise<ActionResu
     const { error: aError } = await supabase
       .from("extra_task_assignees")
       .insert(v.assigneeIds.map((id) => ({ task_id: task.id, profile_id: id })));
-    if (aError) return { ok: false, message: dbErrorMessage(aError, "Assegnatari non salvati.") };
+    if (aError) {
+      // Niente attività senza assegnatari: si annulla la creazione.
+      await supabase.from("extra_tasks").delete().eq("id", task.id);
+      return { ok: false, message: dbErrorMessage(aError, "Assegnatari non salvati.") };
+    }
 
     await notify(v.assigneeIds, {
       kind: "assignment_new",

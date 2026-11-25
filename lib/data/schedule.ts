@@ -1,7 +1,9 @@
 import "server-only";
 import { addDays, format, parseISO } from "date-fns";
 import type { createClient } from "@/lib/supabase/server";
+import type { Database } from "@/lib/supabase/types";
 import { parseOpeningHours, type OpeningHoursMap } from "@/lib/settings";
+import { fetchAllRows } from "./paginate";
 import type {
   LeaveRecord,
   PublishedShift,
@@ -165,14 +167,7 @@ export async function getAdminWeek(db: Db, weekStart: string): Promise<AdminWeek
   if (!week) throw new Error("Settimana non disponibile");
 
   const days = weekDates(weekStart);
-  const [{ data: shifts }, { data: leaves }] = await Promise.all([
-    db.from("shifts").select("*").eq("week_id", week.id),
-    db
-      .from("leaves")
-      .select("profile_id, date, type, hours, status, source")
-      .gte("date", days[0])
-      .lte("date", days[6]),
-  ]);
+  const { shifts, leaves } = await readWeekShiftsAndLeaves(db, week.id, days);
 
   return {
     week: {
@@ -186,6 +181,37 @@ export async function getAdminWeek(db: Db, weekStart: string): Promise<AdminWeek
       publishedShifts: (week.published_shifts ?? []) as unknown as PublishedShift[],
     },
     days,
+    shifts,
+    leaves,
+  };
+}
+
+/**
+ * Turni di lavoro (in ordine stabile: giorno, orario d'inizio, id) e assenze di una settimana.
+ * Senza `weekId` (settimana non ancora creata) i turni sono vuoti.
+ */
+async function readWeekShiftsAndLeaves(
+  db: Db,
+  weekId: string | null,
+  days: string[],
+): Promise<{ shifts: ShiftRecord[]; leaves: LeaveRecord[] }> {
+  const [{ data: shifts }, { data: leaves }] = await Promise.all([
+    weekId
+      ? db
+          .from("shifts")
+          .select("*")
+          .eq("week_id", weekId)
+          .order("date")
+          .order("start_time")
+          .order("id")
+      : Promise.resolve({ data: [] as Parameters<typeof toShiftRecord>[0][] }),
+    db
+      .from("leaves")
+      .select("profile_id, date, type, hours, status, source")
+      .gte("date", days[0])
+      .lte("date", days[6]),
+  ]);
+  return {
     shifts: (shifts ?? []).map(toShiftRecord),
     leaves: (leaves ?? []).map((l) => ({
       profileId: l.profile_id,
@@ -196,6 +222,24 @@ export async function getAdminWeek(db: Db, weekStart: string): Promise<AdminWeek
       source: l.source,
     })),
   };
+}
+
+/**
+ * Turni di lavoro e assenze della settimana in SOLA LETTURA: a differenza di `getAdminWeek` non
+ * crea la settimana se manca (serve alle pagine che la guardano soltanto, es. l'effetto di una
+ * richiesta sulla copertura: aprire una pagina non deve scrivere nel database).
+ */
+export async function getWeekWorkingData(
+  db: Db,
+  weekStart: string,
+): Promise<{ days: string[]; shifts: ShiftRecord[]; leaves: LeaveRecord[] }> {
+  const days = weekDates(weekStart);
+  const { data: week } = await db
+    .from("schedule_weeks")
+    .select("id")
+    .eq("week_start", weekStart)
+    .maybeSingle();
+  return { days, ...(await readWeekShiftsAndLeaves(db, week?.id ?? null, days)) };
 }
 
 export function toShiftRecord(s: {
@@ -235,10 +279,23 @@ export async function getPublishedShifts(
   to: string,
   profileId?: string,
 ): Promise<(PublishedShift & { week_version: number })[]> {
-  let query = db.from("published_shifts").select("*").gte("date", from).lte("date", to);
-  if (profileId) query = query.eq("profile_id", profileId);
-  const { data } = await query.order("date").order("start_time");
-  return (data ?? []).map((s) => ({
+  // A pagine: su più settimane (es. i 4 mesi della nuova richiesta) le righe superano le 1000.
+  const data = await fetchAllRows((start, end) => {
+    let query = db
+      .from("published_shifts")
+      .select("*", { count: "exact" })
+      .gte("date", from)
+      .lte("date", to);
+    if (profileId) query = query.eq("profile_id", profileId);
+    return query.order("date").order("start_time").order("id").range(start, end);
+  });
+  return data.map(toPublishedShift);
+}
+
+type PublishedShiftRow = Database["public"]["Views"]["published_shifts"]["Row"];
+
+function toPublishedShift(s: PublishedShiftRow): PublishedShift & { week_version: number } {
+  return {
     id: s.id!,
     profile_id: s.profile_id!,
     date: s.date!,
@@ -254,7 +311,27 @@ export async function getPublishedShifts(
     note: s.note,
     changed: (s.changed ?? false) && (s.version ?? 1) > 1,
     week_version: s.version ?? 1,
-  }));
+  };
+}
+
+/**
+ * Turni pubblicati di alcune persone in alcuni giorni precisi (poche righe: es. le due giornate
+ * di uno scambio). Chi chiama filtra poi per persona + giorno.
+ */
+export async function getPublishedDays(
+  db: Db,
+  profileIds: string[],
+  dates: string[],
+): Promise<(PublishedShift & { week_version: number })[]> {
+  if (profileIds.length === 0 || dates.length === 0) return [];
+  const { data } = await db
+    .from("published_shifts")
+    .select("*")
+    .in("profile_id", profileIds)
+    .in("date", dates)
+    .order("date")
+    .order("start_time");
+  return (data ?? []).map(toPublishedShift);
 }
 
 /** Assenze come le vede chiunque: "Ferie" o "Assente", mai il motivo. */

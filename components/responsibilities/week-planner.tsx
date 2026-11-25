@@ -1,13 +1,21 @@
 "use client";
 
 import { getISOWeek, parseISO } from "date-fns";
-import { Save, Undo2 } from "lucide-react";
+import { Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import { saveWeekAssignments } from "@/app/admin/comunicazioni/responsabilita/actions";
+import {
+  deleteResponsibility,
+  quickAddResponsibility,
+  saveWeekAssignments,
+  setResponsibilityActive,
+} from "@/app/admin/comunicazioni/responsabilita/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import { PersonDot } from "@/components/ui/table";
 import type { WeekPlannerColumn } from "@/lib/data/responsibilities";
 import { cn } from "@/lib/utils";
@@ -43,6 +51,46 @@ export function WeekPlanner({
   const [sets, setSets] = React.useState<Record<string, string[]>>(initial);
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null);
   const [pending, startTransition] = React.useTransition();
+  const [removing, setRemoving] = React.useState<WeekPlannerColumn | null>(null);
+  const [newTitle, setNewTitle] = React.useState("");
+
+  /** Aggiunge o toglie una colonna (responsabilità): le spunte non ancora salvate restano. */
+  const manage = (run: () => Promise<{ ok: boolean; message?: string }>, after?: () => void) =>
+    startTransition(async () => {
+      const res = await run();
+      setResult(res);
+      if (res.ok) {
+        after?.();
+        router.refresh();
+      }
+    });
+
+  const addForm = (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!newTitle.trim()) return;
+        manage(
+          () => quickAddResponsibility(newTitle),
+          () => setNewTitle(""),
+        );
+      }}
+    >
+      <Input
+        aria-label="Nome della nuova responsabilità"
+        placeholder="Nuova responsabilità (es. Controllo vetrine)"
+        value={newTitle}
+        maxLength={120}
+        onChange={(e) => setNewTitle(e.target.value)}
+        disabled={pending}
+        className="w-full sm:w-80"
+      />
+      <Button type="submit" variant="secondary" disabled={pending || !newTitle.trim()}>
+        <Plus aria-hidden /> Aggiungi colonna
+      </Button>
+    </form>
+  );
 
   const changed = columns.filter((c) => !sameSet(sets[c.id] ?? [], initial[c.id] ?? []));
   const week = getISOWeek(parseISO(weekStart));
@@ -72,9 +120,13 @@ export function WeekPlanner({
 
   if (columns.length === 0) {
     return (
-      <p className="py-6 font-display text-xl font-light text-subtle">
-        Nessuna attività attiva: creane una con «Nuova attività».
-      </p>
+      <div className="flex flex-col gap-4">
+        <p className="py-2 font-display text-xl font-light text-subtle">
+          Nessuna responsabilità attiva: aggiungi qui sotto la prima colonna.
+        </p>
+        {addForm}
+        <FormMessage result={result} />
+      </div>
     );
   }
 
@@ -118,6 +170,26 @@ export function WeekPlanner({
                         {note}
                       </span>
                     ) : null}
+                    <span className="mt-1 flex justify-center gap-1">
+                      <Link
+                        href={`/admin/comunicazioni/responsabilita/${c.id}`}
+                        className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface hover:text-foreground"
+                        aria-label={`Modifica «${c.title}» (giorni e procedura)`}
+                        title="Modifica giorni e procedura"
+                      >
+                        <Pencil className="size-3.5 stroke-[1.5]" aria-hidden />
+                      </Link>
+                      <button
+                        type="button"
+                        className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface hover:text-danger disabled:opacity-40"
+                        aria-label={`Togli la colonna «${c.title}»`}
+                        title="Togli questa colonna"
+                        disabled={pending}
+                        onClick={() => setRemoving(c)}
+                      >
+                        <X className="size-4 stroke-[1.5]" aria-hidden />
+                      </button>
+                    </span>
                   </th>
                 );
               })}
@@ -231,7 +303,65 @@ export function WeekPlanner({
           Settimana passata: le assegnazioni restano in sola lettura.
         </p>
       )}
+      {addForm}
       <FormMessage result={result} />
+
+      <Dialog open={removing !== null} onOpenChange={(o) => !o && !pending && setRemoving(null)}>
+        {removing ? (
+          <DialogContent
+            title={`Togliere «${removing.title}»?`}
+            description="Scegli se conservare lo storico delle spunte o eliminare tutto."
+          >
+            <div className="flex flex-col gap-4 text-sm">
+              <Button
+                variant="secondary"
+                disabled={pending}
+                className="h-auto justify-start py-3 text-left whitespace-normal"
+                onClick={() =>
+                  manage(
+                    () => setResponsibilityActive(removing.id, false),
+                    () => setRemoving(null),
+                  )
+                }
+              >
+                <X aria-hidden />
+                <span>
+                  <span className="block font-medium">Togli dal tabellone</span>
+                  <span className="block text-xs font-normal text-muted">
+                    La colonna sparisce per tutti; lo storico resta e puoi rimetterla
+                    dall&apos;elenco «Attività» più sotto.
+                  </span>
+                </span>
+              </Button>
+              <Button
+                variant="danger"
+                disabled={pending}
+                className="h-auto justify-start py-3 text-left whitespace-normal"
+                onClick={() =>
+                  manage(
+                    () => deleteResponsibility(removing.id),
+                    () => setRemoving(null),
+                  )
+                }
+              >
+                <Trash2 aria-hidden />
+                <span>
+                  <span className="block font-medium">Elimina definitivamente</span>
+                  <span className="block text-xs font-normal">
+                    Si eliminano anche tutte le sue spunte e assegnazioni: non si può annullare.
+                  </span>
+                </span>
+              </Button>
+              <DialogClose asChild>
+                <Button variant="ghost" disabled={pending}>
+                  Annulla
+                </Button>
+              </DialogClose>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+
       <p className="max-w-3xl text-xs text-muted">
         Spunta le attività che ciascuno farà nella week {week}: un&apos;attività può andare a una o
         più persone. Nei giorni previsti la fa chi di loro è in turno. Le scelte valgono anche per

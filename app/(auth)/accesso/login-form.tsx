@@ -2,9 +2,10 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { leaveDevice } from "@/components/layout/offline-copy";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/input";
 
@@ -17,6 +18,11 @@ type Values = z.infer<typeof schema>;
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  // Qui si arriva solo senza sessione (uscita, sessione scaduta, account disattivato): il
+  // dispositivo non deve conservare la copia offline né ricevere le push di chi c'era prima.
+  useEffect(() => {
+    void leaveDevice();
+  }, []);
   const {
     register,
     handleSubmit,

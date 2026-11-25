@@ -16,11 +16,15 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
   const me = await requireAdmin();
   const { id } = await params;
   const supabase = await createClient();
-  const [{ data: person }, { data: memberships }, departments] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", id).maybeSingle(),
-    supabase.from("profile_departments").select("department_id, is_primary").eq("profile_id", id),
-    getDepartments(supabase),
-  ]);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
+  const [{ data: person }, { data: memberships }, departments, { data: adminNotes }] =
+    await Promise.all([
+      supabase.from("profiles").select("*").eq("id", id).maybeSingle(),
+      supabase.from("profile_departments").select("department_id, is_primary").eq("profile_id", id),
+      getDepartments(supabase),
+      // Note riservate: tabella a parte, leggibile solo dagli admin.
+      supabase.from("profile_admin_notes").select("notes").eq("profile_id", id).maybeSingle(),
+    ]);
   if (!person) notFound();
 
   // Tutto ciò che sparirebbe eliminando l'account (per la finestra di conferma).
@@ -67,7 +71,7 @@ export default async function DipendentePage({ params }: { params: Promise<{ id:
           primaryDepartmentId: primaryDepartmentId(member) ?? "",
           email: person.email ?? "",
           phone: person.phone ?? "",
-          adminNotes: person.admin_notes ?? "",
+          adminNotes: adminNotes?.notes ?? "",
         }}
       />
       <AccountActions

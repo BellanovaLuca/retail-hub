@@ -49,7 +49,8 @@ export const maxConsecutiveDays: RuleTypeDefinition<MaxConsecutiveParams> = {
         let streak = 0;
         for (let d = date; dates.has(d); d = addDaysISO(d, -1)) streak++;
         if (streak <= max) return;
-        if (i > 0 && streak - 1 > max) return; // già segnalata il giorno prima
+        // Già segnalata il giorno prima, se quel giorno la regola valeva (giorni e periodo).
+        if (i > 0 && streak - 1 > max && ruleAppliesOn(rule, ctx.days[i - 1])) return;
         out.push({
           ...baseViolation(rule),
           date,

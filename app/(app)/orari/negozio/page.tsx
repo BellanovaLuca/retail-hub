@@ -19,6 +19,7 @@ import {
 } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { publishedToInputs, peopleToInputs } from "@/lib/schedule/adapters";
+import { isHolidayClosure, openingFor } from "@/lib/schedule/opening";
 import { createClient } from "@/lib/supabase/server";
 import { ShopGrid, type DaySummary } from "./shop-grid";
 
@@ -55,14 +56,10 @@ export default async function NegozioPage({
   // Riepilogo per giorno, solo nell'orario di apertura (§7.2).
   const summaries: Record<string, DaySummary> = {};
   for (const date of days) {
-    const weekday = ((parseISO(date).getDay() + 6) % 7) + 1;
-    const hours =
-      date in calendar.exceptions
-        ? calendar.exceptions[date]
-        : calendar.openingHours[String(weekday)];
-    const closed = calendar.holidays.some((h) => h.date === date && h.storeClosed) || !hours;
+    // Stessa precedenza delle regole: eccezione del giorno > festivo chiuso > orario standard.
+    const hours = openingFor(date, calendar);
     const present = new Set(inputs.filter((s) => s.date === date).map((s) => s.profileId)).size;
-    if (closed) {
+    if (!hours) {
       summaries[date] = {
         present,
         closed: true,
@@ -78,7 +75,7 @@ export default async function NegozioPage({
       shifts: inputs,
       people: personInputs,
       departments: deps,
-    }).filter((s) => s.start >= hours.open && s.end <= hours.close);
+    }).filter((s) => s.start >= hours.start && s.end <= hours.end);
     summaries[date] = {
       present,
       closed: false,
@@ -143,7 +140,11 @@ export default async function NegozioPage({
             people={people}
             leaves={leaves}
             departments={deps}
-            holidays={calendar.holidays}
+            // "Chiuso" solo se nessuna eccezione riapre il negozio in quel festivo.
+            holidays={calendar.holidays.map((h) => ({
+              ...h,
+              storeClosed: isHolidayClosure(h.date, calendar),
+            }))}
             summaries={summaries}
             initialDepartment={params.reparto ?? ""}
           />

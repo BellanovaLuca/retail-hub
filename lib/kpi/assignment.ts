@@ -2,7 +2,7 @@
  * Tabella di anteprima dell'"Assegnazione obiettivi" (§8.3): ore pianificate per persona,
  * obiettivi calcolati con `assignWeeklyTargets`, sovrascritture manuali e totali assegnati.
  */
-import { shiftNetHours } from "@/lib/hours";
+import { toMinutes } from "@/lib/domain/time";
 import { resolveBackOffice } from "@/lib/schedule/cells";
 import type { SchedulePerson, ShiftRecord } from "@/lib/schedule/types";
 import {
@@ -14,20 +14,35 @@ import {
 } from "@/lib/targets";
 
 /**
- * Ore pianificate che contano per gli obiettivi: ore nette dei turni, escluse quelle in back office
- * (chi è in back office non è in vendita, §7.1). Le assenze non hanno orario e non contano.
+ * Ore pianificate che contano per gli obiettivi: ore dei turni in vendita meno le pause della
+ * giornata, escluse quelle in back office (chi è in back office non è in vendita, §7.1).
+ * Le assenze non hanno orario e non contano.
  */
 export function countedHoursByPerson(
-  shifts: Pick<ShiftRecord, "profileId" | "start" | "end" | "breakMinutes" | "isBackOffice">[],
+  shifts: Pick<
+    ShiftRecord,
+    "profileId" | "date" | "start" | "end" | "breakMinutes" | "isBackOffice"
+  >[],
   people: SchedulePerson[],
 ): Map<string, number> {
   const byId = new Map(people.map((p) => [p.id, p]));
-  const out = new Map<string, number>();
+  // Per giornata: minuti in vendita e pause. La pausa non ha una posizione nella giornata e si
+  // toglie dal tempo in vendita, anche se è registrata sul pezzo in back office (es. chi apre).
+  const days = new Map<string, { profileId: string; sale: number; pause: number }>();
   for (const s of shifts) {
     if (!s.start || !s.end) continue;
-    if (resolveBackOffice(s, byId.get(s.profileId))) continue;
-    const h = shiftNetHours({ start: s.start, end: s.end, breakMinutes: s.breakMinutes });
-    out.set(s.profileId, (out.get(s.profileId) ?? 0) + h);
+    const k = `${s.profileId}|${s.date}`;
+    const day = days.get(k) ?? { profileId: s.profileId, sale: 0, pause: 0 };
+    day.pause += s.breakMinutes ?? 0;
+    if (!resolveBackOffice(s, byId.get(s.profileId)))
+      day.sale += Math.max(0, toMinutes(s.end) - toMinutes(s.start));
+    days.set(k, day);
+  }
+  const out = new Map<string, number>();
+  for (const day of days.values()) {
+    if (day.sale === 0) continue;
+    const h = Math.max(0, day.sale - day.pause) / 60;
+    out.set(day.profileId, (out.get(day.profileId) ?? 0) + h);
   }
   return out;
 }
@@ -63,7 +78,8 @@ export type AssignmentPreview = {
 
 /**
  * Calcola l'anteprima: proposta automatica + sovrascritture (`overrides`, per chiave cella;
- * null = cella svuotata a mano). Una sovrascrittura uguale al calcolato non è più "sovrascritta".
+ * null = cella svuotata a mano). Una sovrascrittura uguale a ciò che il calcolo mostrerebbe senza
+ * di lei non è più "sovrascritta".
  */
 export function buildAssignmentPreview(input: {
   store: StoreWeeklyTargets;
@@ -95,15 +111,36 @@ export function buildAssignmentPreview(input: {
   let woAssigned = 0;
   let solePiecesAssigned = 0;
 
+  const targetById = new Map(targetPeople.map((p) => [p.profileId, p]));
+  /** Valore che la cella avrebbe senza la propria correzione (con le altre della persona). */
+  const proposalWithout = (profileId: string, code: string, computed: number | null) => {
+    const others = { ...(byCode[profileId] ?? {}) };
+    delete others[code];
+    if (Object.keys(others).length === 0) return computed;
+    const targets = assignWeeklyTargets(input.store, [targetById.get(profileId)!], input.kpis, {
+      [profileId]: others,
+    }).people[0].targets;
+    return code in targets ? targets[code] : null;
+  };
+
   for (const person of input.people) {
     const computedTargets = byPerson.get(person.profileId)?.targets ?? {};
     const effectiveTargets = effectiveByPerson.get(person.profileId)?.targets ?? {};
     for (const k of person.kpis) {
       const key = cellKey(person.profileId, k.kpiId);
       const computed = k.code in computedTargets ? computedTargets[k.code] : null;
-      const hasOverride = key in input.overrides && input.overrides[key] !== computed;
+      const manual = key in input.overrides ? input.overrides[key] : undefined;
+      // "Sovrascritta" = diversa da ciò che il calcolo mostrerebbe senza questa correzione: così
+      // un valore scritto a mano resta tale anche se coincide con la proposta di partenza ma non
+      // con quella effettiva (es. Doppi = 3 dopo aver portato i WO da 16 a 20).
+      const hasOverride =
+        manual === undefined
+          ? false
+          : manual === null
+            ? computed !== null
+            : manual !== proposalWithout(person.profileId, k.code, computed);
       const value = hasOverride
-        ? input.overrides[key]
+        ? (manual as number | null)
         : k.code in effectiveTargets
           ? effectiveTargets[k.code]
           : computed;
@@ -145,7 +182,9 @@ export function parseAmount(text: string): number | null {
   const t = text.trim().replace(/[\s€]/g, "");
   if (t === "") return 0;
   let normalized: string;
-  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) normalized = t.replace(/\./g, "").replace(",", ".");
+  // Migliaia all'italiana ("45.000", "1.234,5"); "0.125" invece è un decimale col punto.
+  if (/^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(t))
+    normalized = t.replace(/\./g, "").replace(",", ".");
   else if (/^\d+(,\d+)?$/.test(t)) normalized = t.replace(",", ".");
   else if (/^\d+(\.\d+)?$/.test(t)) normalized = t;
   else return null;

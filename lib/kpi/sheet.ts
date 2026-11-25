@@ -86,12 +86,18 @@ export function filledDates(entries: Pick<EntryValue, "date">[]): Set<string> {
 }
 
 /**
- * Interpreta un numero digitato ("3", "2,5", " 4 "). Vuoto → null (svuota la cella).
+ * Interpreta un numero digitato ("3", "2,5", " 4 ", "12.345"). Vuoto → null (svuota la cella).
+ * È l'inverso di `formatCount`: ciò che la cella mostra si può riscrivere e incollare.
  * Negativi, testo o valori enormi → "invalid".
  */
 export function parseCount(text: string): number | null | "invalid" {
-  const t = text.trim().replace(/\s/g, "").replace(",", ".");
-  if (t === "") return null;
+  const raw = text.trim().replace(/\s/g, "");
+  if (raw === "") return null;
+  // "12.345" e "1.234,5" sono migliaia all'italiana (è così che `formatCount` li scrive);
+  // altrimenti virgola o punto sono il separatore decimale ("2,5", "2.5").
+  const t = /^[1-9]\d{0,2}(\.\d{3})+(,\d{1,2})?$/.test(raw)
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw.replace(",", ".");
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return "invalid";
   const n = Number(t);
   if (!Number.isFinite(n) || n > 99_999) return "invalid";

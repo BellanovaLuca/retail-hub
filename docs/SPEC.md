@@ -113,7 +113,8 @@ profiles (
   email text null, phone text null, avatar_url text null,
   must_change_pin boolean default true,
   active boolean default true,
-  admin_notes text                       -- visibile solo agli admin
+  -- le note riservate degli admin stanno in profile_admin_notes(profile_id, notes), RLS solo admin:
+  -- una colonna qui sarebbe leggibile dal dipendente interessato (la RLS è per riga)
 )
 
 profile_departments (
@@ -670,7 +671,7 @@ Ogni persona riceve le voci del gruppo della sua area (i jolly: Vista + Pz sole,
 6.  Sotto la tabella, i totali assegnati confrontati con l'obiettivo del negozio (es. "WO assegnati 118 / 120").
 7.  Pulsante "Copia dalla settimana precedente".
 
-**Versione semplice** (richiesta del 25/11/2026): in cima alla scheda "Assegnazione" c'è la tabella con **tutte le persone attive** (una riga ciascuna) e tutte le voci attive; l'admin scrive direttamente cosa deve fare ognuno in settimana. Una cella di una voce che non è nel foglio della persona si può scrivere lo stesso: alla conferma la voce viene aggiunta al suo foglio. La colonna **Commento**, subito accanto al nome, è il commento generale della settimana: con "Conferma e avvisa" viene pubblicato e la persona lo vede in un riquadro in evidenza in cima a `/obiettivi` (insieme ai commenti sulle voci). Il calcolo dalla produttività oraria dei punti 1–4 è in una sezione richiudibile "Calcolo automatico (facoltativo)": è attivo solo se sono inseriti generato vista o valore sole; altrimenti WO e pezzi sole non vengono proposti (restano le regole fisse e le "% di …" sui valori scritti).
+**Versione semplice** (richiesta del 25/11/2026): in cima alla scheda "Assegnazione" c'è la tabella con **tutte le persone attive** (una riga ciascuna) e tutte le voci attive; l'admin scrive direttamente cosa deve fare ognuno in settimana. Una cella di una voce che non è nel foglio della persona si può scrivere lo stesso: alla conferma la voce viene aggiunta al suo foglio. La colonna **Commento**, subito accanto al nome, è il commento generale della settimana: con "Conferma e avvisa" viene pubblicato e la persona lo vede in un riquadro in evidenza in cima a `/obiettivi` (insieme ai commenti sulle voci). Il calcolo dalla produttività oraria dei punti 1–4 è in una sezione richiudibile "Calcolo automatico (facoltativo)": è attivo solo se sono inseriti generato vista o valore sole; altrimenti WO e pezzi sole non vengono proposti (restano le regole fisse e le "% di …" sui valori scritti). **Nessuna cella è bloccata** (richiesta del 26/11/2026): tutte le celle degli obiettivi si scrivono liberamente (l'unica colonna di sola lettura è «Ore», che viene dai turni), e con «Aggiungi colonna» si crea al volo una nuova voce (obiettivo scritto a mano, senza regola automatica; si rifinisce dalla scheda Voci). Una voce "% di …" non propone nulla finché la voce di riferimento non ha un valore.
 
 **Compilazione giornaliera** (dipendente): vedi `/obiettivi` in §6.1.
 
@@ -729,6 +730,10 @@ I nomi dei responsabili si assegnano da interfaccia: non vanno messi nel seed.
 - Quando il responsabile cambia, la vecchia assegnazione resta nello storico.
 
 **Assegnazione per settimana** (richiesta del 25/11/2026): in cima a `/admin/comunicazioni/responsabilita` la griglia **"Chi fa cosa questa settimana"** ha le persone attive in riga e le attività in colonna; l'admin spunta quali attività farà ciascuno **in quella settimana**. Un'attività può andare a una o più persone, tutte alla pari: nei giorni previsti la fa chi del gruppo è in turno (tutti, se i turni non sono pubblicati); se nessuno del gruppo è in turno l'attività è "senza nessuno in turno". Tabella `responsibility_week_assignments` (attività, lunedì, `profile_ids`). Una settimana senza assegnazione propria riprende l'ultima settimana assegnata, finché non si cambia; un'attività mai assegnata per settimana usa responsabile e supporti della sua scheda (che restano facoltativi). Si può preparare fino a 8 settimane avanti; le settimane passate sono in sola lettura. Chi riceve un'attività nuova riceve una sola notifica con l'elenco. La spunta giornaliera spetta agli assegnati della settimana di quel giorno (RLS `is_responsibility_assignee_on`).
+
+**Colonne della griglia** (richiesta del 26/11/2026): dalla griglia si aggiunge una responsabilità al volo («Aggiungi colonna»: solo il nome, prevista tutti i giorni; giorni e procedura si completano dalla scheda) e si toglie una colonna con la ✕ sull'intestazione, scegliendo tra «Togli dal tabellone» (disattiva e conserva lo storico) ed «Elimina definitivamente» (con tutte le spunte).
+
+**Controllo delle spunte** (richiesta del 26/11/2026, sostituisce nell'area admin il tabellone attività × giorni): stessa impostazione della griglia di assegnazione, cioè **persone in riga e responsabilità in colonna, un giorno alla volta** (schede lun–dom con il numero di attività mancanti nei giorni passati). In ogni casella assegnata alla persona: nera con l'ora = l'ha spuntata lei; con il nome di un collega = l'ha fatta un altro assegnato; rossa = non svolta a giornata finita; tratteggiata = persona non in turno o giorno non previsto. Le caselle non assegnate restano vuote. In fondo, l'esito del giorno per attività. L'admin con un clic segna l'attività come fatta dalla persona (nella spunta resta la nota «Segnata da …») o toglie la spunta. Le attività «per tutti» mostrano la spunta solo nella riga di chi l'ha fatta. Il tabellone attività × giorni resta ai dipendenti (scheda «Spunte») e nel PDF.
 
 ------------------------------------------------------------------------
 
@@ -917,4 +922,22 @@ Nessuna domanda aperta bloccante. In caso di dubbio durante lo sviluppo, sceglie
 - Residui ferie, monte ore, ROL maturati.
 - Timbrature, buste paga.
 - Generazione automatica dei turni (possibile evoluzione futura, partendo dalle regole di copertura).
+
+------------------------------------------------------------------------
+
+## 19. Precisazioni dopo l'audit del 25–26 novembre 2026
+
+Regole emerse correggendo i problemi trovati dall'audit; dove toccano le sezioni precedenti, valgono queste.
+
+- **Accesso (§4).** Il controllo dei tentativi e la loro registrazione sono un'unica operazione nel database (`login_attempt_begin`): richieste parallele non aggirano il blocco. Per l'IP, un accesso riuscito con un altro codice non azzera i tentativi falliti sui colleghi. Il cambio PIN dal profilo chiede il PIN attuale e chiude le altre sessioni. Chi diventa admin deve scegliere un PIN da admin al prossimo accesso. Con il PIN provvisorio (o senza informativa accettata) funzionano solo cambio PIN, uscita e tema: anche le azioni e gli export lo verificano, non solo le pagine. Il ritorno dopo l'accesso (`?da=`) accetta solo percorsi interni.
+- **Dati e RLS (§5).** Serve un profilo **attivo** per leggere o scrivere qualunque tabella (policy restrittiva «solo profili attivi» + `is_staff()` nelle letture comuni): un account senza profilo o disattivato non vede nulla. Le note riservate degli admin sono in `profile_admin_notes`. Una richiesta nasce senza esito e il suo allegato sta nella cartella di chi la fa; i dipendenti leggono i propri allegati ma non li sostituiscono né li cancellano. Le letture che possono superare le 1000 righe sono paginate (`lib/data/paginate.ts`).
+- **Dipendenti (§6.2).** Disattivando un account si tolgono i suoi turni da oggi in poi, anche dagli orari pubblicati. Eliminandolo si rimuovono anche i suoi file (allegati e foto).
+- **Richieste (§6).** Approvazione e rifiuto valgono solo se la richiesta è ancora in attesa nel momento in cui si salva. Negli scambi il turno si identifica con persona + giorno, ricavati dal server dagli orari pubblicati.
+- **Orario di apertura (§7).** Precedenza unica: eccezione del giorno > festivo a negozio chiuso > orario standard (`lib/schedule/opening.ts`).
+- **Ore e copertura (§7.1–7.2).** La pausa vale per la giornata (non per il singolo pezzo) e si toglie dal tempo in vendita; al salvataggio va sul pezzo più lungo non in back office. Una persona è presente in una fascia se l'unione dei suoi pezzi la copre; conta nella forza vendita solo se la coprono i pezzi di vendita. Le ore si mostrano con due decimali, senza arrotondare alla mezz'ora.
+- **Regola «ore di contratto ±%» (§7.3).** Valgono come ore coperte solo ferie, permessi e malattia, nei giorni senza turni e al massimo fino ai giorni lavorativi rimasti; i festivi a negozio chiuso sono giornata coperta. Giorni liberi e indisponibilità sono riposi.
+- **Foglio turni (§8.1).** Il testo di una cella ha una forma canonica (riscrivere lo stesso orario non è una modifica) e il marcatore `BO` per i pezzi in back office. Salvando gli stessi orari restano pausa, back office, area, reparto e nota. Il salvataggio di un lotto è atomico. «Duplica la settimana precedente» copia tra le assenze solo i riposi. Nel foglio orario, ridipingere conserva gli estremi non toccati. Limite noto: Canc seguito da Annulla riporta orari e back office, non pausa e nota.
+- **Pubblicazione (§10).** Conta come «turno modificato» anche un cambio di area, pausa o back office; con «notifica tutti» si avvisa anche chi è stato tolto dalla settimana.
+- **Obiettivi (§8.3).** WO e pezzi sole si propongono solo con ore, valore e prezzo medio dell'area maggiori di zero. Una cella è «corretta a mano» se differisce da ciò che il calcolo mostrerebbe senza di lei. I numeri con le migliaia («12.345») sono accettati. Il dipendente può scrivere numeri solo per le voci del proprio foglio. I numeri giornalieri non salvati per un errore di rete restano a schermo, con avviso, e vengono riprovati.
+- **Notifiche e promemoria (§10).** La sottoscrizione push segue chi usa il dispositivo (si riassegna all'accesso e si toglie all'uscita); sono ammessi solo gli indirizzi dei servizi push noti. Un promemoria automatico fallito o interrotto viene ritentato (fino a 3 volte). La chiamata ogni 15 minuti al dispatcher è obbligatoria. Il link del calendario personale si può rigenerare.
 

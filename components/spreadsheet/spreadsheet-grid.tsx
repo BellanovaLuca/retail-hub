@@ -94,7 +94,11 @@ type Line =
 
 type HistoryEntry = { forward: CellChange[]; backward: CellChange[] };
 
-type Editing = { r: number; c: number; initial: string; mode: "enter" | "edit" };
+/**
+ * Cella in modifica, ancorata a riga e colonna per id: se le righe cambiano mentre si scrive
+ * (aggiornamento in tempo reale, un'altra persona in elenco) il valore resta sulla sua cella.
+ */
+type Editing = { rowId: string; colId: string; initial: string; mode: "enter" | "edit" };
 
 type Drag = { kind: "select" } | { kind: "fill"; source: Rect };
 
@@ -233,7 +237,7 @@ export function SpreadsheetGrid({
   const [editError, setEditError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [fillPreview, setFillPreview] = React.useState<Rect | null>(null);
-  const [sheet, setSheet] = React.useState<{ r: number; c: number } | null>(null);
+  const [sheet, setSheet] = React.useState<{ rowId: string; colId: string } | null>(null);
   const [sheetError, setSheetError] = React.useState<string | null>(null);
 
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -373,8 +377,29 @@ export function SpreadsheetGrid({
       return;
     }
     setEditError(null);
-    setEditing({ r, c, mode, initial: initial ?? read(r, c) });
+    setEditing({
+      rowId: visibleRows[r].id,
+      colId: columns[c].id,
+      mode,
+      initial: initial ?? read(r, c),
+    });
   };
+
+  /** Posizione attuale di una cella indicata per id (-1 se non è più tra quelle visibili). */
+  const posOf = (cell: { rowId: string; colId: string }): Pos => ({
+    r: visibleRows.findIndex((row) => row.id === cell.rowId),
+    c: columns.findIndex((col) => col.id === cell.colId),
+  });
+  const editPos = editing ? posOf(editing) : null;
+  const editGone = !!editPos && (editPos.r < 0 || editPos.c < 0);
+  // La cella in modifica non è più nel foglio (riga tolta o gruppo chiuso): si lascia la modifica.
+  React.useEffect(() => {
+    if (!editGone) return;
+    editingRef.current = null;
+    setEditing(null);
+    setEditError(null);
+    setNotice("La cella che stavi modificando non è più nel foglio: valore non salvato.");
+  }, [editGone]);
 
   const finishEdit = (
     value: string | null,
@@ -383,6 +408,10 @@ export function SpreadsheetGrid({
   ) => {
     const ed = editingRef.current;
     if (!ed) return;
+    // La posizione si rilegge adesso: tra l'inizio e la fine della modifica le righe possono
+    // essere cambiate.
+    const at = posOf(ed);
+    const found = at.r >= 0 && at.c >= 0;
     if (value !== null) {
       const res = check(value);
       if ("error" in res) {
@@ -391,8 +420,10 @@ export function SpreadsheetGrid({
           return;
         }
         setNotice(res.error);
+      } else if (found) {
+        emit([{ r: at.r, c: at.c, value: res.value }], { validate: false });
       } else {
-        emit([{ r: ed.r, c: ed.c, value: res.value }], { validate: false });
+        setNotice("La cella che stavi modificando non è più nel foglio: valore non salvato.");
       }
     }
     editingRef.current = null;
@@ -400,7 +431,9 @@ export function SpreadsheetGrid({
     setEditError(null);
     if (!fromBlur) {
       pendingFocus.current = true;
-      if (dir) setSel(move(single({ r: ed.r, c: ed.c }), dir, bounds));
+      // Senza direzione (Esc) la selezione resta com'è, a meno che la cella si sia spostata.
+      const moved = sel.anchor.r !== at.r || sel.anchor.c !== at.c;
+      if (found && (dir || moved)) setSel(dir ? move(single(at), dir, bounds) : single(at));
     }
   };
 
@@ -448,7 +481,8 @@ export function SpreadsheetGrid({
       if (lower === "d" || lower === "r") {
         done();
         const writes = fillShortcutWrites(sel, lower === "d" ? "down" : "right", read);
-        emit(writes, { validate: false });
+        // Validato come l'incolla: la sorgente può essere una cella bloccata (es. un'assenza).
+        emit(writes, { validate: true });
         return;
       }
       if (lower === "c" || lower === "x" || lower === "v") return; // eventi copy/cut/paste nativi
@@ -600,7 +634,7 @@ export function SpreadsheetGrid({
     const drag = dragRef.current;
     const target = fillRef.current;
     if (!drag || drag.kind !== "fill" || !target) return;
-    emit(fillWrites(drag.source, target, read), { validate: false });
+    emit(fillWrites(drag.source, target, read), { validate: true });
     pendingFocus.current = true;
     setSel({
       anchor: { r: target.r1, c: target.c1 },
@@ -674,7 +708,7 @@ export function SpreadsheetGrid({
     const p = posFrom(e.target as Element);
     if (!p || isCellReadOnly(p.r, p.c)) return;
     setSheetError(null);
-    setSheet(p);
+    setSheet({ rowId: visibleRows[p.r].id, colId: columns[p.c].id });
   };
 
   const onDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -722,8 +756,9 @@ export function SpreadsheetGrid({
       return next;
     });
 
-  const sheetRow = sheet ? visibleRows[sheet.r] : undefined;
-  const sheetCol = sheet ? columns[sheet.c] : undefined;
+  const sheetRow = sheet ? visibleRows.find((row) => row.id === sheet.rowId) : undefined;
+  const sheetCol = sheet ? columns.find((col) => col.id === sheet.colId) : undefined;
+  const sheetValue = sheet ? getValue(sheet.rowId, sheet.colId) : "";
   const closeSheet = () => {
     setSheet(null);
     setSheetError(null);
@@ -735,7 +770,8 @@ export function SpreadsheetGrid({
       setSheetError(res.error);
       return;
     }
-    emit([{ r: sheet.r, c: sheet.c, value: res.value }], { validate: false });
+    const at = posOf(sheet);
+    if (at.r >= 0 && at.c >= 0) emit([{ ...at, value: res.value }], { validate: false });
     closeSheet();
   };
 
@@ -981,17 +1017,17 @@ export function SpreadsheetGrid({
                 style={rectBox(fillPreview)}
               />
             ) : null}
-            {editing ? (
+            {editing && editPos && !editGone ? (
               <CellEditor
-                key={`${editing.r}:${editing.c}`}
+                key={`${editing.rowId}:${editing.colId}`}
                 editing={editing}
                 error={editError}
-                label={`Modifica ${visibleRows[editing.r]?.label ?? ""}, ${columns[editing.c]?.label ?? ""}`}
+                label={`Modifica ${visibleRows[editPos.r]?.label ?? ""}, ${columns[editPos.c]?.label ?? ""}`}
                 style={{
-                  top: rowTop[editing.r] ?? 0,
-                  left: colLeft[editing.c] ?? 0,
+                  top: rowTop[editPos.r] ?? 0,
+                  left: colLeft[editPos.c] ?? 0,
                   height: m.rowH,
-                  minWidth: widths[editing.c] ?? 72,
+                  minWidth: widths[editPos.c] ?? 72,
                 }}
                 onFinish={finishEdit}
               />
@@ -1053,9 +1089,7 @@ export function SpreadsheetGrid({
         <MobileSheet
           open
           title={`${sheetRow.label} · ${sheetCol.label}${sheetCol.sublabel ? ` ${sheetCol.sublabel}` : ""}`}
-          description={
-            read(sheet.r, sheet.c) ? `Valore attuale: ${read(sheet.r, sheet.c)}` : "Cella vuota"
-          }
+          description={sheetValue ? `Valore attuale: ${sheetValue}` : "Cella vuota"}
           error={sheetError}
           onOpenChange={(open) => !open && closeSheet()}
         >
@@ -1063,16 +1097,12 @@ export function SpreadsheetGrid({
             renderMobileEditor({
               rowId: sheetRow.id,
               colId: sheetCol.id,
-              value: read(sheet.r, sheet.c),
+              value: sheetValue,
               close: closeSheet,
               commit: commitSheet,
             })
           ) : (
-            <DefaultMobileEditor
-              value={read(sheet.r, sheet.c)}
-              close={closeSheet}
-              commit={commitSheet}
-            />
+            <DefaultMobileEditor value={sheetValue} close={closeSheet} commit={commitSheet} />
           )}
         </MobileSheet>
       ) : null}

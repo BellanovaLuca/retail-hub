@@ -13,7 +13,8 @@ import {
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { computeCoverage } from "@/lib/coverage";
-import { evaluateWeek, installStandardRuleSet } from "@/lib/data/rules";
+import { evaluateWeek } from "@/lib/data/rules";
+import { openingFor } from "@/lib/schedule/opening";
 import { EditorWithRules, type DayCoverage } from "./editor-with-rules";
 
 export async function generateMetadata({
@@ -32,7 +33,6 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
   if (weekStart !== param) redirect(`/admin/turni/${weekStart}`);
 
   const supabase = await createClient();
-  await installStandardRuleSet(supabase);
   const sunday = format(addDays(parseISO(weekStart), 6), "yyyy-MM-dd");
   const [
     data,
@@ -76,19 +76,16 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
   // Copertura minima per giorno nell'orario di apertura (riga "Copertura" in fondo al foglio).
   const coverage: DayCoverage = {};
   for (const date of data.days) {
-    const weekday = ((parseISO(date).getDay() + 6) % 7) + 1;
-    const hours =
-      date in calendar.exceptions
-        ? calendar.exceptions[date]
-        : calendar.openingHours[String(weekday)];
-    if (!hours || calendar.holidays.some((h) => h.date === date && h.storeClosed)) continue;
+    // Stessa precedenza delle regole: eccezione del giorno > festivo chiuso > orario standard.
+    const hours = openingFor(date, calendar);
+    if (!hours) continue;
     const slots = computeCoverage({
       date,
       shifts: evaluation.context.shifts,
       people: evaluation.context.people,
       departments: evaluation.context.departments,
     });
-    const open = slots.filter((s) => s.start >= hours.open && s.end <= hours.close);
+    const open = slots.filter((s) => s.start >= hours.start && s.end <= hours.end);
     coverage[date] = {
       min: {
         vista: Math.min(...open.map((s) => s.vista)),

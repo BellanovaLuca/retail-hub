@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { TemplatesEditor } from "./templates-editor";
 
 export const metadata: Metadata = { title: "Turni rapidi" };
 
 export default async function TurniRapidiPage() {
+  await requireAdmin();
   const supabase = await createClient();
   const { data } = await supabase
     .from("shift_templates")

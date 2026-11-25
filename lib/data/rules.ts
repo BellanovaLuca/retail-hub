@@ -9,9 +9,9 @@ import type { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/lib/supabase/types";
 import { getDepartments } from "./people";
 import {
-  getAdminWeek,
   getSchedulePeople,
   getStoreCalendar,
+  getWeekWorkingData,
   toShiftRecord,
   weekDates,
 } from "./schedule";
@@ -106,12 +106,16 @@ function toOpeningHours(map: Record<string, { open: string; close: string } | nu
   return out;
 }
 
-/** Contesto delle regole sulla versione di LAVORO della settimana (solo admin). */
+/**
+ * Contesto delle regole sulla versione di LAVORO della settimana (solo admin). Sola lettura:
+ * una settimana non ancora creata vale come settimana senza turni (non viene inserita, così le
+ * pagine che valutano le regole — cruscotto, dettaglio di una richiesta — non scrivono nulla).
+ */
 export async function buildRuleContext(db: Db, weekStart: string): Promise<RuleContext> {
   const days = weekDates(weekStart);
   const prevStart = format(addDays(parseISO(weekStart), -7), "yyyy-MM-dd");
   const [week, people, departments, calendar, variables, { data: prevWeek }] = await Promise.all([
-    getAdminWeek(db, weekStart),
+    getWeekWorkingData(db, weekStart),
     getSchedulePeople(db),
     getDepartments(db),
     getStoreCalendar(db, days[0], days[6]),
@@ -120,9 +124,17 @@ export async function buildRuleContext(db: Db, weekStart: string): Promise<RuleC
   ]);
   const peopleMap = new Map(people.map((p) => [p.id, p]));
   const prevShifts = prevWeek
-    ? ((await db.from("shifts").select("*").eq("week_id", prevWeek.id)).data ?? []).map(
-        toShiftRecord,
-      )
+    ? (
+        (
+          await db
+            .from("shifts")
+            .select("*")
+            .eq("week_id", prevWeek.id)
+            .order("date")
+            .order("start_time")
+            .order("id")
+        ).data ?? []
+      ).map(toShiftRecord)
     : [];
 
   return {
@@ -183,11 +195,12 @@ export type WeekEvaluation = {
 /** Valuta le regole della settimana (versione di lavoro) tenendo conto degli avvisi ignorati. */
 export async function evaluateWeek(db: Db, weekStart: string): Promise<WeekEvaluation> {
   const context = await buildRuleContext(db, weekStart);
+  // La settimana può non esistere ancora (buildRuleContext non la crea).
   const { data: week } = await db
     .from("schedule_weeks")
     .select("id, rule_set_id")
     .eq("week_start", weekStart)
-    .single();
+    .maybeSingle();
   const { rules } = await getWeekRules(db, week?.rule_set_id ?? null);
   const { data: overrides } = week
     ? await db.from("rule_overrides").select("id, rule_id, date, note").eq("week_id", week.id)

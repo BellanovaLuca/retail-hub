@@ -162,11 +162,22 @@ export function MyWeek({ days, today, kpis, targets, comments, initialValues }: 
   const onGridChange = React.useCallback(
     (changes: CellChange[]) => {
       const valid = [];
+      let invalid = 0;
       for (const c of changes) {
         const v = parseCount(c.value);
-        if (v === "invalid") continue;
+        if (v === "invalid") {
+          invalid++;
+          continue;
+        }
         valid.push({ kpiId: c.rowId, date: c.colId, value: v });
       }
+      // Niente scarti silenziosi: se un valore non è un numero lo si dice.
+      if (invalid)
+        setMessage(
+          invalid === 1
+            ? "Un valore non è un numero (es. 3): non è stato salvato."
+            : `${invalid} valori non sono numeri (es. 3): non sono stati salvati.`,
+        );
       update(valid);
     },
     [update],

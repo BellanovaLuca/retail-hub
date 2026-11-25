@@ -8,6 +8,7 @@ import { weekStart } from "@/lib/dates";
 import { notify } from "@/lib/notifications";
 import { publishSnapshot } from "@/lib/schedule/publish";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
+import { ownAttachmentPaths } from "./attachments";
 import {
   awaitsAdmin,
   formatRange,
@@ -69,7 +70,10 @@ export async function decideRequests(
         lastError = "Alcune richieste non sono più in attesa.";
         continue;
       }
-      const { error } = await supabase
+      // La guardia sullo stato sta nell'UPDATE stesso: se nel frattempo il dipendente ha
+      // annullato (o un altro admin ha deciso) non si aggiorna nessuna riga e la richiesta
+      // conta come non aggiornata, invece di tornare "approvata" e creare ferie.
+      const { data: updated, error } = await supabase
         .from("requests")
         .update({
           status: decision,
@@ -77,12 +81,19 @@ export async function decideRequests(
           decided_at: new Date().toISOString(),
           decision_note: decisionNote || null,
         })
-        .eq("id", r.id);
+        .eq("id", r.id)
+        .eq("status", r.type === "scambio_turno" ? "peer_accepted" : "pending")
+        .select("id");
       if (error) {
         failed++;
         lastError = error.message.includes("Turni dello scambio")
           ? "I turni dello scambio non esistono più: controlla il foglio turni."
           : dbErrorMessage(error, "Decisione non salvata.");
+        continue;
+      }
+      if (!updated?.length) {
+        failed++;
+        lastError = "Alcune richieste non sono più in attesa.";
         continue;
       }
       done++;
@@ -149,11 +160,25 @@ export async function resetAllRequests(
       return { ok: false, message: `Per confermare scrivi ${RESET_CONFIRM_WORD}.` };
     const { supabase } = await adminAction();
 
-    const { data: all, error: readError } = await supabase
-      .from("requests")
-      .select("id, status, attachment_path");
-    if (readError) return { ok: false, message: dbErrorMessage(readError, "Richieste non lette.") };
-    const rows = all ?? [];
+    // A pagine: PostgREST restituisce al massimo 1000 righe per richiesta.
+    const PAGE = 1000;
+    const rows: {
+      id: string;
+      profile_id: string;
+      status: string;
+      attachment_path: string | null;
+    }[] = [];
+    for (let page = 0; ; page++) {
+      const { data, error: readError } = await supabase
+        .from("requests")
+        .select("id, profile_id, status, attachment_path")
+        .order("id")
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (readError)
+        return { ok: false, message: dbErrorMessage(readError, "Richieste non lette.") };
+      rows.push(...(data ?? []));
+      if (!data || data.length < PAGE) break;
+    }
     if (rows.length === 0)
       return { ok: true, message: "Non ci sono richieste.", data: { deleted: 0 } };
 
@@ -178,9 +203,10 @@ export async function resetAllRequests(
       if (error) return { ok: false, message: dbErrorMessage(error, "Richieste non eliminate.") };
     }
 
-    await removeAttachmentFiles(
-      rows.map((r) => r.attachment_path).filter((p): p is string => Boolean(p)),
-    );
+    // I file si tolgono con il service role: solo quelli nella cartella di chi ha fatto la
+    // richiesta. Il percorso lo scrive il dipendente e non va preso per buono (potrebbe indicare
+    // l'allegato di una comunicazione o di un collega).
+    await removeAttachmentFiles(ownAttachmentPaths(rows));
 
     revalidatePath("/", "layout");
     revalidatePath("/admin", "layout");

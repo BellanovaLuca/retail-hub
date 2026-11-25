@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { LeaveRecord, ShiftRecord, TemplateRecord } from "@/lib/schedule/types";
-import { absenceTypeOf, withAbsenceShifts } from "@/lib/schedule/view";
+import {
+  absenceTypeOf,
+  formatHoursIt,
+  weekHoursByPerson,
+  withAbsenceShifts,
+} from "@/lib/schedule/view";
 
 const tpl = (id: string, code: string, label: string, isAbsence = true): TemplateRecord => ({
   id,
@@ -65,5 +70,31 @@ describe("assenze scritte come turno rapido (foglio orario e PDF)", () => {
     expect(out).toHaveLength(2);
     expect(out[0]).toBe(planning);
     expect(out[1]).toMatchObject({ profileId: "b", type: "ferie", hours: null, fromShift: true });
+  });
+});
+
+describe("ore nel foglio turni, in «I miei orari» e negli export", () => {
+  it("formatHoursIt non arrotonda alla mezz'ora", () => {
+    expect(formatHoursIt(7.75)).toBe("7,75");
+    expect(formatHoursIt(8.25)).toBe("8,25");
+    expect(formatHoursIt(39.75)).toBe("39,75");
+    expect(formatHoursIt(37.5)).toBe("37,5");
+    expect(formatHoursIt(40)).toBe("40");
+  });
+
+  it("weekHoursByPerson: la pausa vale per la giornata", () => {
+    const piece = (date: string, start: string, end: string, breakMinutes = 0): ShiftRecord => ({
+      ...shift("a", date, null, start),
+      id: `${date}-${start}`,
+      end,
+      breakMinutes,
+    });
+    const hours = weekHoursByPerson([
+      piece("2026-10-12", "10:00", "10:30", 60),
+      piece("2026-10-12", "11:00", "19:00"),
+      piece("2026-10-13", "10:00", "18:15", 30),
+      shift("a", "2026-10-14", "f"),
+    ]);
+    expect(hours.get("a")).toBe(7.5 + 7.75);
   });
 });

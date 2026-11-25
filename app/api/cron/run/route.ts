@@ -16,7 +16,8 @@ function authorized(header: string | null) {
 
 /**
  * Dispatcher dei job pianificati (§10). Protetto da CRON_SECRET (Vercel Cron lo invia da sé
- * come "Authorization: Bearer …"). Parametri facoltativi: ?job=<nome>&force=1 per i test.
+ * come "Authorization: Bearer …"). Parametri facoltativi: ?job=<nome>&force=1 per i test
+ * (un'esecuzione forzata non passa dal registro delle esecuzioni). Risponde 500 se un job fallisce.
  */
 export async function GET(request: NextRequest) {
   if (!authorized(request.headers.get("authorization"))) {
@@ -24,7 +25,9 @@ export async function GET(request: NextRequest) {
   }
   const job = request.nextUrl.searchParams.get("job") ?? undefined;
   const force = request.nextUrl.searchParams.get("force") === "1";
-  return NextResponse.json(await runDueJobs({ only: job, force }));
+  const outcome = await runDueJobs({ only: job, force });
+  // Un job in errore deve vedersi nei log di chi chiama (Vercel Cron, pg_cron): 500.
+  return NextResponse.json(outcome, { status: outcome.failed.length ? 500 : 200 });
 }
 
 export const POST = GET;

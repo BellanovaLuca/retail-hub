@@ -13,6 +13,7 @@ import {
 } from "@/lib/announcements/model";
 import { markdownToText } from "@/lib/markdown";
 import type { Database, Tables } from "@/lib/supabase/types";
+import { chunk, fetchAllRows } from "./paginate";
 
 type Db = SupabaseClient<Database>;
 type AnnouncementRow = Tables<"announcements">;
@@ -77,7 +78,7 @@ export type FeedEntry = {
 async function visibleAnnouncements(db: Db, profileId: string, limit = 300) {
   const now = new Date();
   const nowIso = now.toISOString();
-  const [{ data: rows }, { data: me }, { data: reads }] = await Promise.all([
+  const [{ data: rows }, { data: me }, reads] = await Promise.all([
     db
       .from("announcements")
       .select("*")
@@ -86,13 +87,19 @@ async function visibleAnnouncements(db: Db, profileId: string, limit = 300) {
       .order("publish_at", { ascending: false })
       .limit(limit),
     db.from("public_profiles").select("department_ids").eq("id", profileId).maybeSingle(),
-    db
-      .from("announcement_reads")
-      .select("announcement_id, read_at, acknowledged_at")
-      .eq("profile_id", profileId),
+    // A pagine: negli anni le letture di una persona superano le 1000 righe e le comunicazioni
+    // rimaste fuori tornerebbero "non lette".
+    fetchAllRows((start, end) =>
+      db
+        .from("announcement_reads")
+        .select("announcement_id, read_at, acknowledged_at", { count: "exact" })
+        .eq("profile_id", profileId)
+        .order("announcement_id")
+        .range(start, end),
+    ),
   ]);
   const person = { id: profileId, departmentIds: me?.department_ids ?? [] };
-  const readMap = new Map((reads ?? []).map((r) => [r.announcement_id, r]));
+  const readMap = new Map(reads.map((r) => [r.announcement_id, r]));
   const list = (rows ?? []).filter((a) => isLive(a, now) && isRecipient(a, person));
   return { list, readMap };
 }
@@ -249,21 +256,43 @@ export type AdminAnnouncement = {
   ackCount: number;
 };
 
+/** Quanti id di comunicazione per richiesta nel filtro `in` delle letture. */
+const READS_ID_CHUNK = 50;
+
 /** Elenco per l'admin, con le letture di ogni destinatario. */
 export async function getAdminAnnouncements(db: Db): Promise<AdminAnnouncement[]> {
-  const [{ data: rows }, people, { data: reads }, { data: departments }] = await Promise.all([
+  const [{ data: rows }, people, { data: departments }] = await Promise.all([
     db.from("announcements").select("*").order("publish_at", { ascending: false }).limit(200),
     getPeopleDirectory(db, { includeInactive: true }),
-    db.from("announcement_reads").select("announcement_id, profile_id, read_at, acknowledged_at"),
     db.from("departments").select("id, name"),
   ]);
+  // Letture delle sole comunicazioni mostrate, a blocchi di id (viaggiano nell'indirizzo) e a
+  // pagine: tutte insieme superano le 1000 righe e i conteggi "letto/confermato" si sbagliano.
+  const reads = (
+    await Promise.all(
+      chunk(
+        (rows ?? []).map((a) => a.id),
+        READS_ID_CHUNK,
+      ).map((ids) =>
+        fetchAllRows((start, end) =>
+          db
+            .from("announcement_reads")
+            .select("announcement_id, profile_id, read_at, acknowledged_at", { count: "exact" })
+            .in("announcement_id", ids)
+            .order("announcement_id")
+            .order("profile_id")
+            .range(start, end),
+        ),
+      ),
+    )
+  ).flat();
   const byId = new Map(people.map((p) => [p.id, p]));
   const deptName = new Map((departments ?? []).map((d) => [d.id, d.name]));
   const readsBy = new Map<
     string,
     Map<string, { read_at: string; acknowledged_at: string | null }>
   >();
-  for (const r of reads ?? []) {
+  for (const r of reads) {
     const m = readsBy.get(r.announcement_id) ?? new Map();
     m.set(r.profile_id, r);
     readsBy.set(r.announcement_id, m);

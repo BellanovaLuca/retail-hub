@@ -244,13 +244,14 @@ export async function confirmAssignment(
     // Celle svuotate (voce senza obiettivo): si tolgono le righe salvate in precedenza.
     if (profileIds.length) {
       const stale = (existing ?? []).filter((e) => !keep.has(`${e.profile_id}|${e.kpi_id}`));
-      if (stale.length) {
+      // A blocchi: gli id viaggiano nell'indirizzo della richiesta.
+      for (let i = 0; i < stale.length; i += 100) {
         const { error } = await supabase
           .from("weekly_targets")
           .delete()
           .in(
             "id",
-            stale.map((s) => s.id),
+            stale.slice(i, i + 100).map((s) => s.id),
           );
         if (error) throw new ActionError(dbErrorMessage(error, "Obiettivi non aggiornati."));
       }
@@ -682,6 +683,61 @@ export async function saveKpi(
         : { ok: false, message: dbErrorMessage(error, "Voce non creata.") };
     revalidatePath("/admin/obiettivi", "layout");
     return { ok: true, message: "Voce creata.", data: { id: data.id } };
+  });
+}
+
+const quickKpiSchema = z.string().trim().min(1, "Scrivi il nome della voce.").max(60);
+
+/** Codice interno ricavato dal nome: "Lenti da sole" → "LENTI_DA_SOLE" (reso univoco). */
+function kpiCodeFromLabel(label: string, used: Set<string>): string {
+  const base =
+    label
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/&/g, "E")
+      .replace(/[^A-Z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/^(?=[0-9])/, "V_")
+      .slice(0, 24) || "VOCE";
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) if (!used.has(`${base}_${n}`)) return `${base}_${n}`;
+}
+
+/**
+ * Aggiunge al volo una voce dalla tabella dell'Assegnazione: obiettivo scritto a mano (nessuna
+ * regola automatica), in fondo all'elenco. Regola e gruppi si rifiniscono poi dalla scheda Voci.
+ */
+export async function quickAddKpi(label: string): Promise<ActionResult<{ id: string }>> {
+  return runAction(async () => {
+    const { supabase } = await adminAction();
+    const parsed = quickKpiSchema.safeParse(label);
+    if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
+    const { data: all } = await supabase
+      .from("kpi_definitions")
+      .select("code, label, active, sort_order");
+    const same = (all ?? []).find((k) => k.label.toLowerCase() === parsed.data.toLowerCase());
+    if (same)
+      return {
+        ok: false,
+        message: same.active
+          ? `La voce «${same.label}» esiste già.`
+          : `La voce «${same.label}» esiste ma è disattivata: riattivala dalla scheda Voci.`,
+      };
+    const code = kpiCodeFromLabel(parsed.data, new Set((all ?? []).map((k) => k.code)));
+    const { data, error } = await supabase
+      .from("kpi_definitions")
+      .insert({
+        code,
+        label: parsed.data,
+        default_target_rule: null,
+        sort_order: Math.max(0, ...(all ?? []).map((k) => k.sort_order)) + 1,
+      })
+      .select("id")
+      .single();
+    if (error || !data) return { ok: false, message: dbErrorMessage(error, "Voce non creata.") };
+    revalidatePath("/admin/obiettivi", "layout");
+    return { ok: true, message: `Voce «${parsed.data}» aggiunta.`, data: { id: data.id } };
   });
 }
 

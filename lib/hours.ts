@@ -10,33 +10,62 @@ export function intervalHours(interval: Interval): number {
   return Math.max(0, toMinutes(interval.end) - toMinutes(interval.start)) / 60;
 }
 
-/** Ore nette di un turno: durata meno la pausa, mai sotto zero. */
+/**
+ * Ore nette di un turno: durata meno la pausa, mai sotto zero. Per le ore di una giornata con più
+ * pezzi usare `dayNetHours`, che applica la pausa all'intera giornata.
+ */
 export function shiftNetHours(shift: Pick<ShiftInput, "start" | "end" | "breakMinutes">): number {
   const minutes = toMinutes(shift.end) - toMinutes(shift.start) - (shift.breakMinutes ?? 0);
   return Math.max(0, minutes) / 60;
 }
 
+type Piece = Pick<ShiftInput, "start" | "end" | "breakMinutes">;
+
+/**
+ * Ore nette di UNA giornata di una persona (tutti i suoi pezzi di turno): somma delle durate meno
+ * le pause, mai sotto zero. La pausa non ha una posizione: vale per la giornata, anche se è
+ * registrata su un pezzo più corto della pausa stessa.
+ */
+export function dayNetHours(pieces: Piece[]): number {
+  let minutes = 0;
+  let pause = 0;
+  for (const p of pieces) {
+    minutes += Math.max(0, toMinutes(p.end) - toMinutes(p.start));
+    pause += p.breakMinutes ?? 0;
+  }
+  return Math.max(0, minutes - pause) / 60;
+}
+
+/** Raggruppa i pezzi per chiave e somma le ore nette di ogni gruppo-giornata. */
+function netHoursBy<T extends Piece>(shifts: T[], keyOf: (s: T) => string): Map<string, number> {
+  const groups = new Map<string, T[]>();
+  for (const s of shifts) {
+    const k = keyOf(s);
+    const list = groups.get(k);
+    if (list) list.push(s);
+    else groups.set(k, [s]);
+  }
+  return new Map([...groups].map(([k, list]) => [k, dayNetHours(list)]));
+}
+
 /** Ore nette di una persona in un giorno (somma dei pezzi di turno). */
 export function personDayHours(shifts: ShiftInput[], profileId: string, date: ISODate): number {
-  return shifts
-    .filter((s) => s.profileId === profileId && s.date === date)
-    .reduce((sum, s) => sum + shiftNetHours(s), 0);
+  return dayNetHours(shifts.filter((s) => s.profileId === profileId && s.date === date));
 }
 
 /** Ore nette di una persona nella settimana (o nei soli `days`, se indicati). */
 export function personWeekHours(shifts: ShiftInput[], profileId: string, days?: ISODate[]): number {
   const inDays = days ? new Set(days) : null;
-  return shifts
-    .filter((s) => s.profileId === profileId && (!inDays || inDays.has(s.date)))
-    .reduce((sum, s) => sum + shiftNetHours(s), 0);
+  const mine = shifts.filter((s) => s.profileId === profileId && (!inDays || inDays.has(s.date)));
+  return [...netHoursBy(mine, (s) => s.date).values()].reduce((sum, h) => sum + h, 0);
 }
 
 /** Ore nette per persona e per giorno: `{ [profileId]: { [date]: ore } }`. */
 export function hoursByPersonDay(shifts: ShiftInput[]): Record<string, Record<ISODate, number>> {
   const out: Record<string, Record<ISODate, number>> = {};
-  for (const s of shifts) {
-    const byDay = (out[s.profileId] ??= {});
-    byDay[s.date] = (byDay[s.date] ?? 0) + shiftNetHours(s);
+  for (const [key, hours] of netHoursBy(shifts, (s) => `${s.profileId}|${s.date}`)) {
+    const [profileId, date] = key.split("|");
+    (out[profileId] ??= {})[date] = hours;
   }
   return out;
 }
@@ -66,9 +95,7 @@ export function residualHoursByDay(
 ): ResidualDay[] {
   let used = 0;
   return days.map((date) => {
-    const planned = shiftsOfWeek
-      .filter((s) => s.date === date)
-      .reduce((sum, s) => sum + shiftNetHours(s), 0);
+    const planned = dayNetHours(shiftsOfWeek.filter((s) => s.date === date));
     const before = weeklyHours == null ? null : round2(weeklyHours - used);
     used += planned;
     const after = weeklyHours == null ? null : round2(weeklyHours - used);

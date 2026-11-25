@@ -510,3 +510,76 @@ describe("regole per persona", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("weekly_hours_deviation: assenze e festivi come ore coperte", () => {
+  const anna = [people[0]];
+  const hours = rule("weekly_hours_deviation", { pct: 10 });
+  const leave = (date: string, type: LeaveInput["type"], hours: number | null = null) =>
+    ({ profileId: "sole1", date, type, hours, status: "confirmed" }) satisfies LeaveInput;
+  const run = (shifts: ShiftInput[], extra: Partial<RuleContext>) =>
+    evaluateRules(ctx(shifts, { days: WEEK, people: anna, ...extra }), [hours]);
+  const work = (n: number, end = "18:00") =>
+    WEEK.slice(0, n).map((d) => sh("sole1", d, "10:00", end));
+
+  it("una settimana intera di ferie (7 righe, domenica compresa) vale il contratto, non 56 ore", () => {
+    expect(run([], { leaves: WEEK.map((d) => leave(d, "ferie")) })).toEqual([]);
+    expect(run([], { leaves: WEEK.slice(0, 6).map((d) => leave(d, "ferie")) })).toEqual([]);
+    // 32 ore lavorate + ferie da venerdì a domenica: copre il solo giorno lavorativo mancante.
+    expect(run(work(4), { leaves: WEEK.slice(4).map((d) => leave(d, "ferie")) })).toEqual([]);
+  });
+
+  it("giorno libero e indisponibilità (assenze «altro») sono riposi, non ore", () => {
+    // 40 ore lavorate + sabato libero approvato: niente "48 ore su 40".
+    expect(run(work(5), { leaves: [leave(SAT, "altro")] })).toEqual([]);
+    // 32 ore lavorate + giorno libero: resta il −20%.
+    const v = run(work(4), { leaves: [leave(SAT, "altro")] });
+    expect(v).toMatchObject([{ profileId: "sole1", actual: 32, expected: 40 }]);
+    expect(v[0].message).toMatch(/^Sole1: 32 ore su 40, fuori dal ±10%/);
+  });
+
+  it("niente doppio conteggio di turno e assenza nello stesso giorno", () => {
+    expect(run(work(5), { leaves: [leave(MON, "ferie")] })).toEqual([]);
+    // Il permesso a ore invece si somma alle ore lavorate quel giorno.
+    const short = [sh("sole1", MON, "10:00", "14:00"), ...work(5).slice(1)];
+    expect(run(short, { leaves: [leave(MON, "permesso", 4)] })).toEqual([]);
+  });
+
+  it("festivo a negozio chiuso: giornata coperta, salvo eccezione di apertura", () => {
+    const shifts = [MON, TUE, "2026-09-24", "2026-09-25"].map((d) =>
+      sh("sole1", d, "10:00", "18:00"),
+    );
+    const holidays = [{ date: WED, storeClosed: true }];
+    expect(run(shifts, { holidays })).toEqual([]);
+    // Festivo non chiuso, o riaperto da un'eccezione: è un giorno lavorativo come gli altri.
+    expect(run(shifts, { holidays: [{ date: WED, storeClosed: false }] })).toHaveLength(1);
+    expect(
+      run(shifts, { holidays, openingExceptions: { [WED]: { start: "10:00", end: "19:00" } } }),
+    ).toHaveLength(1);
+  });
+
+  it("un'assenza copre ore mancanti, non ne aggiunge a chi ha già il contratto in meno giorni", () => {
+    // 4 giorni da 10 ore = 40: un festivo o una ferie nel giorno di riposo non porta a 48.
+    const long = work(4, "20:00");
+    expect(run(long, { holidays: [{ date: SAT, storeClosed: true }] })).toEqual([]);
+    expect(run(long, { leaves: [leave(SAT, "ferie")] })).toEqual([]);
+    // 5 giorni da 6 ore = 30: le ferie nel weekend non coprono le ore che mancano.
+    expect(
+      run(work(5, "16:00"), { leaves: [leave(SAT, "ferie"), leave(SUN, "ferie")] }),
+    ).toMatchObject([{ actual: 30 }]);
+  });
+});
+
+describe("max_consecutive_days: giorno precedente non applicabile", () => {
+  const all = WEEK.map((d) => sh("sole1", d, "10:00", "14:00"));
+  it("segnala la serie nel primo giorno in cui la regola vale", () => {
+    const c = ctx(all, { days: WEEK });
+    // Regola valida da giovedì: mercoledì non poteva segnalarla, quindi tocca a giovedì.
+    expect(
+      evaluateRules(c, [rule("max_consecutive_days", { days: 2 }, { validFrom: "2026-09-24" })]),
+    ).toMatchObject([{ date: "2026-09-24", actual: 4, expected: 2 }]);
+    // Regola solo sabato e domenica: una sola segnalazione, il sabato.
+    expect(
+      evaluateRules(c, [rule("max_consecutive_days", { days: 2 }, { days: [6, 7] })]),
+    ).toMatchObject([{ date: SAT, actual: 6 }]);
+  });
+});

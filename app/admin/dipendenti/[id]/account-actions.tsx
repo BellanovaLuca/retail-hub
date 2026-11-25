@@ -46,7 +46,7 @@ export function AccountActions({
 
   function onToggleActive() {
     const question = active
-      ? "Disattivare l'account? La persona non potrà più accedere; il suo storico resta."
+      ? "Disattivare l'account? La persona non potrà più accedere e i suoi turni da oggi in poi verranno tolti, anche dagli orari già pubblicati (riattivando l'account non tornano). Lo storico resta."
       : "Riattivare l'account?";
     if (!confirm(question)) return;
     startTransition(async () => {

@@ -1,8 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentProfile } from "@/lib/auth/session";
+import { getCurrentProfile, isOnboarded } from "@/lib/auth/session";
 import { getYearLeaves, getYearPublicLeaves } from "@/lib/data/leaves";
 import { getDepartments } from "@/lib/data/people";
 import { getPublicPeople, getSchedulePeople, getStoreCalendar } from "@/lib/data/schedule";
+import { fileSlug } from "@/lib/export/http";
 import type { ExportLeave, LeavesExportData } from "@/lib/export/leaves-data";
 import { buildLeavesPdf } from "@/lib/export/leaves-pdf";
 import { buildLeavesXlsx } from "@/lib/export/leaves-xlsx";
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ year: string }> }) {
   const profile = await getCurrentProfile();
-  if (!profile || !profile.active || profile.must_change_pin) {
+  if (!profile || !profile.active || !isOnboarded(profile)) {
     return NextResponse.json({ error: "Accesso richiesto." }, { status: 401 });
   }
   const { year: param } = await params;
@@ -76,7 +77,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     holidays: new Map(calendar.holidays.map((h) => [h.date, h.label])),
   };
 
-  const suffix = department ? `-${department.toLowerCase().replace(/\s+/g, "-")}` : "";
+  // Il nome del reparto lo sceglie l'admin: nel nome del file solo a-z, 0-9 e trattini.
+  const slug = department ? fileSlug(department) : "";
+  const suffix = slug ? `-${slug}` : "";
   if (format === "xlsx") {
     const body = await buildLeavesXlsx(data);
     return new NextResponse(new Uint8Array(body), {

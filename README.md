@@ -76,12 +76,16 @@ cambiare mai dopo i primi accessi).
 
 I promemoria (19:30 "compila la giornata", promemoria turno la sera prima, avviso del giovedì se la
 settimana dopo non è pubblicata, responsabilità del giorno, riepilogo serale, comunicazioni
-programmate) partono dall'indirizzo `/api/cron/run`, che si può chiamare spesso: ogni promemoria
-parte una sola volta.
+programmate) partono dall'indirizzo `/api/cron/run`, che va chiamato **ogni 15 minuti**: ogni
+promemoria parte una sola volta, all'ora giusta (Europe/Rome, ora legale compresa). Se un job va
+in errore o la funzione viene interrotta, la chiamata successiva lo riprova (al massimo 3 volte) e
+la risposta è un errore 500, visibile nei log di chi chiama.
 
-- `vercel.json` lo chiama già **due volte al giorno** (mattina e sera), il massimo del piano
-  gratuito di Vercel.
-- Per gli orari precisi (consigliato) attivalo ogni 15 minuti da Supabase: **Database →
+- `vercel.json` lo chiama solo **due volte al giorno** (mattina e sera, in UTC), il massimo del
+  piano gratuito di Vercel, e senza garanzia sul minuto: da solo **non basta**. D'estate il
+  promemoria delle 19:30 partirebbe alle 20:30, d'inverno potrebbe saltare, e le comunicazioni
+  programmate verrebbero notificate con ore di ritardo. Resta come rete di sicurezza.
+- **Obbligatorio**: la chiamata ogni 15 minuti da Supabase. **Database →
   Extensions** abilita `pg_cron` e `pg_net`, salva il segreto nel Vault e pianifica la chiamata
   nello **SQL Editor** (il segreto resta cifrato, mai in chiaro nel job):
   ```sql
@@ -133,7 +137,16 @@ festività e chiusure, preavviso minimo per le richieste, soglie ferie per repar
 - I permessi sono applicati dal database (Row Level Security), non solo dall'interfaccia: un
   dipendente non può leggere performance, richieste, note o dati di contratto altrui, né i turni non
   pubblicati. Per le assenze dei colleghi vede solo "Ferie" o "Assente".
-- Il PIN non è mai salvato in chiaro; dopo 5 tentativi errati l'accesso si blocca per 15 minuti.
+- Il PIN non è mai salvato in chiaro; dopo 5 tentativi errati l'accesso si blocca per 15 minuti
+  (20 per indirizzo IP). Controllo e registrazione del tentativo sono un'unica operazione nel
+  database: tante richieste in parallelo non aggirano la soglia (`pnpm check:lockout` lo prova
+  sullo stack locale). Per cambiare PIN dal profilo serve quello attuale, e gli altri dispositivi
+  vengono disconnessi.
+- Un account senza profilo attivo (disattivato, o eliminato a metà) non legge né scrive nulla,
+  nemmeno con un token non ancora scaduto.
+- Uscendo, il dispositivo smette di ricevere le notifiche push e perde la copia offline degli
+  orari. Il link del calendario (iCal) si può rigenerare da **Orari → Aggiungi al calendario**:
+  quello vecchio smette di funzionare.
 - Ogni modifica degli amministratori finisce nel **Registro modifiche**.
 - Backup: Supabase li fa ogni giorno (piano gratuito: 7 giorni). Gli export Excel di turni, ferie
   e obiettivi sono un'ulteriore copia.
@@ -147,6 +160,7 @@ scripts/local-stack/setup.sh           # Supabase locale senza Docker (vedi scri
 scripts/local-stack/start.sh
 scripts/local-stack/env.sh > .env.local
 pnpm seed:admin && pnpm seed:dev       # admin ADM-001 / 39182746, persone inventate (tre "Francesca")
+                                       # seed:dev rifiuta un Supabase non locale (PIN noti!)
 pnpm dev                               # http://localhost:3000 — guida di stile su /dev/design
 ```
 
@@ -154,7 +168,9 @@ Controlli:
 
 ```sh
 pnpm lint && pnpm typecheck && pnpm test                 # unit (Vitest)
-DATABASE_URL=postgres://…/db_usa_e_getta pnpm test:db    # migrazioni + RLS (svuota il DB!)
+DATABASE_URL=postgres://…/retail_test pnpm test:db       # migrazioni + RLS: SVUOTA il DB, quindi
+                                                         # solo localhost e nome con "test"
+pnpm check:lockout                                       # blocco PIN con 40 richieste in parallelo
 pnpm test:e2e                                            # Playwright, con lo stack locale acceso
 DATABASE_URL=postgres://…/retail_dev pnpm db:types:local # rigenera i tipi dopo una migrazione
 ```

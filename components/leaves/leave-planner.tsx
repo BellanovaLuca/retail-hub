@@ -80,12 +80,16 @@ export function LeavePlanner(props: LeavePlannerProps) {
   const [, startTransition] = React.useTransition();
   const gridWrap = React.useRef<HTMLDivElement>(null);
 
-  // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati.
-  const [lastLeaves, setLastLeaves] = React.useState(leaves);
-  if (lastLeaves !== leaves) {
-    setLastLeaves(leaves);
-    setPending(new Map());
-  }
+  // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati, e
+  // comunque finché c'è un salvataggio in corso: i dati ricaricati dopo il salvataggio precedente
+  // non contengono ancora le celle scritte nel frattempo.
+  const inflight = React.useRef(0);
+  const lastLeaves = React.useRef(leaves);
+  React.useEffect(() => {
+    if (lastLeaves.current === leaves) return;
+    lastLeaves.current = leaves;
+    if (inflight.current === 0) setPending(new Map());
+  }, [leaves]);
 
   // Stato della vista nell'URL (ricaricando la pagina si resta dove si era).
   React.useEffect(() => {
@@ -284,10 +288,29 @@ export function LeavePlanner(props: LeavePlannerProps) {
         return next;
       });
       setSaveState("saving");
+      inflight.current += 1;
       startTransition(async () => {
-        const res = await saveLeaveCells({
-          changes: changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
-        });
+        let res: Awaited<ReturnType<typeof saveLeaveCells>>;
+        try {
+          res = await saveLeaveCells({
+            changes: changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
+          });
+        } catch {
+          // Server non raggiungibile: le celle di questo lotto tornano ai valori salvati (a meno
+          // che non siano state riscritte nel frattempo) e l'errore resta visibile.
+          setPending((prev) => {
+            const next = new Map(prev);
+            for (const c of changes) {
+              if (next.get(key(c.rowId, c.colId)) === c.value) next.delete(key(c.rowId, c.colId));
+            }
+            return next;
+          });
+          setSaveState("error");
+          setMessage("Salvataggio non riuscito: controlla la connessione e riprova.");
+          return;
+        } finally {
+          inflight.current -= 1;
+        }
         const partial = res.ok && (res.data?.skippedRequests || res.data?.errors);
         setSaveState(res.ok ? "saved" : "error");
         setMessage(!res.ok || partial ? (res.message ?? null) : null);

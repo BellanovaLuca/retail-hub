@@ -280,16 +280,29 @@ export async function publishGoals(input: unknown): Promise<ActionResult<{ publi
     if (toPublish.length === 0) {
       return { ok: true, message: "Già tutto pubblicato.", data: { published: 0 } };
     }
-    const { error } = await supabase
-      .from("performance_goals")
-      .update({ published: true, published_at: new Date().toISOString() })
-      .in(
-        "id",
-        toPublish.map((g) => g.id),
-      );
-    if (error) throw new ActionError(dbErrorMessage(error, "Pubblicazione non riuscita."));
+    // A blocchi: gli id viaggiano nell'indirizzo della richiesta (tutto il periodo sono
+    // centinaia di id). Si avvisa solo chi ha obiettivi davvero pubblicati.
+    const publishedAt = new Date().toISOString();
+    const ids = toPublish.map((g) => g.id);
+    const done = new Set<string>();
+    let failure: { code?: string; message?: string } | null = null;
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await supabase
+        .from("performance_goals")
+        .update({ published: true, published_at: publishedAt })
+        .in("id", ids.slice(i, i + 100))
+        .select("id");
+      if (error) {
+        failure = error;
+        break;
+      }
+      for (const g of data ?? []) done.add(g.id);
+    }
+    const publishedGoals = toPublish.filter((g) => done.has(g.id));
+    if (failure && publishedGoals.length === 0)
+      throw new ActionError(dbErrorMessage(failure, "Pubblicazione non riuscita."));
 
-    const people = [...new Set(toPublish.map((g) => g.profile_id))];
+    const people = [...new Set(publishedGoals.map((g) => g.profile_id))];
     await notify(people, {
       kind: "performance_published",
       title: `Obiettivi di performance ${y}`,
@@ -297,11 +310,15 @@ export async function publishGoals(input: unknown): Promise<ActionResult<{ publi
       link: `/performance?anno=${y}`,
     });
     revalidate(y, profileId);
-    return {
-      ok: true,
-      message: `Pubblicati ${toPublish.length} ${toPublish.length === 1 ? "obiettivo" : "obiettivi"} · ${people.length} ${people.length === 1 ? "persona avvisata" : "persone avvisate"}.`,
-      data: { published: toPublish.length },
-    };
+    const n = publishedGoals.length;
+    const summary = `Pubblicati ${n} ${n === 1 ? "obiettivo" : "obiettivi"} · ${people.length} ${people.length === 1 ? "persona avvisata" : "persone avvisate"}`;
+    if (failure) {
+      return {
+        ok: false,
+        message: `${summary}, ma ${toPublish.length - n} non sono stati pubblicati: riprova.`,
+      };
+    }
+    return { ok: true, message: `${summary}.`, data: { published: n } };
   });
 }
 

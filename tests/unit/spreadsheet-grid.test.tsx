@@ -5,6 +5,7 @@ import * as React from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SpreadsheetGrid } from "@/components/spreadsheet/spreadsheet-grid";
 import type { CellChange, CellState, GridColumn, GridRow } from "@/components/spreadsheet/types";
+import { formatShiftCompact, parseShiftCell } from "@/lib/shifts/parse";
 
 // jsdom non calcola il layout: diamo al contenitore una dimensione perché il virtualizzatore
 // renda le colonne.
@@ -403,5 +404,101 @@ describe("SpreadsheetGrid · virtualizzazione", () => {
     expect(activeCell()).toBe(cell("Anna", "G366"));
     await user.keyboard("{Control>}{Home}{/Control}");
     expect(activeCell()).toBe(cell("Anna", "G1"));
+  });
+});
+
+describe("SpreadsheetGrid · riempimenti validati e modifica ancorata alla cella", () => {
+  // Stessa normalizzazione del foglio turni: orari in forma compatta, codici non validi rifiutati.
+  const shiftNormalize = (value: string) => {
+    const parsed = parseShiftCell(value, []);
+    if (parsed.kind === "error") return { error: parsed.message };
+    if (parsed.kind === "times") return { value: formatShiftCompact(parsed.segments) };
+    return { value };
+  };
+
+  it("Ctrl+D da una cella bloccata non scrive un valore non valido", async () => {
+    const { user, onChange } = setup({
+      initial: { "anna:lun": "Ferie", "anna:mar": "10–14" },
+      locked: ["anna:lun"],
+      normalize: shiftNormalize,
+    });
+    await user.click(cell("Bruno", "Lun"));
+    await user.keyboard("{Control>}d{/Control}");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("Ferie");
+    // Da una cella valida il riempimento funziona come prima.
+    await user.click(cell("Bruno", "Mar"));
+    await user.keyboard("{Control>}d{/Control}");
+    expect(onChange).toHaveBeenLastCalledWith([{ rowId: "bruno", colId: "mar", value: "10–14" }]);
+  });
+
+  it("riscrivere lo stesso orario in un altro formato non è una modifica", async () => {
+    const { user, onChange } = setup({
+      initial: { "anna:lun": "10–19", "anna:mar": "8:30–10 BO · 10–17:30" },
+      normalize: shiftNormalize,
+    });
+    await user.click(cell("Anna", "Lun"));
+    await user.keyboard("10-19{Enter}");
+    await user.click(cell("Anna", "Mar"));
+    await user.keyboard("8.30-10 bo 10-1730{Enter}");
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(cell("Anna", "Lun"));
+    await user.keyboard("10-18{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith([{ rowId: "anna", colId: "lun", value: "10–18" }]);
+  });
+
+  function RowsHarness({
+    rows,
+    onChange,
+  }: {
+    rows: GridRow[];
+    onChange: (c: CellChange[]) => void;
+  }) {
+    const [data, setData] = React.useState<Record<string, string>>({});
+    const getValue = React.useCallback((r: string, c: string) => data[`${r}:${c}`] ?? "", [data]);
+    return (
+      <SpreadsheetGrid
+        ariaLabel="Foglio di prova"
+        rows={rows}
+        columns={COLS}
+        getValue={getValue}
+        onChange={(changes) => {
+          onChange(changes);
+          setData((prev) => {
+            const next = { ...prev };
+            for (const ch of changes) next[`${ch.rowId}:${ch.colId}`] = ch.value;
+            return next;
+          });
+        }}
+      />
+    );
+  }
+
+  it("se le righe cambiano mentre si scrive, il valore resta sulla persona giusta", async () => {
+    const onChange = vi.fn<(changes: CellChange[]) => void>();
+    const user = userEvent.setup();
+    const { rerender } = render(<RowsHarness rows={ROWS} onChange={onChange} />);
+    await user.click(cell("Bruno", "Lun"));
+    await user.keyboard("10-14");
+    // Aggiornamento in tempo reale: compare una persona in cima all'elenco.
+    rerender(<RowsHarness rows={[{ id: "zeno", label: "Zeno" }, ...ROWS]} onChange={onChange} />);
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("10-14");
+    await user.keyboard("{Enter}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith([{ rowId: "bruno", colId: "lun", value: "10-14" }]);
+    // Invio scende di una riga rispetto alla posizione attuale di Bruno.
+    expect(activeCell().getAttribute("aria-label")).toBe("Carla, Lun: vuota");
+  });
+
+  it("se la riga in modifica sparisce, il valore non finisce su un'altra persona", async () => {
+    const onChange = vi.fn<(changes: CellChange[]) => void>();
+    const user = userEvent.setup();
+    const { rerender } = render(<RowsHarness rows={ROWS} onChange={onChange} />);
+    await user.click(cell("Bruno", "Lun"));
+    await user.keyboard("10-14");
+    rerender(<RowsHarness rows={[ROWS[0], ROWS[2]]} onChange={onChange} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("non è più nel foglio");
   });
 });

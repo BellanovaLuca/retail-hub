@@ -6,9 +6,13 @@
  * - un orario (`10-14`, `10:30-20`, `10.30-20`, `10,30-20`, `1030-2000`, `10–20`, `10 - 14`);
  * - due o più fasce per lo spezzato (`10-14 16-20`, `10-14/16-20`, `10-14 · 16-20`, `10-14;16-20`).
  *
+ * Dopo una fascia, `BO` la segna come back office (`8:30-10 BO 10-17:30`): serve a chi apre in
+ * back office e poi passa in vendita. Se almeno una fascia è segnata, le altre sono in vendita.
+ *
  * Regole: orari tra 00:00 e 24:00, minuti a passo di 15 (quarti d'ora: la griglia "foglio orario"
  * usa le mezz'ore, ma un turno 10:15–… è comune e non va rifiutato), fine dopo l'inizio, fasce
- * non sovrapposte. Le fasce vengono ordinate; quelle contigue (`10-14 14-20`) vengono unite.
+ * non sovrapposte. Le fasce vengono ordinate; quelle contigue (`10-14 14-20`) vengono unite, a
+ * meno che una sia in back office e l'altra no.
  */
 import { formatTimeCompact, fromMinutes, toMinutes } from "@/lib/domain/time";
 import type { Interval } from "@/lib/domain/types";
@@ -24,10 +28,19 @@ export type ShiftTemplateRef = {
   isAbsence: boolean;
 };
 
+/** Marcatore di back office dopo una fascia. */
+export const BACK_OFFICE_MARK = "BO";
+
+/**
+ * Fascia letta dalla cella. `isBackOffice` c'è solo se il testo usa il marcatore `BO`
+ * (true = segnata, false = in vendita); senza marcatori decide il predefinito della persona.
+ */
+export type ShiftSegment = Interval & { isBackOffice?: boolean };
+
 export type ParsedShiftCell =
   | { kind: "empty" }
   | { kind: "template"; code: string }
-  | { kind: "times"; segments: Interval[] }
+  | { kind: "times"; segments: ShiftSegment[] }
   | { kind: "error"; message: string };
 
 /** Un orario dentro una fascia: "10", "10:30", "10.30", "10,30", "1030", "930". */
@@ -64,8 +77,22 @@ export function parseShiftCell(text: string, templates: ShiftTemplateRef[]): Par
   const pieces = normalized.split(/[\s/;·•|+]+/).filter((p) => p !== "");
   if (pieces.length === 0) return { kind: "empty" };
 
-  const ranges: { start: number; end: number }[] = [];
-  for (const piece of pieces) {
+  const ranges: { start: number; end: number; bo: boolean }[] = [];
+  for (let piece of pieces) {
+    // "BO" da solo segna la fascia che lo precede; va bene anche attaccato ("8:30-10bo").
+    if (piece.toUpperCase() === BACK_OFFICE_MARK) {
+      const last = ranges[ranges.length - 1];
+      if (!last || last.bo) {
+        return {
+          kind: "error",
+          message: `"${BACK_OFFICE_MARK}" va scritto dopo una fascia (es. 8:30-10 BO)`,
+        };
+      }
+      last.bo = true;
+      continue;
+    }
+    const attached = /^(.*\d)bo$/i.exec(piece);
+    if (attached) piece = attached[1];
     const parts = piece.split("-");
     if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
       if (!/\d/.test(piece))
@@ -82,11 +109,12 @@ export function parseShiftCell(text: string, templates: ShiftTemplateRef[]): Par
         message: `${fromMinutes(start)}–${fromMinutes(end)}: la fine deve venire dopo l'inizio`,
       };
     }
-    ranges.push({ start, end });
+    ranges.push({ start, end, bo: Boolean(attached) });
   }
+  if (ranges.length === 0) return { kind: "empty" };
 
   ranges.sort((a, b) => a.start - b.start);
-  const merged: { start: number; end: number }[] = [];
+  const merged: { start: number; end: number; bo: boolean }[] = [];
   for (const r of ranges) {
     const last = merged[merged.length - 1];
     if (last && r.start < last.end) {
@@ -95,20 +123,32 @@ export function parseShiftCell(text: string, templates: ShiftTemplateRef[]): Par
         message: `Le fasce ${fromMinutes(last.start)}–${fromMinutes(last.end)} e ${fromMinutes(r.start)}–${fromMinutes(r.end)} si sovrappongono`,
       };
     }
-    if (last && r.start === last.end) last.end = r.end;
+    if (last && r.start === last.end && r.bo === last.bo) last.end = r.end;
     else merged.push({ ...r });
   }
 
+  const marked = merged.some((r) => r.bo);
   return {
     kind: "times",
-    segments: merged.map((r) => ({ start: fromMinutes(r.start), end: fromMinutes(r.end) })),
+    segments: merged.map((r) => ({
+      start: fromMinutes(r.start),
+      end: fromMinutes(r.end),
+      ...(marked ? { isBackOffice: r.bo } : {}),
+    })),
   };
 }
 
-/** Forma compatta per la cella: `10–20`, `10:30–20`, `10–14 · 16–20`. */
-export function formatShiftCompact(segments: Interval[]): string {
+/**
+ * Forma compatta per la cella: `10–20`, `10:30–20`, `10–14 · 16–20`; le fasce con
+ * `isBackOffice: true` portano il marcatore (`8:30–10 BO · 10–17:30`). È la forma canonica:
+ * `parseShiftCell` la rilegge dando le stesse fasce.
+ */
+export function formatShiftCompact(segments: ShiftSegment[]): string {
   return segments
-    .map((s) => `${formatTimeCompact(s.start)}–${formatTimeCompact(s.end)}`)
+    .map(
+      (s) =>
+        `${formatTimeCompact(s.start)}–${formatTimeCompact(s.end)}${s.isBackOffice ? ` ${BACK_OFFICE_MARK}` : ""}`,
+    )
     .join(" · ");
 }
 

@@ -3,6 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
 import { SESSION_MAX_AGE_SECONDS, supabaseAnonKey, supabaseUrl } from "./env";
 
+/** Intestazione di risposta con l'id di chi è collegato, letta dal service worker. */
+export const USER_HEADER = "x-staff-user";
+
 /** Percorsi raggiungibili senza sessione. */
 const PUBLIC_PATHS = ["/accesso", "/privacy", "/api/auth/pin", "/api/ical/", "/api/cron/", "/dev/"];
 
@@ -34,7 +37,8 @@ export async function updateSession(request: NextRequest) {
 
   // Non inserire codice tra createServerClient e getClaims: serve a rinnovare la sessione.
   const { data } = await supabase.auth.getClaims();
-  const signedIn = Boolean(data?.claims?.sub);
+  const userId = data?.claims?.sub;
+  const signedIn = Boolean(userId);
   const { pathname } = request.nextUrl;
 
   if (!signedIn && !isPublicPath(pathname)) {
@@ -54,5 +58,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Il service worker lega la copia offline delle pagine a questa persona (public/sw.js).
+  if (userId) response.headers.set(USER_HEADER, userId);
   return response;
 }

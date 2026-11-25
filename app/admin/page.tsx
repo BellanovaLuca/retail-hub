@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/feedback";
 import { requireAdmin } from "@/lib/auth/session";
 import { getAdminAnnouncements } from "@/lib/data/announcements";
 import { namesById } from "@/lib/data/requests";
-import { evaluateWeek, installStandardRuleSet } from "@/lib/data/rules";
+import { evaluateWeek } from "@/lib/data/rules";
 import { formatLong, nowInRome, toISODate, weekNumber, weekStart } from "@/lib/dates";
 import { awaitsAdmin, type RequestStatus } from "@/lib/requests";
 import { leaveLabelAdmin } from "@/lib/schedule/view";
@@ -21,7 +21,6 @@ export const metadata: Metadata = { title: "Cruscotto" };
 export default async function AdminDashboardPage() {
   await requireAdmin();
   const supabase = await createClient();
-  await installStandardRuleSet(supabase);
   const now = nowInRome();
   const today = toISODate(now);
   const tomorrow = toISODate(addDays(now, 1));

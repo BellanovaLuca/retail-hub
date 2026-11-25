@@ -145,11 +145,18 @@ export function toRomeLocalInput(iso: string | null | undefined): string {
   return format(new TZDate(iso, ROME), "yyyy-MM-dd'T'HH:mm");
 }
 
-/** Interpreta "yyyy-MM-ddTHH:mm" come ora di Roma e restituisce l'istante ISO (UTC). */
+/**
+ * Interpreta "yyyy-MM-ddTHH:mm" come ora di Roma e restituisce l'istante ISO (UTC).
+ * Null se il formato è sbagliato o la data non esiste (31 febbraio, mese 13, ore 25): senza il
+ * controllo `Date` le farebbe "scorrere" in avanti (31 febbraio → 3 marzo) in silenzio.
+ */
 export function fromRomeLocalInput(value: string): string | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
   if (!m) return null;
   const [, y, mo, d, h, mi] = m.map(Number);
+  if (mo < 1 || mo > 12 || h > 23 || mi > 59) return null;
+  // Giorno 0 del mese successivo = ultimo giorno del mese (febbraio bisestile compreso).
+  if (d < 1 || d > new Date(Date.UTC(y, mo, 0)).getUTCDate()) return null;
   const date = new TZDate(y, mo - 1, d, h, mi, ROME);
   return Number.isNaN(date.getTime()) ? null : new Date(date.getTime()).toISOString();
 }

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { getDepartments } from "@/lib/data/people";
 import { createClient } from "@/lib/supabase/server";
 import { LogoForm, StoreForm } from "./store-forms";
@@ -6,6 +7,8 @@ import { LogoForm, StoreForm } from "./store-forms";
 export const metadata: Metadata = { title: "Impostazioni" };
 
 export default async function ImpostazioniNegozioPage() {
+  // La guardia del layout non basta: una pagina può essere richiesta senza ripassare dal layout.
+  await requireAdmin();
   const supabase = await createClient();
   const [{ data: settings }, departments] = await Promise.all([
     supabase.from("store_settings").select("*").eq("id", true).single(),

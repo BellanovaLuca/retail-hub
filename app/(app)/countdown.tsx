@@ -1,26 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { countdownLabel, romeClock, type ShiftPiece } from "./countdown-label";
 
-/** Conto alla rovescia all'inizio del turno di oggi (ora di Roma). */
-export function Countdown({ date, start }: { date: string; start: string }) {
+/**
+ * Conto alla rovescia del turno di oggi (ora di Roma). `pieces` = tutti i pezzi del turno
+ * (più di uno se è spezzato): durante la pausa mostra quanto manca alla ripresa.
+ */
+export function Countdown({ date, pieces }: { date: string; pieces: ShiftPiece[] }) {
   const [label, setLabel] = useState<string | null>(null);
   useEffect(() => {
     const compute = () => {
-      const nowRome = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" }));
-      const [h, m] = start.split(":").map(Number);
-      const [y, mo, d] = date.split("-").map(Number);
-      const target = new Date(y, mo - 1, d, h, m);
-      const minutes = Math.round((target.getTime() - nowRome.getTime()) / 60_000);
-      if (minutes <= 0) setLabel("In corso");
-      else if (minutes < 60) setLabel(`Tra ${minutes} min`);
-      else
-        setLabel(`Tra ${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`);
+      const now = romeClock(new Date());
+      // Pagina rimasta aperta oltre la mezzanotte: il turno non è più "di oggi".
+      setLabel(now.date === date ? countdownLabel(pieces, now.minutes) : null);
     };
     compute();
     const t = setInterval(compute, 30_000);
     return () => clearInterval(t);
-  }, [date, start]);
+  }, [date, pieces]);
   if (!label) return null;
   return (
     <p className="mt-2 text-sm text-muted nums" aria-live="polite">

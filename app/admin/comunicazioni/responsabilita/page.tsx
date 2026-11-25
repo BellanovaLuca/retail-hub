@@ -1,7 +1,7 @@
 import { FileDown, Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ResponsibilityBoard } from "@/components/responsibilities/board";
+import { CheckMonitor } from "@/components/responsibilities/check-monitor";
 import { boardProps } from "@/components/responsibilities/board-rows";
 import { ExtraTaskForm } from "@/components/responsibilities/extra-task-form";
 import { ExtraTaskList } from "@/components/responsibilities/extra-task-list";
@@ -14,13 +14,19 @@ import { requireAdmin } from "@/lib/auth/session";
 import {
   getBoard,
   getExtraTasks,
+  getOnShiftByDay,
   getResponsibilities,
   getWeekPlanner,
   loadsByPerson,
 } from "@/lib/data/responsibilities";
 import { normalizeWeekParam } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
-import { cellState, isScheduledOn, shiftDate } from "@/lib/responsibilities/assignment";
+import {
+  assigneeIds,
+  cellState,
+  isScheduledOn,
+  shiftDate,
+} from "@/lib/responsibilities/assignment";
 import { createClient } from "@/lib/supabase/server";
 import { getPickerData } from "../editor-data";
 
@@ -49,7 +55,8 @@ export default async function AdminResponsabilitaPage({
     getPickerData(supabase),
     getWeekPlanner(supabase, week),
   ]);
-  const { rows, checks, days } = boardProps(board);
+  const onShiftByDay = await getOnShiftByDay(supabase, board.days);
+  const { rows, days } = boardProps(board);
   const missing = board.items.reduce(
     (sum, r) =>
       sum +
@@ -114,7 +121,7 @@ export default async function AdminResponsabilitaPage({
         <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 id="tabellone" className="eyebrow">
-              Tabellone e storico delle spunte
+              Controllo delle spunte
             </h2>
             <p className="mt-1 text-sm text-muted nums">
               {missing > 0
@@ -139,12 +146,30 @@ export default async function AdminResponsabilitaPage({
             basePath="/admin/comunicazioni/responsabilita"
           />
         </div>
-        <ResponsibilityBoard
-          rows={rows}
+        <CheckMonitor
+          key={week}
           days={days}
           today={today}
-          checks={checks}
-          viewer={{ id: profile.id, name: profile.display_name, isAdmin: true }}
+          people={planner.people}
+          columns={board.items.map((r) => ({
+            id: r.id,
+            title: r.title,
+            scheduleDays: r.scheduleDays,
+            allStaff: r.allStaff,
+            assigneeIds: r.allStaff ? [] : assigneeIds(r),
+          }))}
+          checks={Object.fromEntries(
+            Object.entries(board.checks).map(([id, byDate]) => [
+              id,
+              Object.fromEntries(
+                Object.entries(byDate).map(([date, c]) => [
+                  date,
+                  { doneById: c.doneById, doneByName: c.doneByName, doneAt: c.doneAt },
+                ]),
+              ),
+            ]),
+          )}
+          onShift={onShiftByDay}
         />
       </section>
 

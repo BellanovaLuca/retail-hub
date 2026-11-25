@@ -72,7 +72,8 @@ export function StoreForm({
                 <Input
                   id={`th-${d.id}`}
                   type="number"
-                  min={1}
+                  min={0}
+                  max={50}
                   className="nums"
                   value={values.leaveThresholds[d.id] ?? ""}
                   onChange={(e) =>

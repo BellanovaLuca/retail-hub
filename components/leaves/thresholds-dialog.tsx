@@ -42,9 +42,10 @@ export function ThresholdsDialog({
     for (const d of departments) {
       const raw = (values[d.id] ?? "").trim();
       if (raw === "") payload[d.id] = null;
-      else if (/^\d{1,2}$/.test(raw)) payload[d.id] = Number(raw);
+      // Stessi limiti del server: un numero intero da 0 a 50.
+      else if (/^\d{1,2}$/.test(raw) && Number(raw) <= 50) payload[d.id] = Number(raw);
       else {
-        setResult({ ok: false, message: `Soglia non valida per ${d.name}.` });
+        setResult({ ok: false, message: `Soglia non valida per ${d.name}: da 0 a 50.` });
         return;
       }
     }
