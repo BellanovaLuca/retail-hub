@@ -1,6 +1,6 @@
 import { addDays, format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, MessageSquareText } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { StoreCard } from "@/components/targets/store-card";
@@ -44,6 +44,8 @@ export default async function ObiettiviPage({
     for (const [date, v] of Object.entries(row.values))
       if (v !== null) initialValues[`${row.kpiId}|${date}`] = v;
 
+  const voiceComments = week.rows.filter((r) => r.comment);
+
   const storeRows = storeTotalsRows({
     kpis: week.kpis,
     totals: week.store.totals,
@@ -83,13 +85,39 @@ export default async function ObiettiviPage({
         </p>
       </header>
 
-      {week.generalComment ? (
+      {week.generalComment || voiceComments.length ? (
         <section
-          aria-label="Commento della settimana"
-          className="mb-8 border-l-2 border-foreground pl-4"
+          aria-labelledby="commento-settimana"
+          className="mb-10 rounded-lg border-2 border-foreground p-5 sm:p-6"
         >
-          <p className="mb-1 eyebrow">Commento della settimana</p>
-          <p className="text-base whitespace-pre-line">{week.generalComment}</p>
+          <h2 id="commento-settimana" className="mb-3 flex items-center gap-2 eyebrow">
+            <MessageSquareText className="size-4 stroke-[1.5]" aria-hidden />
+            Il commento del tuo responsabile
+          </h2>
+          {week.generalComment ? (
+            <p className="font-display text-xl leading-snug font-light whitespace-pre-line sm:text-2xl">
+              {week.generalComment}
+            </p>
+          ) : null}
+          {voiceComments.length ? (
+            <dl
+              className={
+                week.generalComment
+                  ? "mt-5 divide-y divide-line border-t border-line"
+                  : "divide-y divide-line"
+              }
+            >
+              {voiceComments.map((r) => (
+                <div
+                  key={r.kpiId}
+                  className="grid gap-1 py-3 text-sm sm:grid-cols-[12rem_1fr] sm:gap-4"
+                >
+                  <dt className="font-medium">{r.label}</dt>
+                  <dd className="whitespace-pre-line">{r.comment}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
         </section>
       ) : null}
 

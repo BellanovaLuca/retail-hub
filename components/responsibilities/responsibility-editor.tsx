@@ -165,6 +165,13 @@ export function ResponsibilityEditor({
           onCheckedChange={(x) => set("allStaff", x)}
         />
         {!v.allStaff ? (
+          <p className="mb-2 max-w-2xl text-sm text-muted">
+            Facoltativo: di solito le persone si assegnano settimana per settimana dalla griglia
+            «Chi fa cosa questa settimana». Responsabile e supporto qui sotto valgono solo finché
+            l&apos;attività non è mai stata assegnata con la griglia.
+          </p>
+        ) : null}
+        {!v.allStaff ? (
           <div className="grid gap-8 lg:grid-cols-2">
             <Field
               label="Responsabile"
@@ -185,7 +192,7 @@ export function ResponsibilityEditor({
                   }));
                 }}
               >
-                <option value="">— Scegli —</option>
+                <option value="">— Nessuno —</option>
                 {people.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}

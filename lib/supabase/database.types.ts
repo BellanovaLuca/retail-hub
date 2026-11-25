@@ -1137,6 +1137,7 @@ export type Database = {
           shift_id: string | null;
           target_profile_id: string | null;
           target_shift_id: string | null;
+          target_date: string | null;
           message: string | null;
           attachment_path: string | null;
           status: "approved" | "cancelled" | "peer_accepted" | "peer_declined" | "pending" | "rejected";
@@ -1145,7 +1146,6 @@ export type Database = {
           decision_note: string | null;
           created_at: string;
           updated_at: string;
-          target_date: string | null;
         };
         Insert: {
           id?: string;
@@ -1160,6 +1160,7 @@ export type Database = {
           shift_id?: string | null;
           target_profile_id?: string | null;
           target_shift_id?: string | null;
+          target_date?: string | null;
           message?: string | null;
           attachment_path?: string | null;
           status?: "approved" | "cancelled" | "peer_accepted" | "peer_declined" | "pending" | "rejected";
@@ -1168,7 +1169,6 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
-          target_date?: string | null;
         };
         Update: {
           id?: string;
@@ -1183,6 +1183,7 @@ export type Database = {
           shift_id?: string | null;
           target_profile_id?: string | null;
           target_shift_id?: string | null;
+          target_date?: string | null;
           message?: string | null;
           attachment_path?: string | null;
           status?: "approved" | "cancelled" | "peer_accepted" | "peer_declined" | "pending" | "rejected";
@@ -1191,7 +1192,6 @@ export type Database = {
           decision_note?: string | null;
           created_at?: string;
           updated_at?: string;
-          target_date?: string | null;
         };
         Relationships: [
           {
@@ -1353,6 +1353,38 @@ export type Database = {
           },
           {
             foreignKeyName: "responsibility_checks_responsibility_id_fkey";
+            columns: ["responsibility_id"];
+            isOneToOne: false;
+            referencedRelation: "responsibilities";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      responsibility_week_assignments: {
+        Row: {
+          responsibility_id: string;
+          week_start: string;
+          profile_ids: string[];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          responsibility_id: string;
+          week_start: string;
+          profile_ids?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          responsibility_id?: string;
+          week_start?: string;
+          profile_ids?: string[];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "responsibility_week_assignments_responsibility_id_fkey";
             columns: ["responsibility_id"];
             isOneToOne: false;
             referencedRelation: "responsibilities";
@@ -1989,7 +2021,10 @@ export type Database = {
       cancel_request: { Args: { p_request_id: string }; Returns: undefined };
       is_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
       is_responsibility_assignee: { Args: { p_responsibility_id: string; uid: string }; Returns: boolean };
+      is_responsibility_assignee_on: { Args: { p_responsibility_id: string; uid: string; p_date: string }; Returns: boolean };
+      is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
       respond_to_swap: { Args: { p_request_id: string; p_accept: boolean }; Returns: undefined };
+      responsibility_week_team: { Args: { p_responsibility_id: string; p_date: string }; Returns: string[] };
       set_extra_task_done: { Args: { p_task_id: string; p_done: boolean }; Returns: undefined };
       set_performance_note: { Args: { p_goal_id: string; p_note: string }; Returns: undefined };
       today_rome: { Args: Record<PropertyKey, never>; Returns: string };

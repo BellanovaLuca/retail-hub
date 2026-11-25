@@ -420,6 +420,7 @@ Tab su mobile: **Home · Orari · Obiettivi · Richieste · Altro** ("Altro" = F
 - Tab In attesa / Approvate / Rifiutate / Tutte, con filtri.
 - Il dettaglio mostra il contesto: turni di quei giorni, chi altro è in ferie, effetto sulla copertura.
 - Approvazione singola o multipla, nota di decisione, commenti.
+- **Azzera tutte le richieste** (richiesta del 25/11/2026): elimina tutte le richieste dei dipendenti, di qualsiasi stato (anche approvate), con commenti e allegati. Conferma scrivendo "AZZERA". A scelta toglie anche le assenze nate da richieste approvate (le revoca prima di eliminarle); senza la spunta ferie e permessi restano nel calendario. Gli scambi già approvati restano come sono.
 
 **`/admin/comunicazioni`**
 
@@ -669,6 +670,8 @@ Ogni persona riceve le voci del gruppo della sua area (i jolly: Vista + Pz sole,
 6.  Sotto la tabella, i totali assegnati confrontati con l'obiettivo del negozio (es. "WO assegnati 118 / 120").
 7.  Pulsante "Copia dalla settimana precedente".
 
+**Versione semplice** (richiesta del 25/11/2026): in cima alla scheda "Assegnazione" c'è la tabella con **tutte le persone attive** (una riga ciascuna) e tutte le voci attive; l'admin scrive direttamente cosa deve fare ognuno in settimana. Una cella di una voce che non è nel foglio della persona si può scrivere lo stesso: alla conferma la voce viene aggiunta al suo foglio. La colonna **Commento**, subito accanto al nome, è il commento generale della settimana: con "Conferma e avvisa" viene pubblicato e la persona lo vede in un riquadro in evidenza in cima a `/obiettivi` (insieme ai commenti sulle voci). Il calcolo dalla produttività oraria dei punti 1–4 è in una sezione richiudibile "Calcolo automatico (facoltativo)": è attivo solo se sono inseriti generato vista o valore sole; altrimenti WO e pezzi sole non vengono proposti (restano le regole fisse e le "% di …" sui valori scritti).
+
 **Compilazione giornaliera** (dipendente): vedi `/obiettivi` in §6.1.
 
 - "A quanto sei" = somma lun→dom; "Quanto mi manca?" = obiettivo − somma (mostrato come "Obiettivo raggiunto ✓" quando arriva a zero o sotto).
@@ -724,6 +727,8 @@ I nomi dei responsabili si assegnano da interfaccia: non vanno messi nel seed.
   - giorno non previsto (grigio, non cliccabile).
 - **Attività extra**: compiti una tantum con scadenza, assegnati a una o più persone. Compaiono nella card "Oggi tocca a te" fino a quando qualcuno li chiude.
 - Quando il responsabile cambia, la vecchia assegnazione resta nello storico.
+
+**Assegnazione per settimana** (richiesta del 25/11/2026): in cima a `/admin/comunicazioni/responsabilita` la griglia **"Chi fa cosa questa settimana"** ha le persone attive in riga e le attività in colonna; l'admin spunta quali attività farà ciascuno **in quella settimana**. Un'attività può andare a una o più persone, tutte alla pari: nei giorni previsti la fa chi del gruppo è in turno (tutti, se i turni non sono pubblicati); se nessuno del gruppo è in turno l'attività è "senza nessuno in turno". Tabella `responsibility_week_assignments` (attività, lunedì, `profile_ids`). Una settimana senza assegnazione propria riprende l'ultima settimana assegnata, finché non si cambia; un'attività mai assegnata per settimana usa responsabile e supporti della sua scheda (che restano facoltativi). Si può preparare fino a 8 settimane avanti; le settimane passate sono in sola lettura. Chi riceve un'attività nuova riceve una sola notifica con l'elenco. La spunta giornaliera spetta agli assegnati della settimana di quel giorno (RLS `is_responsibility_assignee_on`).
 
 ------------------------------------------------------------------------
 
@@ -783,6 +788,7 @@ Prima delle pagine reali, crea `/dev/design` (visibile solo in sviluppo) con col
 | Promemoria turno (sera prima, facoltativo)                          | il dipendente                                                   | push                               |
 
 - Campanella con contatore in tempo reale (Supabase Realtime).
+- In `/notifiche`: "Segna tutte come lette" e **"Elimina tutte"** (svuota l'elenco delle proprie notifiche, dopo conferma).
 - Preferenze di notifica nel profilo.
 - **Vercel Cron**: promemoria serali, avviso agli admin il giovedì se la settimana successiva non è ancora pubblicata.
 

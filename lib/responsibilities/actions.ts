@@ -41,18 +41,18 @@ export async function toggleResponsibilityCheck(input: {
     const { responsibilityId, date, done } = parsed.data;
     const { supabase, profile } = await authedAction();
 
+    // Assegnato quel giorno: gruppo della settimana, se c'è, altrimenti responsabile e supporti.
     const [{ data: r }, { data: assignee }] = await Promise.all([
       supabase
         .from("responsibilities")
         .select("id, all_staff, schedule_days, active")
         .eq("id", responsibilityId)
         .maybeSingle(),
-      supabase
-        .from("responsibility_assignees")
-        .select("profile_id")
-        .eq("responsibility_id", responsibilityId)
-        .eq("profile_id", profile.id)
-        .maybeSingle(),
+      supabase.rpc("is_responsibility_assignee_on", {
+        p_responsibility_id: responsibilityId,
+        uid: profile.id,
+        p_date: date,
+      }),
     ]);
     if (!r) throw new ActionError("Attività non trovata.");
     const today = toISODate(nowInRome());
@@ -74,14 +74,12 @@ export async function toggleResponsibilityCheck(input: {
 
     if (done) {
       const doneAt = new Date().toISOString();
-      const { error } = await supabase
-        .from("responsibility_checks")
-        .insert({
-          responsibility_id: responsibilityId,
-          date,
-          done_by: profile.id,
-          done_at: doneAt,
-        });
+      const { error } = await supabase.from("responsibility_checks").insert({
+        responsibility_id: responsibilityId,
+        date,
+        done_by: profile.id,
+        done_at: doneAt,
+      });
       if (error && error.code !== "23505")
         return { ok: false, message: dbErrorMessage(error, "Spunta non salvata.") };
       revalidateBoards();

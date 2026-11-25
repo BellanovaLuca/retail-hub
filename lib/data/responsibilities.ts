@@ -3,14 +3,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseAttachments, type Attachment } from "@/lib/announcements/model";
 import { getPeopleDirectory, type Person } from "@/lib/data/announcements";
 import {
+  assigneeIds,
   dutiesForPerson,
+  effectiveWeekTeam,
   isScheduledOn,
+  mondayOf,
   peopleOnShift,
   resolveDuty,
   shiftDate,
   uncoveredOn,
+  withWeekTeam,
   type Duty,
   type ResponsibilityAssignment,
+  type WeekTeam,
 } from "@/lib/responsibilities/assignment";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/types";
@@ -47,25 +52,67 @@ async function directory(db: Db) {
   return { people, byId: new Map(people.map((p) => [p.id, p])) };
 }
 
-/** Attività con responsabile e supporti, nell'ordine del tabellone. */
+/** Assegnazioni settimanali fino alla settimana indicata (compresa), per attività. */
+export async function getWeekTeams(db: Db, uptoWeek: string): Promise<Map<string, WeekTeam[]>> {
+  const { data } = await db
+    .from("responsibility_week_assignments")
+    .select("responsibility_id, week_start, profile_ids")
+    .lte("week_start", uptoWeek);
+  const out = new Map<string, WeekTeam[]>();
+  for (const row of data ?? []) {
+    const list = out.get(row.responsibility_id) ?? [];
+    list.push({ weekStart: row.week_start, profileIds: row.profile_ids });
+    out.set(row.responsibility_id, list);
+  }
+  return out;
+}
+
+/**
+ * Attività con responsabile e supporti, nell'ordine del tabellone. Con `week` (lunedì) vale
+ * l'assegnazione settimanale, se l'attività ne ha una: gli assegnati finiscono in `supports`
+ * (tutti alla pari) e `weekly` è true.
+ */
 export async function getResponsibilities(
   db: Db,
-  opts: { includeInactive?: boolean; people?: Map<string, Person> } = {},
+  opts: { includeInactive?: boolean; people?: Map<string, Person>; week?: string } = {},
 ): Promise<ResponsibilityItem[]> {
   let query = db.from("responsibilities").select("*");
   if (!opts.includeInactive) query = query.eq("active", true);
-  const [{ data: rows }, { data: assignees }, byId] = await Promise.all([
+  const [{ data: rows }, { data: assignees }, byId, teams] = await Promise.all([
     query.order("sort_order").order("title"),
     db
       .from("responsibility_assignees")
       .select("responsibility_id, profile_id, role, sort_order")
       .order("sort_order"),
     opts.people ? Promise.resolve(opts.people) : directory(db).then((d) => d.byId),
+    opts.week ? getWeekTeams(db, opts.week) : Promise.resolve(null),
   ]);
   return (rows ?? []).map((r) => {
     const mine = (assignees ?? []).filter((a) => a.responsibility_id === r.id);
     const owner = mine.find((a) => a.role === "owner");
     const supports = mine.filter((a) => a.role === "support");
+    const team =
+      teams && opts.week
+        ? (effectiveWeekTeam(teams.get(r.id) ?? [], opts.week)?.filter((id) => byId.has(id)) ??
+          null)
+        : null;
+    if (team && !r.all_staff) {
+      const base = {
+        id: r.id,
+        title: r.title,
+        descriptionMd: r.description_md,
+        scheduleDays: [...r.schedule_days].sort(),
+        allStaff: false,
+        active: r.active,
+        attachments: parseAttachments(r.attachments),
+        sortOrder: r.sort_order,
+        ownerId: null,
+        supportIds: [],
+        owner: null,
+        supports: team.map((id) => ref(byId, id)),
+      };
+      return withWeekTeam(base, team);
+    }
     return {
       id: r.id,
       title: r.title,
@@ -143,7 +190,7 @@ export async function getBoard(db: Db, weekStart: string, today: string): Promis
   const { people, byId } = await directory(db);
   const containsToday = days.includes(today);
   const [items, checks, onShift] = await Promise.all([
-    getResponsibilities(db, { people: byId }),
+    getResponsibilities(db, { people: byId, week: weekStart }),
     getChecks(db, days[0], days[6], byId),
     containsToday ? getOnShift(db, today) : Promise.resolve(null),
   ]);
@@ -260,7 +307,7 @@ export async function getTodayDuties(
 ): Promise<TodayDuties> {
   const { byId } = await directory(db);
   const [items, onShift, checks, { data: myTasks }] = await Promise.all([
-    getResponsibilities(db, { people: byId }),
+    getResponsibilities(db, { people: byId, week: mondayOf(date) }),
     getOnShift(db, date),
     getChecks(db, date, date, byId),
     db
@@ -276,6 +323,7 @@ export async function getTodayDuties(
       const r = d.responsibility as ResponsibilityItem;
       const check = checks[r.id]?.[date];
       const replacingName = d.replacingId ? (byId.get(d.replacingId)?.displayName ?? "—") : null;
+      const teammates = (d.teammateIds ?? []).map((id) => byId.get(id)?.displayName ?? "—");
       return {
         id: r.id,
         title: r.title,
@@ -289,7 +337,9 @@ export async function getTodayDuties(
               ? "Per tutti"
               : d.role === "support"
                 ? "Supporto"
-                : null,
+                : teammates.length
+                  ? `Con ${teammates.join(", ")}`
+                  : null,
         done: !!check,
         doneByName: check?.doneByName ?? null,
         doneAt: check?.doneAt ?? null,
@@ -328,7 +378,7 @@ export async function findUncoveredResponsibilities(
   const db = createAdminClient();
   const { byId } = await directory(db);
   const [items, onShift] = await Promise.all([
-    getResponsibilities(db, { people: byId }),
+    getResponsibilities(db, { people: byId, week: mondayOf(date) }),
     getOnShift(db, date),
   ]);
   return uncoveredOn(items, date, onShift).map((r) => {
@@ -362,13 +412,13 @@ export function loadsByPerson(
     .filter((p) => p.active)
     .map((p) => {
       const owner = items
-        .filter((r) => r.ownerId === p.id)
+        .filter((r) => r.ownerId === p.id || (r.weekly && r.supportIds.includes(p.id)))
         .map((r) => ({ id: r.id, title: r.title, days: r.scheduleDays }));
       return {
         person: { id: p.id, name: p.displayName, color: p.color },
         owner,
         support: items
-          .filter((r) => r.supportIds.includes(p.id))
+          .filter((r) => !r.weekly && r.supportIds.includes(p.id))
           .map((r) => ({ id: r.id, title: r.title, days: r.scheduleDays })),
         extra: tasks
           .filter((t) => t.status === "open" && t.assignees.some((a) => a.id === p.id))
@@ -422,3 +472,61 @@ export async function getAssignmentHistory(
 }
 
 export { isScheduledOn };
+
+/** Colonna della griglia "chi fa cosa questa settimana". */
+export type WeekPlannerColumn = {
+  id: string;
+  title: string;
+  scheduleDays: number[];
+  /** Assegnati effettivi della settimana. */
+  profileIds: string[];
+  /**
+   * Da dove vengono: `week` = scelti per questa settimana; `inherited` = ripresi dall'ultima
+   * settimana assegnata (`fromWeek`); `standing` = responsabile e supporti della scheda.
+   */
+  source: "week" | "inherited" | "standing";
+  fromWeek: string | null;
+};
+
+export type WeekPlanner = {
+  weekStart: string;
+  columns: WeekPlannerColumn[];
+  /** Attività per tutti: non si assegnano. */
+  allStaff: { id: string; title: string }[];
+  people: PersonRef[];
+};
+
+/** Dati della griglia persone × attività per la settimana (lunedì) indicata. */
+export async function getWeekPlanner(db: Db, weekStart: string): Promise<WeekPlanner> {
+  const { people, byId } = await directory(db);
+  const [items, teams] = await Promise.all([
+    getResponsibilities(db, { people: byId }),
+    getWeekTeams(db, weekStart),
+  ]);
+  const columns: WeekPlannerColumn[] = items
+    .filter((r) => !r.allStaff)
+    .map((r) => {
+      const plans = teams.get(r.id) ?? [];
+      const team = effectiveWeekTeam(plans, weekStart);
+      const fromWeek =
+        team === null
+          ? null
+          : plans.reduce((best, p) => (p.weekStart > best ? p.weekStart : best), "");
+      return {
+        id: r.id,
+        title: r.title,
+        scheduleDays: r.scheduleDays,
+        profileIds: (team ?? assigneeIds(r)).filter((id) => byId.get(id)?.active),
+        source: team === null ? "standing" : fromWeek === weekStart ? "week" : "inherited",
+        fromWeek,
+      };
+    });
+  return {
+    weekStart,
+    columns,
+    allStaff: items.filter((r) => r.allStaff).map((r) => ({ id: r.id, title: r.title })),
+    people: people
+      .filter((p) => p.active)
+      .map((p) => ({ id: p.id, name: p.displayName, color: p.color })),
+  };
+}

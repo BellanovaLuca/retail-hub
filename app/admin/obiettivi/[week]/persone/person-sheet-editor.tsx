@@ -277,31 +277,9 @@ export function PersonSheetEditor(props: {
         </div>
       </div>
 
-      {kpis.length === 0 ? (
-        <p className="font-display text-2xl font-light text-subtle">
-          Nessuna voce: aggiungile dalla scheda Voci.
-        </p>
-      ) : (
-        <SpreadsheetGrid
-          ariaLabel={`Foglio della settimana di ${props.name}`}
-          rows={gridRows}
-          columns={columns}
-          getValue={getValue}
-          getCellState={getCellState}
-          onChange={onChange}
-          onCellActivate={(kpiId, col) => {
-            if (col === COMMENT) setEditing(kpiId);
-          }}
-          rowHeaderLabel="Voce"
-          saveState={status}
-          className="[--grid-max-height:none]"
-        />
-      )}
-      <FormMessage result={message} />
-
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardTitle>Commento generale della settimana</CardTitle>
+        <Card className="border-2 border-foreground">
+          <CardTitle>Commento della settimana</CardTitle>
           <AutoSaveTextarea
             label="Commento"
             initialValue={comments[GENERAL]?.body ?? ""}
@@ -325,6 +303,28 @@ export function PersonSheetEditor(props: {
           )}
         </Card>
       </div>
+
+      {kpis.length === 0 ? (
+        <p className="font-display text-2xl font-light text-subtle">
+          Nessuna voce: aggiungile dalla scheda Voci.
+        </p>
+      ) : (
+        <SpreadsheetGrid
+          ariaLabel={`Foglio della settimana di ${props.name}`}
+          rows={gridRows}
+          columns={columns}
+          getValue={getValue}
+          getCellState={getCellState}
+          onChange={onChange}
+          onCellActivate={(kpiId, col) => {
+            if (col === COMMENT) setEditing(kpiId);
+          }}
+          rowHeaderLabel="Voce"
+          saveState={status}
+          className="[--grid-max-height:none]"
+        />
+      )}
+      <FormMessage result={message} />
 
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         {editingRow ? (

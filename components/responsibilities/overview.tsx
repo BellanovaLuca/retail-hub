@@ -15,8 +15,9 @@ export function responsibilitiesByPerson(items: ResponsibilityItem[], people: Pe
     .filter((p) => p.active)
     .map((p) => ({
       person: p,
-      owned: items.filter((r) => r.ownerId === p.id),
-      supported: items.filter((r) => r.supportIds.includes(p.id)),
+      // Con l'assegnazione settimanale tutti gli assegnati sono "responsabili" alla pari.
+      owned: items.filter((r) => r.ownerId === p.id || (r.weekly && r.supportIds.includes(p.id))),
+      supported: items.filter((r) => !r.weekly && r.supportIds.includes(p.id)),
     }));
 }
 
@@ -40,7 +41,9 @@ function Name({
     >
       {on ? null : <PersonDot color={person.color} />}
       {person.name}
-      {on && person.id === viewerId ? <span className="text-[0.625rem] uppercase">· tu</span> : null}
+      {on && person.id === viewerId ? (
+        <span className="text-[0.625rem] uppercase">· tu</span>
+      ) : null}
     </span>
   );
 }
@@ -182,6 +185,12 @@ export function ResponsibilityOverview({
                     <span className="mr-2 eyebrow sm:hidden">Responsabile</span>
                     {r.allStaff ? (
                       <Badge>Tutti</Badge>
+                    ) : r.weekly && r.supports.length ? (
+                      <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                        {r.supports.map((s) => (
+                          <Name key={s.id} person={s} {...nameProps} />
+                        ))}
+                      </span>
                     ) : r.owner ? (
                       <Name person={r.owner} {...nameProps} />
                     ) : (
@@ -190,7 +199,7 @@ export function ResponsibilityOverview({
                   </p>
                   <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <span className="eyebrow sm:hidden">Supporto</span>
-                    {r.supports.length ? (
+                    {!r.weekly && r.supports.length ? (
                       r.supports.map((s) => <Name key={s.id} person={s} {...nameProps} />)
                     ) : (
                       <span className="text-subtle">—</span>

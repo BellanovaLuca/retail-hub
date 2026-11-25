@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  assigneeIds,
   canToggleCheck,
   cellState,
   dutiesForPerson,
+  dutyLabel,
+  effectiveWeekTeam,
   isoWeekdayOf,
+  mondayOf,
+  withWeekTeam,
   peopleOnShift,
   resolveDuty,
   shiftDate,
@@ -196,5 +201,81 @@ describe("chi può spuntare", () => {
     expect(canToggleCheck({ ...base, isAdmin: true, isAssignee: false, date: "2026-09-01" })).toBe(
       true,
     );
+  });
+});
+
+describe("assegnazione settimanale", () => {
+  const base: ResponsibilityAssignment = {
+    id: "r1",
+    title: "Vetrine",
+    scheduleDays: [1, 2, 3, 4, 5, 6, 7],
+    allStaff: false,
+    ownerId: "anna",
+    supportIds: ["bruno"],
+  };
+  const plans = [
+    { weekStart: "2026-11-16", profileIds: ["carla"] },
+    { weekStart: "2026-11-30", profileIds: ["dario", "elena"] },
+  ];
+
+  it("mondayOf trova il lunedì", () => {
+    expect(mondayOf("2026-11-25")).toBe("2026-11-23");
+    expect(mondayOf("2026-11-23")).toBe("2026-11-23");
+    expect(mondayOf("2026-11-29")).toBe("2026-11-23");
+  });
+
+  it("vale la settimana stessa, altrimenti l'ultima precedente, altrimenti la scheda", () => {
+    expect(effectiveWeekTeam(plans, "2026-11-09")).toBeNull();
+    expect(effectiveWeekTeam(plans, "2026-11-16")).toEqual(["carla"]);
+    expect(effectiveWeekTeam(plans, "2026-11-23")).toEqual(["carla"]);
+    expect(effectiveWeekTeam(plans, "2026-11-30")).toEqual(["dario", "elena"]);
+    expect(effectiveWeekTeam([{ weekStart: "2026-11-23", profileIds: [] }], "2026-11-30")).toEqual(
+      [],
+    );
+  });
+
+  it("senza gruppo resta l'assegnazione della scheda", () => {
+    expect(withWeekTeam(base, null)).toBe(base);
+    expect(resolveDuty(withWeekTeam(base, null), "2026-11-25", null)).toEqual({
+      kind: "owner",
+      profileId: "anna",
+    });
+  });
+
+  it("il gruppo sostituisce responsabile e supporti: la fanno tutti quelli in turno", () => {
+    const r = withWeekTeam(base, ["dario", "elena", "fabio"]);
+    expect(r.weekly).toBe(true);
+    expect(r.ownerId).toBeNull();
+    expect(assigneeIds(r)).toEqual(["dario", "elena", "fabio"]);
+    expect(resolveDuty(r, "2026-12-01", new Set(["elena", "fabio", "anna"]))).toEqual({
+      kind: "team",
+      profileIds: ["elena", "fabio"],
+    });
+    expect(resolveDuty(r, "2026-12-01", null)).toEqual({
+      kind: "team",
+      profileIds: ["dario", "elena", "fabio"],
+    });
+    expect(resolveDuty(r, "2026-12-01", new Set(["anna"]))).toEqual({ kind: "uncovered" });
+    expect(resolveDuty(withWeekTeam(base, []), "2026-12-01", null)).toEqual({
+      kind: "uncovered",
+    });
+  });
+
+  it("ognuno del gruppo in turno la trova tra le sue, con i colleghi", () => {
+    const r = withWeekTeam(base, ["dario", "elena"]);
+    const onShift = new Set(["dario", "elena"]);
+    expect(dutiesForPerson([r], "elena", "2026-12-01", onShift)).toEqual([
+      { responsibility: r, role: "owner", teammateIds: ["dario"] },
+    ]);
+    expect(dutiesForPerson([r], "anna", "2026-12-01", onShift)).toEqual([]);
+    const names: Record<string, string> = { dario: "Dario", elena: "Elena" };
+    expect(dutyLabel(resolveDuty(r, "2026-12-01", onShift), (id) => names[id])).toBe(
+      "Dario, Elena",
+    );
+  });
+
+  it("un'attività per tutti ignora il gruppo", () => {
+    const r = withWeekTeam({ ...base, allStaff: true }, ["dario"]);
+    expect(r.weekly).toBeUndefined();
   });
 });

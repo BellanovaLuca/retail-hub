@@ -7,6 +7,7 @@ import { awaitsAdmin, REQUEST_TYPES, type RequestStatus } from "@/lib/requests";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { RequestsTable } from "./requests-table";
+import { ResetRequestsDialog } from "./reset-dialog";
 
 export const metadata: Metadata = { title: "Richieste" };
 
@@ -35,7 +36,18 @@ export default async function AdminRichiestePage({
   const tipo = REQUEST_TYPES.find((t) => t.value === q.tipo)?.value;
   if (tipo) query = query.eq("type", tipo);
   if (q.persona) query = query.eq("profile_id", q.persona);
-  const [{ data }, names] = await Promise.all([query, namesById(supabase)]);
+  const [{ data }, names, { data: statuses }] = await Promise.all([
+    query,
+    namesById(supabase),
+    supabase.from("requests").select("status"),
+  ]);
+  const all = statuses ?? [];
+  const counts = {
+    total: all.length,
+    pending: all.filter((r) => r.status === "pending" || r.status === "peer_accepted").length,
+    approved: all.filter((r) => r.status === "approved").length,
+    other: all.filter((r) => !["pending", "peer_accepted", "approved"].includes(r.status)).length,
+  };
 
   const rows = (data ?? [])
     .filter(
@@ -76,7 +88,11 @@ export default async function AdminRichiestePage({
 
   return (
     <>
-      <PageHeader eyebrow="Approvazioni" title="Richieste" />
+      <PageHeader eyebrow="Approvazioni" title="Richieste">
+        <div className="-ml-3 flex flex-wrap items-center gap-3">
+          <ResetRequestsDialog counts={counts} />
+        </div>
+      </PageHeader>
       <nav aria-label="Stato" className="mb-6 flex gap-6 border-b border-line">
         {TABS.map((t) => (
           <Link

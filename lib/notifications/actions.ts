@@ -67,6 +67,17 @@ export async function markAllNotificationsRead(): Promise<ActionResult> {
   });
 }
 
+/** «Elimina tutte»: svuota l'elenco delle proprie notifiche (anche quelle già lette). */
+export async function deleteAllNotifications(): Promise<ActionResult> {
+  return runAction(async () => {
+    const { supabase, profile } = await authedAction();
+    const { error } = await supabase.from("notifications").delete().eq("profile_id", profile.id);
+    if (error) return { ok: false, message: dbErrorMessage(error, "Notifiche non eliminate.") };
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Notifiche eliminate." };
+  });
+}
+
 export async function unreadNotificationsCount(): Promise<number> {
   try {
     const { supabase, profile } = await authedAction();

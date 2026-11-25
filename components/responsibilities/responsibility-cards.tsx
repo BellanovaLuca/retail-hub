@@ -20,8 +20,10 @@ export function ResponsibilityCards({
   items: ResponsibilityItem[];
   attachments: Map<string, SignedAttachment>;
 }) {
-  const owned = items.filter((r) => r.ownerId === personId);
-  const supported = items.filter((r) => r.supportIds.includes(personId));
+  const owned = items.filter(
+    (r) => r.ownerId === personId || (r.weekly && r.supportIds.includes(personId)),
+  );
+  const supported = items.filter((r) => !r.weekly && r.supportIds.includes(personId));
   const allStaff = items.filter((r) => r.allStaff);
 
   const card = (r: ResponsibilityItem, role: "owner" | "support" | "all") => (
@@ -59,9 +61,14 @@ export function ResponsibilityCards({
                 {" · "}
               </>
             ) : null}
-            {role === "owner" && r.supports.length > 0
-              ? `Supporto: ${r.supports.map((s) => s.name).join(", ")} · `
-              : null}
+            {role === "owner" && r.weekly && r.supports.length > 1
+              ? `Insieme a ${r.supports
+                  .filter((s) => s.id !== personId)
+                  .map((s) => s.name)
+                  .join(", ")} · `
+              : role === "owner" && !r.weekly && r.supports.length > 0
+                ? `Supporto: ${r.supports.map((s) => s.name).join(", ")} · `
+                : null}
             {scheduleLabel(r.scheduleDays)}
           </p>
         </div>

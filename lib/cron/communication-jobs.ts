@@ -2,7 +2,7 @@ import "server-only";
 import { sendDueAnnouncementNotifications } from "@/lib/announcements/notify";
 import { getChecks, getOnShift, getResponsibilities } from "@/lib/data/responsibilities";
 import { adminIds, notify, notifyEach } from "@/lib/notifications";
-import { dutiesForPerson, resolveDuty } from "@/lib/responsibilities/assignment";
+import { dutiesForPerson, mondayOf, resolveDuty } from "@/lib/responsibilities/assignment";
 import type { CronJob } from "./jobs";
 
 /** Job delle responsabilità (§8.4, §10) e delle comunicazioni programmate (§6.2). */
@@ -15,7 +15,7 @@ export const communicationJobs: CronJob[] = [
     async run({ db, today }) {
       const [onShift, responsibilities] = await Promise.all([
         getOnShift(db, today),
-        getResponsibilities(db),
+        getResponsibilities(db, { week: mondayOf(today) }),
       ]);
       if (onShift === null) return { skipped: "turni del giorno non pubblicati" };
       const names = new Map(
@@ -72,7 +72,7 @@ export const communicationJobs: CronJob[] = [
     async run({ db, today }) {
       const [onShift, responsibilities, checks] = await Promise.all([
         getOnShift(db, today),
-        getResponsibilities(db),
+        getResponsibilities(db, { week: mondayOf(today) }),
         getChecks(db, today, today, new Map()),
       ]);
       const missing = responsibilities.filter((r) => {

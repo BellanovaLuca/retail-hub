@@ -9,6 +9,7 @@
 - Migrazioni SQL in `supabase/migrations/`, RLS attivo su tutte le tabelle. Lo schema di dominio completo è già in `20261017010000_domain.sql`.
 - I tipi `lib/supabase/database.types.ts` sono GENERATI: `DATABASE_URL=postgres://postgres:postgres@localhost:5432/retail_dev pnpm db:types:local`. Alias comodi in `lib/supabase/types.ts`.
 - I dipendenti non leggono la tabella `shifts` (solo admin): leggono la vista `published_shifts` (istantanea dell'ultima pubblicazione). Assenze altrui: vista `leaves_public` ("ferie"/"assente", mai il motivo). Performance propria: vista `my_performance_goals`.
+- Responsabilità: assegnazione per settimana in `responsibility_week_assignments` (vale anche per le settimane seguenti finché non si cambia); `getResponsibilities(db, { week })` la applica (gruppo in `supports`, `weekly: true`), senza `week` restano responsabile/supporti della scheda.
 - Transizioni dei dipendenti su dati condivisi: funzioni RPC security definer (`cancel_request`, `respond_to_swap`, `set_performance_note`, `set_extra_task_done`).
 
 ## Codice

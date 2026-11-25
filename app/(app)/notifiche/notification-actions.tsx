@@ -3,7 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { markAllNotificationsRead, markNotificationRead } from "@/lib/notifications/actions";
+import { Trash2 } from "lucide-react";
+import {
+  deleteAllNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "@/lib/notifications/actions";
 
 export function MarkAllRead() {
   const router = useRouter();
@@ -21,6 +26,33 @@ export function MarkAllRead() {
       }
     >
       Segna tutte come lette
+    </Button>
+  );
+}
+
+/** Svuota tutte le notifiche (lette e da leggere), dopo conferma. */
+export function DeleteAll() {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={pending}
+      onClick={() => {
+        if (
+          !confirm(
+            "Eliminare tutte le notifiche, anche quelle già lette? Non si possono recuperare.",
+          )
+        )
+          return;
+        startTransition(async () => {
+          await deleteAllNotifications();
+          router.refresh();
+        });
+      }}
+    >
+      <Trash2 aria-hidden /> Elimina tutte
     </Button>
   );
 }

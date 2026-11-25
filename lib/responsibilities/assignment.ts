@@ -18,9 +18,46 @@ export type ResponsibilityAssignment = {
   allStaff: boolean;
   active?: boolean;
   ownerId: string | null;
-  /** Supporti nell'ordine di sostituzione (sort_order). */
+  /**
+   * Supporti nell'ordine di sostituzione (sort_order). Con `weekly` sono invece le persone
+   * assegnate per la settimana, tutte alla pari (e `ownerId` è null).
+   */
   supportIds: string[];
+  /** Assegnazione settimanale: chi del gruppo è in turno fa l'attività. */
+  weekly?: boolean;
 };
+
+/** Lunedì della settimana che contiene la data. */
+export function mondayOf(date: ISODate): ISODate {
+  return shiftDate(date, 1 - isoWeekdayOf(date));
+}
+
+/** Assegnazione di un'attività per una settimana (lunedì). */
+export type WeekTeam = { weekStart: ISODate; profileIds: string[] };
+
+/**
+ * Gruppo della settimana: l'assegnazione di quella settimana o, in mancanza, dell'ultima
+ * settimana precedente assegnata (si ripete finché non si cambia). `null` = mai assegnata per
+ * settimana: valgono responsabile e supporti della scheda.
+ */
+export function effectiveWeekTeam(plans: WeekTeam[], weekStart: ISODate): string[] | null {
+  let best: WeekTeam | null = null;
+  for (const p of plans) {
+    if (p.weekStart <= weekStart && (!best || p.weekStart > best.weekStart)) best = p;
+  }
+  return best ? [...best.profileIds] : null;
+}
+
+/** Applica il gruppo della settimana (se c'è) a un'attività. */
+export function withWeekTeam<T extends ResponsibilityAssignment>(r: T, team: string[] | null): T {
+  if (team === null || r.allStaff) return r;
+  return { ...r, ownerId: null, supportIds: [...team], weekly: true };
+}
+
+/** Assegnati effettivi (responsabile, supporti o gruppo della settimana), senza ripetizioni. */
+export function assigneeIds(r: ResponsibilityAssignment): string[] {
+  return [...new Set([...(r.ownerId ? [r.ownerId] : []), ...r.supportIds])];
+}
 
 /** Turno pubblicato ridotto a quello che serve qui. */
 export type ShiftLike = { profile_id: string; date: ISODate; is_absence: boolean };
@@ -60,6 +97,8 @@ export type Duty =
   | { kind: "substitute"; profileId: string; replacingId: string }
   /** Nessun responsabile indicato: tocca al primo supporto in turno. */
   | { kind: "support"; profileId: string }
+  /** Assegnazione settimanale: la fanno gli assegnati in turno (o tutti, se i turni non sono noti). */
+  | { kind: "team"; profileIds: string[] }
   /** Attività per tutti: la fa chiunque sia in turno. */
   | { kind: "all_staff" }
   /** Nessuno degli assegnati è in turno (o nessuno è assegnato). */
@@ -83,6 +122,11 @@ export function resolveDuty(
 
   const present = (id: string) => onShift === null || onShift.has(id);
 
+  if (r.weekly) {
+    const team = r.supportIds.filter(present);
+    return team.length ? { kind: "team", profileIds: team } : { kind: "uncovered" };
+  }
+
   if (r.ownerId && present(r.ownerId)) return { kind: "owner", profileId: r.ownerId };
   const support = r.supportIds.find((id) => id !== r.ownerId && present(id));
   if (support) {
@@ -97,6 +141,8 @@ export type DutyForPerson = {
   responsibility: ResponsibilityAssignment;
   role: "owner" | "substitute" | "support" | "all_staff";
   replacingId?: string;
+  /** Assegnazione settimanale: gli altri del gruppo in turno quel giorno. */
+  teammateIds?: string[];
 };
 
 /**
@@ -120,6 +166,14 @@ export function dutiesForPerson(
       case "substitute":
         if (duty.profileId === profileId)
           out.push({ responsibility: r, role: "substitute", replacingId: duty.replacingId });
+        break;
+      case "team":
+        if (duty.profileIds.includes(profileId))
+          out.push({
+            responsibility: r,
+            role: "owner",
+            teammateIds: duty.profileIds.filter((id) => id !== profileId),
+          });
         break;
       case "all_staff":
         if (onShift === null || onShift.has(profileId))
@@ -186,6 +240,8 @@ export function dutyLabel(duty: Duty, name: (id: string) => string): string | nu
       return name(duty.profileId);
     case "substitute":
       return `${name(duty.profileId)} (sostituisce ${name(duty.replacingId)})`;
+    case "team":
+      return duty.profileIds.map(name).join(", ");
     case "all_staff":
       return "Tutti";
     case "uncovered":
