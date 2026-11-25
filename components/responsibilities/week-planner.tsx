@@ -1,7 +1,7 @@
 "use client";
 
 import { getISOWeek, parseISO } from "date-fns";
-import { Pencil, Plus, Save, Trash2, Undo2, X } from "lucide-react";
+import { Pencil, Save, Trash2, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
@@ -12,11 +12,11 @@ import {
   setResponsibilityActive,
   setResponsibilityDays,
 } from "@/app/admin/comunicazioni/responsabilita/actions";
+import { AddColumn } from "@/components/ui/add-column";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { FormMessage } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
 import { PersonDot } from "@/components/ui/table";
 import type { WeekPlannerColumn } from "@/lib/data/responsibilities";
 import { cn } from "@/lib/utils";
@@ -54,7 +54,6 @@ export function WeekPlanner({
   const [result, setResult] = React.useState<{ ok: boolean; message?: string } | null>(null);
   const [pending, startTransition] = React.useTransition();
   const [removing, setRemoving] = React.useState<WeekPlannerColumn | null>(null);
-  const [newTitle, setNewTitle] = React.useState("");
   // Giorni della settimana di una responsabilità (finestra di modifica).
   const [daysOf, setDaysOf] = React.useState<{ column: WeekPlannerColumn; days: number[] } | null>(
     null,
@@ -82,42 +81,30 @@ export function WeekPlanner({
     });
 
   const addForm = (
-    <form
-      className="flex flex-wrap items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!newTitle.trim()) return;
-        startTransition(async () => {
-          const res = await quickAddResponsibility(newTitle);
-          setResult(
-            res.ok
-              ? {
-                  ok: true,
-                  message: `${res.message} È l'ultima colonna a destra: spunta chi se ne occupa.`,
-                }
-              : res,
-          );
+    <div className="flex flex-wrap items-center gap-3">
+      <AddColumn
+        title="Nuova responsabilità"
+        description="Diventa una nuova colonna della griglia, prevista tutti i giorni: poi spunti chi se ne occupa e, se serve, cambi i giorni."
+        fieldLabel="Nome della responsabilità"
+        placeholder="Es. Controllo vetrine"
+        disabled={pending}
+        onAdd={async (name) => {
+          const res = await quickAddResponsibility(name);
           if (res.ok) {
-            setNewTitle("");
+            setResult({
+              ok: true,
+              message: `${res.message} È l'ultima colonna a destra: spunta chi se ne occupa.`,
+            });
             setJustAdded(res.data?.id ?? null);
             router.refresh();
           }
-        });
-      }}
-    >
-      <Input
-        aria-label="Nome della nuova responsabilità"
-        placeholder="Nuova responsabilità (es. Controllo vetrine)"
-        value={newTitle}
-        maxLength={120}
-        onChange={(e) => setNewTitle(e.target.value)}
-        disabled={pending}
-        className="w-full sm:w-80"
+          return res;
+        }}
       />
-      <Button type="submit" variant="secondary" disabled={pending || !newTitle.trim()}>
-        <Plus aria-hidden /> Aggiungi colonna
-      </Button>
-    </form>
+      <span className="text-xs text-muted">
+        Per togliere una colonna usa la ✕ sotto il suo nome.
+      </span>
+    </div>
   );
 
   const changed = columns.filter((c) => !sameSet(sets[c.id] ?? [], initial[c.id] ?? []));
@@ -150,7 +137,7 @@ export function WeekPlanner({
     return (
       <div className="flex flex-col gap-4">
         <p className="py-2 font-display text-xl font-light text-subtle">
-          Nessuna responsabilità attiva: aggiungi qui sotto la prima colonna.
+          Nessuna responsabilità attiva: aggiungi la prima colonna.
         </p>
         {addForm}
         <FormMessage result={result} />
@@ -170,7 +157,8 @@ export function WeekPlanner({
   return (
     <div className="flex flex-col gap-4">
       {addForm}
-      <div className="overflow-x-auto rounded-md border border-line">
+      {/* relative: gli elementi nascosti (sr-only) restano dentro l'area scorrevole. */}
+      <div className="relative overflow-x-auto rounded-md border border-line">
         <table className="w-max min-w-full border-collapse text-sm">
           <caption className="sr-only">Attività di ciascuna persona nella week {week}</caption>
           <thead>

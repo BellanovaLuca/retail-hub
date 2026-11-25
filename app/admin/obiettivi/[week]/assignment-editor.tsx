@@ -1,9 +1,10 @@
 "use client";
 
-import { Calculator, Copy, Eraser, Plus, Send, Sparkles } from "lucide-react";
+import { Calculator, Copy, Eraser, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
+import { AddColumn } from "@/components/ui/add-column";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -158,7 +159,6 @@ export function AssignmentEditor(props: {
     vista: false,
     sole: false,
   });
-  const [newKpi, setNewKpi] = React.useState<Record<Area, string>>({ vista: "", sole: "" });
   const [removing, setRemoving] = React.useState<{ area: Area; column: TargetsColumn } | null>(
     null,
   );
@@ -299,20 +299,15 @@ export function AssignmentEditor(props: {
     setDirty(true);
   };
 
-  const onAddKpi = (area: Area) => (e: React.FormEvent) => {
-    e.preventDefault();
-    const label = newKpi[area];
-    if (!label.trim()) return;
-    startTransition(async () => {
-      const res = await quickAddKpi(label, area);
+  const onAddKpi = async (area: Area, label: string) => {
+    const res = await quickAddKpi(label, area);
+    if (res.ok) {
       setResult(res);
-      if (res.ok) {
-        setNewKpi((n) => ({ ...n, [area]: "" }));
-        if (res.data?.id) setJustAdded({ area, kpiId: res.data.id });
-        // La colonna nuova arriva con il refresh; i numeri già scritti restano.
-        router.refresh();
-      }
-    });
+      if (res.data?.id) setJustAdded({ area, kpiId: res.data.id });
+      // La colonna nuova arriva con il refresh; i numeri già scritti restano.
+      router.refresh();
+    }
+    return res;
   };
 
   const onRemoveColumn = () => {
@@ -500,6 +495,15 @@ export function AssignmentEditor(props: {
                     checked={showMixed[t.area]}
                     onChange={(e) => setShowMixed((m) => ({ ...m, [t.area]: e.target.checked }))}
                   />
+                  <AddColumn
+                    title={`Nuova colonna ${AREA_LABEL[t.area]}`}
+                    description={`Una voce in più nella tabella ${AREA_LABEL[t.area]}: la vedranno le persone di quest'area. Se esiste già nell'altra tabella, scrivi lo stesso nome per averla anche qui.`}
+                    fieldLabel="Nome della voce"
+                    placeholder="Es. Lenti a contatto"
+                    maxLength={60}
+                    disabled={pending}
+                    onAdd={(name) => onAddKpi(t.area, name)}
+                  />
                   <Button
                     variant="ghost"
                     size="sm"
@@ -532,25 +536,6 @@ export function AssignmentEditor(props: {
                   onRemoveColumn={(column) => setRemoving({ area: t.area, column })}
                 />
               )}
-              <form onSubmit={onAddKpi(t.area)} className="flex flex-wrap items-center gap-2">
-                <Input
-                  aria-label={`Nome della nuova colonna ${AREA_LABEL[t.area]}`}
-                  placeholder={`Nuova colonna ${AREA_LABEL[t.area]} (es. Lenti a contatto)`}
-                  value={newKpi[t.area]}
-                  maxLength={60}
-                  onChange={(e) => setNewKpi((n) => ({ ...n, [t.area]: e.target.value }))}
-                  disabled={pending}
-                  className="w-full sm:w-80"
-                />
-                <Button
-                  type="submit"
-                  variant="secondary"
-                  size="sm"
-                  disabled={pending || !newKpi[t.area].trim()}
-                >
-                  <Plus aria-hidden /> Aggiungi colonna
-                </Button>
-              </form>
             </section>
           );
         })}

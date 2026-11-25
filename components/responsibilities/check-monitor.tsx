@@ -171,7 +171,7 @@ export function CheckMonitor({
         {error}
       </p>
 
-      <div className="overflow-x-auto rounded-md border border-line">
+      <div className="relative overflow-x-auto rounded-md border border-line">
         <table className="w-max min-w-full border-collapse text-sm">
           <caption className="sr-only">Spunte delle responsabilità di {dayLong}</caption>
           <thead>

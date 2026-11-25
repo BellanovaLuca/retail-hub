@@ -155,7 +155,7 @@ export function TargetsTable({
   const th = "border-b border-l border-line px-2 py-2 text-center align-bottom text-sm font-medium";
 
   return (
-    <div className="overflow-x-auto rounded-md border border-line">
+    <div className="relative overflow-x-auto rounded-md border border-line">
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">{ariaLabel}</caption>
         <thead>

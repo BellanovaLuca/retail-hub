@@ -62,7 +62,7 @@ export function WeekGrid({
   return (
     // Area scorrevole raggiungibile da tastiera (non contiene campi su cui fermarsi).
     <div
-      className="overflow-x-auto rounded-md border border-line focus-visible:outline-2 focus-visible:outline-foreground"
+      className="relative overflow-x-auto rounded-md border border-line focus-visible:outline-2 focus-visible:outline-foreground"
       role="region"
       aria-label={caption}
       tabIndex={0}
