@@ -30,7 +30,8 @@ export async function saveStoreSettings(input: {
         storeName: z.string().trim().min(2).max(80),
         requestNoticeDays: z.coerce.number().int().min(0).max(90),
         shareIndividualMonitoring: z.boolean(),
-        leaveThresholds: z.record(z.uuid(), z.number().int().min(1).max(50).nullable()),
+        // Stessi limiti del planning ferie (saveLeaveThresholds): 0 = nessuno in ferie insieme.
+        leaveThresholds: z.record(z.uuid(), z.number().int().min(0).max(50).nullable()),
       })
       .safeParse(input);
     if (!parsed.success) {

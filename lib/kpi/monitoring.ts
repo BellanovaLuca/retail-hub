@@ -2,7 +2,7 @@
  * Monitoraggio della settimana (§8.3): totali del negozio vs obiettivo, tabelle per persona
  * (META divisa Vista / Sole, NUANCE), best performer e chi non ha compilato la giornata.
  */
-import type { StoreWeeklyTargets, TargetZone, PerformerInput } from "@/lib/targets";
+import { round2, type StoreWeeklyTargets, type TargetZone, type PerformerInput } from "@/lib/targets";
 import type { EntryValue } from "./sheet";
 
 export type MonitoringKpi = { kpiId: string; code: string; label: string };
@@ -90,8 +90,8 @@ export function zoneTable(input: {
     if (!input.holders.has(p.profileId) && mine.length === 0) continue;
     const values: Record<string, number> = {};
     for (const d of input.days) values[d] = 0;
-    for (const e of mine) if (e.date in values) values[e.date] += e.value;
-    const total = Object.values(values).reduce((a, b) => a + b, 0);
+    for (const e of mine) if (e.date in values) values[e.date] = round2(values[e.date] + e.value);
+    const total = round2(Object.values(values).reduce((a, b) => a + b, 0));
     const target = input.targets[p.profileId]?.[input.kpiId] ?? null;
     rows.push({
       profileId: p.profileId,
@@ -109,15 +109,15 @@ export function zoneTable(input: {
         zone,
         label: zone === "vista" ? "Vista" : "Sole",
         rows: list,
-        total: list.reduce((s, r) => s + r.total, 0),
-        target: list.reduce((s, r) => s + (r.target ?? 0), 0),
+        total: round2(list.reduce((s, r) => s + r.total, 0)),
+        target: round2(list.reduce((s, r) => s + (r.target ?? 0), 0)),
       };
     })
     .filter((g) => g.rows.length > 0);
   return {
     groups,
-    total: groups.reduce((s, g) => s + g.total, 0),
-    target: groups.reduce((s, g) => s + g.target, 0),
+    total: round2(groups.reduce((s, g) => s + g.total, 0)),
+    target: round2(groups.reduce((s, g) => s + g.target, 0)),
   };
 }
 
@@ -127,7 +127,7 @@ export function totalsByPerson(entries: EntryValue[]): Record<string, Record<str
   for (const e of entries) {
     if (!e.profileId) continue;
     out[e.profileId] ??= {};
-    out[e.profileId][e.kpiId] = (out[e.profileId][e.kpiId] ?? 0) + e.value;
+    out[e.profileId][e.kpiId] = round2((out[e.profileId][e.kpiId] ?? 0) + e.value);
   }
   return out;
 }

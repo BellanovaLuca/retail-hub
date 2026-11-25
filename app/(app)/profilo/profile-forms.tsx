@@ -2,14 +2,15 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { clearOfflineCopy } from "@/components/layout/offline-copy";
+import { signOutAllDevices, signOutThisDevice } from "@/components/layout/sign-out";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/input";
-import { changePin, setTheme, signOut, signOutEverywhere } from "@/lib/auth/actions";
+import { changePin, setTheme } from "@/lib/auth/actions";
 import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 export function ChangePinForm({ pinHint }: { pinHint: string }) {
+  const [currentPin, setCurrentPin] = useState("");
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
@@ -19,11 +20,12 @@ export function ChangePinForm({ pinHint }: { pinHint: string }) {
     e.preventDefault();
     setMessage(null);
     startTransition(async () => {
-      const result = await changePin({ pin, confirm });
+      const result = await changePin({ pin, confirm, currentPin });
       if (result.ok) {
+        setCurrentPin("");
         setPin("");
         setConfirm("");
-        setMessage({ ok: true, text: "PIN aggiornato." });
+        setMessage({ ok: true, text: "PIN aggiornato. Gli altri dispositivi dovranno rientrare." });
       } else {
         setMessage({ ok: false, text: result.error });
       }
@@ -33,6 +35,18 @@ export function ChangePinForm({ pinHint }: { pinHint: string }) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
       <p className="text-sm text-muted">Il PIN deve avere {pinHint}.</p>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="current-pin">PIN attuale</Label>
+        <Input
+          id="current-pin"
+          type="password"
+          inputMode="numeric"
+          autoComplete="current-password"
+          className="tracking-[0.3em] nums"
+          value={currentPin}
+          onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ""))}
+        />
+      </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="new-pin">Nuovo PIN</Label>
         <Input
@@ -64,7 +78,7 @@ export function ChangePinForm({ pinHint }: { pinHint: string }) {
       ) : (
         <FieldError>{message?.text}</FieldError>
       )}
-      <Button type="submit" variant="secondary" disabled={pending || !pin || !confirm}>
+      <Button type="submit" variant="secondary" disabled={pending || !currentPin || !pin || !confirm}>
         {pending ? "Salvataggio…" : "Aggiorna PIN"}
       </Button>
     </form>
@@ -114,12 +128,12 @@ export function ThemePicker({ current }: { current: Theme }) {
 export function SessionActions() {
   return (
     <div className="flex flex-col gap-3">
-      <form action={signOut} onSubmit={clearOfflineCopy}>
+      <form action={signOutThisDevice}>
         <Button type="submit" variant="secondary" className="w-full">
           Esci
         </Button>
       </form>
-      <form action={signOutEverywhere} onSubmit={clearOfflineCopy}>
+      <form action={signOutAllDevices}>
         <Button type="submit" variant="ghost" className="w-full text-muted">
           Esci da tutti i dispositivi
         </Button>

@@ -4,7 +4,12 @@ import { addDays, format, parseISO } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { adminAction, dbErrorMessage, runAction, type ActionResult } from "@/lib/auth/guards";
-import { buildRuleContext, getVariables, variablesMap } from "@/lib/data/rules";
+import {
+  buildRuleContext,
+  getVariables,
+  installStandardRuleSet,
+  variablesMap,
+} from "@/lib/data/rules";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { evaluateRules, validateRuleParams } from "@/lib/rules/registry";
 import type { RuleRecord } from "@/lib/rules/types";
@@ -40,6 +45,18 @@ const done = (message: string): ActionResult => {
   revalidatePath("/admin/turni", "layout");
   return { ok: true, message };
 };
+
+/**
+ * Crea il set "Standard" (regole e variabili del seed) se non esiste ancora nessun set. La pagina
+ * Regole la chiama da sola alla prima apertura: è un'azione perché scrive.
+ */
+export async function installStandardRules(): Promise<ActionResult> {
+  return runAction(async () => {
+    const { supabase } = await adminAction();
+    await installStandardRuleSet(supabase);
+    return done("Regole standard pronte.");
+  });
+}
 
 export async function saveRule(input: RuleInput): Promise<ActionResult> {
   return runAction(async () => {
@@ -103,6 +120,7 @@ export async function deleteRule(id: string): Promise<ActionResult> {
 export async function moveRule(id: string, direction: -1 | 1): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
+    const step = z.union([z.literal(-1), z.literal(1)]).parse(direction);
     const { data: rule } = await supabase
       .from("planning_rules")
       .select("rule_set_id")
@@ -116,10 +134,10 @@ export async function moveRule(id: string, direction: -1 | 1): Promise<ActionRes
       .order("sort_order");
     const ids = (list ?? []).map((r) => r.id);
     const i = ids.indexOf(id);
-    const j = i + direction;
+    const j = i + step;
     if (i < 0 || j < 0 || j >= ids.length) return { ok: true };
     [ids[i], ids[j]] = [ids[j], ids[i]];
-    await Promise.all(
+    const results = await Promise.all(
       ids.map((rid, k) =>
         supabase
           .from("planning_rules")
@@ -127,6 +145,11 @@ export async function moveRule(id: string, direction: -1 | 1): Promise<ActionRes
           .eq("id", rid),
       ),
     );
+    const failed = results.find((r) => r.error);
+    if (failed) {
+      revalidatePath("/admin/impostazioni/regole");
+      return { ok: false, message: dbErrorMessage(failed.error, "Ordine non salvato. Riprova.") };
+    }
     return done("Ordine aggiornato.");
   });
 }
@@ -175,14 +198,30 @@ export async function duplicateRuleSet(
       .select("id")
       .single();
     if (error || !created) return { ok: false, message: dbErrorMessage(error, "Set non creato.") };
-    const { data: rules } = await supabase.from("planning_rules").select("*").eq("rule_set_id", id);
-    if (rules?.length) {
-      await supabase.from("planning_rules").insert(
-        rules.map(({ id: _id, created_at: _c, updated_at: _u, ...r }) => ({
-          ...r,
-          rule_set_id: created.id,
-        })),
-      );
+    const { data: rules, error: rulesError } = await supabase
+      .from("planning_rules")
+      .select("*")
+      .eq("rule_set_id", source.id);
+    const { error: copyError } =
+      !rulesError && rules?.length
+        ? await supabase.from("planning_rules").insert(
+            rules.map(({ id: _id, created_at: _c, updated_at: _u, ...r }) => ({
+              ...r,
+              rule_set_id: created.id,
+            })),
+          )
+        : { error: null };
+    if (rulesError || copyError) {
+      // Un set "duplicato" ma senza regole trarrebbe in inganno: si annulla la creazione.
+      const { error: undoError } = await supabase
+        .from("planning_rule_sets")
+        .delete()
+        .eq("id", created.id);
+      if (undoError) console.error("duplica set: annullamento non riuscito", undoError);
+      return {
+        ok: false,
+        message: dbErrorMessage(rulesError ?? copyError, "Set non duplicato. Riprova."),
+      };
     }
     revalidatePath("/admin/impostazioni/regole");
     return { ok: true, message: `Set "${cleanName}" creato.`, data: { id: created.id } };
@@ -192,12 +231,19 @@ export async function duplicateRuleSet(
 export async function setDefaultRuleSet(id: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
-    await supabase.from("planning_rule_sets").update({ is_default: false }).eq("is_default", true);
-    const { error } = await supabase
-      .from("planning_rule_sets")
-      .update({ is_default: true })
-      .eq("id", z.uuid().parse(id));
-    if (error) return { ok: false, message: dbErrorMessage(error, "Operazione non riuscita.") };
+    // In una transazione sola (RPC): prima si verifica che il set esista, poi si sposta il
+    // predefinito. Così non si resta mai senza set predefinito (settimane senza regole).
+    const { error } = await supabase.rpc("set_default_rule_set", {
+      p_rule_set_id: z.uuid().parse(id),
+    });
+    if (error) {
+      return {
+        ok: false,
+        message: error.message.includes("non trovato")
+          ? "Set non trovato: ricarica la pagina."
+          : dbErrorMessage(error, "Operazione non riuscita."),
+      };
+    }
     return done("Set predefinito aggiornato.");
   });
 }

@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/guards";
 import { credentialsMessage, generatePin, syntheticEmail } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
+import { nowInRome, toISODate } from "@/lib/dates";
 import { sameName } from "@/lib/employees/confirm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
@@ -38,7 +39,6 @@ function profileRow(v: EmployeeValues) {
     color: v.color,
     email: v.email ?? null,
     phone: v.phone ?? null,
-    admin_notes: v.adminNotes ?? null,
   };
 }
 
@@ -88,6 +88,19 @@ async function saveDepartments(db: Db, profileId: string, v: EmployeeValues) {
   if (error) throw new ActionError(dbErrorMessage(error, "Reparti non salvati."));
 }
 
+/**
+ * Note riservate degli admin: stanno in `profile_admin_notes` (solo admin via RLS), non sul
+ * profilo, che l'interessato può leggere. Note vuote = nessuna riga.
+ */
+async function saveAdminNotes(db: Db, profileId: string, notes: string | null | undefined) {
+  const { error } = notes
+    ? await db
+        .from("profile_admin_notes")
+        .upsert({ profile_id: profileId, notes }, { onConflict: "profile_id" })
+    : await db.from("profile_admin_notes").delete().eq("profile_id", profileId);
+  if (error) throw new ActionError(dbErrorMessage(error, "Note non salvate."));
+}
+
 /** Le voci degli obiettivi della persona partono dal gruppo della sua area (§8.3). */
 async function assignDefaultKpis(db: Db, profileId: string, homeZone: EmployeeValues["homeZone"]) {
   const setName = homeZone === "sole" ? "Sole" : "Vista";
@@ -98,7 +111,7 @@ async function assignDefaultKpis(db: Db, profileId: string, homeZone: EmployeeVa
     .select("kpi_id, label_override, sort_order")
     .eq("set_id", set.id);
   if (!items?.length) return;
-  await db.from("profile_kpis").upsert(
+  const { error } = await db.from("profile_kpis").upsert(
     items.map((i) => ({
       profile_id: profileId,
       kpi_id: i.kpi_id,
@@ -107,6 +120,8 @@ async function assignDefaultKpis(db: Db, profileId: string, homeZone: EmployeeVa
     })),
     { onConflict: "profile_id,kpi_id", ignoreDuplicates: true },
   );
+  // Non blocca la creazione: le voci si assegnano comunque alla prima conferma degli obiettivi.
+  if (error) console.error("nuovo dipendente: voci degli obiettivi non assegnate", error);
 }
 
 function withFieldErrors<T>(fn: () => Promise<ActionResult<T>>) {
@@ -174,7 +189,16 @@ export async function createEmployee(
       await admin.auth.admin.deleteUser(id);
       return { ok: false, message: dbErrorMessage(error, "Dipendente non creato.") };
     }
-    await saveDepartments(supabase, id, v);
+    try {
+      await saveDepartments(supabase, id, v);
+      await saveAdminNotes(supabase, id, v.adminNotes);
+    } catch (error) {
+      // Creazione a metà: si annulla tutto (il profilo sparisce a cascata con l'accesso), così
+      // non resta un account senza reparti il cui PIN non è mai stato mostrato.
+      const { error: undoError } = await admin.auth.admin.deleteUser(id);
+      if (undoError) console.error("nuovo dipendente: annullamento non riuscito", undoError);
+      throw error;
+    }
     await assignDefaultKpis(supabase, id, v.homeZone);
 
     revalidatePath("/admin/dipendenti");
@@ -215,33 +239,64 @@ export async function updateEmployee(id: string, input: EmployeeInput): Promise<
 
     const { data: current } = await supabase
       .from("profiles")
-      .select("employee_code")
+      .select("employee_code, role")
       .eq("id", id)
       .single();
     if (!current) return { ok: false, message: "Dipendente non trovato." };
 
-    if (current.employee_code !== v.employeeCode) {
+    const codeChanged = current.employee_code !== v.employeeCode;
+    if (codeChanged) {
       const { data: taken } = await supabase
         .from("profiles")
         .select("id")
         .eq("employee_code", v.employeeCode)
         .maybeSingle();
       if (taken) throw new FieldError({ employeeCode: "Codice già assegnato." });
-      // Il codice è il login: va aggiornata anche l'email sintetica dell'accesso.
-      const { error } = await createAdminClient().auth.admin.updateUserById(id, {
+    }
+
+    // Chi diventa amministratore deve scegliere un PIN da amministratore (più lungo): finché
+    // non lo cambia resterebbe con quello a 6 cifre da dipendente.
+    const promoted = current.role !== "admin" && v.role === "admin";
+    const { error } = await supabase
+      .from("profiles")
+      .update({ ...profileRow(v), ...(promoted ? { must_change_pin: true } : {}) })
+      .eq("id", id);
+    if (error) return { ok: false, message: dbErrorMessage(error, "Modifiche non salvate.") };
+
+    if (codeChanged) {
+      // Il codice è il login: va aggiornata anche l'email sintetica dell'accesso. Si fa DOPO il
+      // profilo e, se non riesce, il codice del profilo torna quello di prima: con codice ed
+      // email diversi la persona non riuscirebbe più a entrare.
+      const { error: authError } = await createAdminClient().auth.admin.updateUserById(id, {
         email: syntheticEmail(v.employeeCode),
         email_confirm: true,
       });
-      if (error) return { ok: false, message: "Non è stato possibile cambiare il codice." };
+      if (authError) {
+        const { error: undoError } = await supabase
+          .from("profiles")
+          .update({ employee_code: current.employee_code })
+          .eq("id", id);
+        if (undoError) console.error("cambio codice: ripristino non riuscito", undoError);
+        revalidatePath(`/admin/dipendenti/${id}`);
+        return {
+          ok: false,
+          message: undoError
+            ? "Non è stato possibile cambiare il codice. Salva di nuovo per completare il cambio."
+            : "Non è stato possibile cambiare il codice: resta quello di prima. Riprova.",
+        };
+      }
     }
-
-    const { error } = await supabase.from("profiles").update(profileRow(v)).eq("id", id);
-    if (error) return { ok: false, message: dbErrorMessage(error, "Modifiche non salvate.") };
     await saveDepartments(supabase, id, v);
+    await saveAdminNotes(supabase, id, v.adminNotes);
 
     revalidatePath("/admin/dipendenti");
     revalidatePath(`/admin/dipendenti/${id}`);
-    return { ok: true, message: "Modifiche salvate." };
+    return {
+      ok: true,
+      message: promoted
+        ? "Modifiche salvate. Al prossimo accesso dovrà scegliere un PIN da amministratore."
+        : "Modifiche salvate.",
+    };
   });
 }
 
@@ -254,17 +309,33 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
     }
     const { data: person } = await supabase
       .from("profiles")
-      .select("display_name, employee_code, role")
+      .select("display_name, employee_code, role, must_change_pin")
       .eq("id", id)
       .single();
     if (!person) return { ok: false, message: "Dipendente non trovato." };
+
+    // Prima l'obbligo di cambio (se non si riesce a segnarlo il PIN resta quello di prima), poi
+    // il PIN: così non esiste mai un PIN provvisorio senza obbligo di cambiarlo.
+    const { error: flagError } = await supabase
+      .from("profiles")
+      .update({ must_change_pin: true })
+      .eq("id", id);
+    if (flagError) return { ok: false, message: dbErrorMessage(flagError, "PIN non aggiornato.") };
 
     const pin = generatePin(person.role);
     const { error } = await createAdminClient().auth.admin.updateUserById(id, {
       password: authPassword(id, pin),
     });
-    if (error) return { ok: false, message: "PIN non aggiornato. Riprova." };
-    await supabase.from("profiles").update({ must_change_pin: true }).eq("id", id);
+    if (error) {
+      if (!person.must_change_pin) {
+        const { error: undoError } = await supabase
+          .from("profiles")
+          .update({ must_change_pin: false })
+          .eq("id", id);
+        if (undoError) console.error("reset PIN: ripristino non riuscito", undoError);
+      }
+      return { ok: false, message: "PIN non aggiornato. Riprova." };
+    }
 
     revalidatePath(`/admin/dipendenti/${id}`);
     return {
@@ -284,24 +355,128 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
   });
 }
 
-/** Disattiva (persona uscita) o riattiva: accesso bloccato, storico conservato. */
+/**
+ * Disattiva (persona uscita) o riattiva: accesso bloccato, storico conservato.
+ *
+ * Alla disattivazione i turni della persona da oggi in poi vengono tolti, anche dagli orari già
+ * pubblicati: altrimenti resterebbero invisibili nel foglio (che mostra solo le persone attive)
+ * ma contati nelle coperture. La riattivazione non li ripristina. Ogni riga tolta finisce nel
+ * registro a nome dell'admin.
+ *
+ * Ordine pensato per poter riprovare: prima i turni (una transazione), poi il blocco
+ * dell'accesso, poi il profilo; se l'ultimo passo fallisce il blocco torna com'era.
+ */
 export async function setEmployeeActive(id: string, active: boolean): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase, profile: me } = await adminAction();
-    if (id === me.id && !active)
+    const personId = z.uuid().parse(id);
+    const wanted = z.boolean().parse(active);
+    if (personId === me.id && !wanted)
       return { ok: false, message: "Non puoi disattivare il tuo account." };
 
-    const { error: banError } = await createAdminClient().auth.admin.updateUserById(id, {
-      ban_duration: active ? "none" : "876000h",
+    let removed: { shifts: number; weeks: number } | null = null;
+    if (!wanted) {
+      const { data, error } = await supabase.rpc("remove_future_shifts", {
+        p_profile_id: personId,
+        p_from: toISODate(nowInRome()),
+      });
+      if (error) {
+        return {
+          ok: false,
+          message: dbErrorMessage(
+            error,
+            "Non è stato possibile togliere i turni futuri: l'account resta attivo. Riprova.",
+          ),
+        };
+      }
+      const counts = (data ?? {}) as { shifts?: number; weeks?: number };
+      removed = { shifts: Number(counts.shifts ?? 0), weeks: Number(counts.weeks ?? 0) };
+    }
+
+    const admin = createAdminClient();
+    const { error: banError } = await admin.auth.admin.updateUserById(personId, {
+      ban_duration: wanted ? "none" : "876000h",
     });
     if (banError) return { ok: false, message: "Operazione non riuscita. Riprova." };
-    const { error } = await supabase.from("profiles").update({ active }).eq("id", id);
-    if (error) return { ok: false, message: dbErrorMessage(error, "Operazione non riuscita.") };
+    const { data: updated, error } = await supabase
+      .from("profiles")
+      .update({ active: wanted })
+      .eq("id", personId)
+      .select("id");
+    if (error || !updated?.length) {
+      // Accesso e profilo devono dire la stessa cosa: il blocco torna com'era.
+      const { error: undoError } = await admin.auth.admin.updateUserById(personId, {
+        ban_duration: wanted ? "876000h" : "none",
+      });
+      if (undoError)
+        console.error("attiva/disattiva: ripristino del blocco non riuscito", undoError);
+      return { ok: false, message: dbErrorMessage(error, "Operazione non riuscita. Riprova.") };
+    }
 
     revalidatePath("/admin/dipendenti");
-    revalidatePath(`/admin/dipendenti/${id}`);
-    return { ok: true, message: active ? "Account riattivato." : "Account disattivato." };
+    revalidatePath(`/admin/dipendenti/${personId}`);
+    if (removed && (removed.shifts > 0 || removed.weeks > 0)) {
+      revalidatePath("/admin/turni", "layout");
+      revalidatePath("/admin");
+      revalidatePath("/orari", "layout");
+      revalidatePath("/");
+    }
+    if (wanted) return { ok: true, message: "Account riattivato." };
+    return {
+      ok: true,
+      message: removed?.shifts
+        ? `Account disattivato: ${removed.shifts === 1 ? "tolto 1 turno" : `tolti ${removed.shifts} turni`} da oggi in poi${removed.weeks ? " (anche dagli orari pubblicati)" : ""}.`
+        : "Account disattivato.",
+    };
   });
+}
+
+/** Elenca (fino a due livelli di cartelle) i file sotto `prefix` di un bucket. */
+async function listFiles(
+  admin: ReturnType<typeof createAdminClient>,
+  bucket: string,
+  prefix: string,
+  depth = 0,
+): Promise<string[]> {
+  const out: string[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data, error } = await admin.storage.from(bucket).list(prefix, { limit: PAGE, offset });
+    if (error) throw error;
+    for (const entry of data ?? []) {
+      const path = `${prefix}/${entry.name}`;
+      // Le cartelle non hanno id.
+      if (entry.id) out.push(path);
+      else if (depth < 2) out.push(...(await listFiles(admin, bucket, path, depth + 1)));
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * File personali nello Storage: allegati delle richieste (anche certificati) e foto, in
+ * `attachments/<id>/…` e `avatars/<id>/…`. Gli errori non bloccano l'eliminazione dell'account
+ * ma restano nel log; restituisce false se qualcosa non è stato rimosso.
+ */
+async function removePersonFiles(
+  admin: ReturnType<typeof createAdminClient>,
+  personId: string,
+): Promise<boolean> {
+  let clean = true;
+  for (const bucket of ["attachments", "avatars"]) {
+    try {
+      const paths = await listFiles(admin, bucket, personId);
+      for (let i = 0; i < paths.length; i += 100) {
+        const { error } = await admin.storage.from(bucket).remove(paths.slice(i, i + 100));
+        if (error) throw error;
+      }
+    } catch (error) {
+      clean = false;
+      console.error(`eliminazione account ${personId}: file di "${bucket}" non rimossi`, error);
+    }
+  }
+  return clean;
 }
 
 /**
@@ -314,8 +489,9 @@ export async function setEmployeeActive(id: string, active: boolean): Promise<Ac
  * 1. accesso bloccato e account disattivato (nessun nuovo login mentre si cancella);
  * 2. la persona viene tolta dagli orari già pubblicati;
  * 3. via gli scambi che i colleghi le avevano proposto (il vincolo li impedirebbe);
- * 4. registro modifiche: chi elimina chi;
- * 5. account di accesso eliminato: profilo e dati collegati spariscono a cascata, in un passo.
+ * 4. via i suoi file dallo Storage (allegati delle richieste, foto): un errore qui non blocca;
+ * 5. registro modifiche: chi elimina chi;
+ * 6. account di accesso eliminato: profilo e dati collegati spariscono a cascata, in un passo.
  */
 export async function deleteEmployee(id: string, confirmName: string): Promise<ActionResult> {
   return runAction(async () => {
@@ -334,6 +510,7 @@ export async function deleteEmployee(id: string, confirmName: string): Promise<A
       // Profilo già eliminato in un tentativo precedente: resta solo l'accesso da togliere.
       const { data: orphan } = await admin.auth.admin.getUserById(personId);
       if (!orphan?.user) return { ok: false, message: "Dipendente non trovato." };
+      await removePersonFiles(admin, personId);
       const { error } = await admin.auth.admin.deleteUser(personId);
       if (error) return { ok: false, message: "Eliminazione non completata. Riprova." };
       revalidatePath("/admin/dipendenti");
@@ -383,7 +560,10 @@ export async function deleteEmployee(id: string, confirmName: string): Promise<A
       .eq("target_profile_id", personId);
     if (swapError) return fail("Non è stato possibile togliere gli scambi che la riguardano.");
 
-    // 4. Registro modifiche a nome dell'admin (la cascata del passo 5 non ha un autore).
+    // 4. File personali nello Storage (la cascata del database non li tocca).
+    await removePersonFiles(admin, personId);
+
+    // 5. Registro modifiche a nome dell'admin (la cascata del passo 6 non ha un autore).
     await admin.from("audit_log").insert({
       actor_id: me.id,
       action: "delete",
@@ -392,7 +572,7 @@ export async function deleteEmployee(id: string, confirmName: string): Promise<A
       diff: { eliminazione_account: person.display_name },
     });
 
-    // 5. Account di accesso: profilo e dati collegati spariscono a cascata, in un solo passo.
+    // 6. Account di accesso: profilo e dati collegati spariscono a cascata, in un solo passo.
     const { error: deleteError } = await admin.auth.admin.deleteUser(personId);
     if (deleteError) return fail("Eliminazione dell'account non riuscita.");
 

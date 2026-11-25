@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { FieldError, Input, Label } from "@/components/ui/input";
-import { changePin, signOut } from "@/lib/auth/actions";
+import { signOutThisDevice } from "@/components/layout/sign-out";
+import { changePin } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 
 const STEPS = ["Nuovo PIN", "Schermata Home", "Notifiche"] as const;
@@ -145,7 +146,7 @@ function PinStep({
         </Button>
       </form>
       {/* Il PIN provvisorio va cambiato prima di usare il portale: chi non vuole farlo ora esce. */}
-      <form action={signOut} className="mt-6 text-sm text-muted">
+      <form action={signOutThisDevice} className="mt-6 text-sm text-muted">
         Preferisci farlo più tardi?{" "}
         <button type="submit" className="text-foreground underline underline-offset-4">
           Esci

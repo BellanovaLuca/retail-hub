@@ -202,6 +202,96 @@ export function swapConflicts(i: {
   return [...new Set(out)];
 }
 
+/** Turno pubblicato ridotto a quello che serve per una richiesta di cambio o scambio. */
+export type PublishedShiftRef = {
+  id: string;
+  profileId: string;
+  date: string;
+  startTime: string | null;
+  isAbsence: boolean;
+};
+
+export type ShiftRequestDays =
+  | { ok: true; startDate: string; targetDate: string | null }
+  | { ok: false; field: "shiftId" | "targetShiftId"; message: string };
+
+/**
+ * Giorni di una richiesta di cambio o scambio turno, ricavati dai turni PUBBLICATI scelti e non
+ * dalle date inviate dal browser: il turno da cedere dev'essere di chi chiede, quello preso in
+ * cambio del collega indicato. Così il collega (e il responsabile) vedono gli stessi giorni che
+ * l'approvazione scambierà davvero (il trigger lavora su persona + giorno).
+ *
+ * `shifts` = le righe di `published_shifts` trovate per gli id indicati.
+ */
+export function resolveShiftRequest(i: {
+  type: "cambio_turno" | "scambio_turno";
+  me: string;
+  shiftId: string | null;
+  targetProfileId: string | null;
+  targetShiftId: string | null;
+  shifts: PublishedShiftRef[];
+}): ShiftRequestDays {
+  const isWork = (s: PublishedShiftRef) => !s.isAbsence && Boolean(s.startTime);
+  const gone = "non è più tra quelli pubblicati: ricarica la pagina e scegli di nuovo.";
+
+  if (!i.shiftId) return { ok: false, field: "shiftId", message: "Scegli un tuo turno." };
+  const mine = i.shifts.find((s) => s.id === i.shiftId);
+  if (!mine) return { ok: false, field: "shiftId", message: `Il tuo turno ${gone}` };
+  if (mine.profileId !== i.me || !isWork(mine)) {
+    return { ok: false, field: "shiftId", message: "Puoi indicare solo un tuo turno di lavoro." };
+  }
+  if (i.type === "cambio_turno" || !i.targetShiftId) {
+    return { ok: true, startDate: mine.date, targetDate: null };
+  }
+
+  const theirs = i.shifts.find((s) => s.id === i.targetShiftId);
+  if (!theirs) {
+    return { ok: false, field: "targetShiftId", message: `Il turno del collega ${gone}` };
+  }
+  if (theirs.profileId !== i.targetProfileId || !isWork(theirs)) {
+    return {
+      ok: false,
+      field: "targetShiftId",
+      message: "Il turno da prendere in cambio dev'essere un turno di lavoro del collega scelto.",
+    };
+  }
+  return { ok: true, startDate: mine.date, targetDate: theirs.date };
+}
+
+export type ShiftDay = { profileId: string; date: string };
+
+/**
+ * Dove guardare (persona + giorno, nei turni pubblicati) per mostrare i turni di una richiesta di
+ * cambio o scambio: `shift` = il turno di chi chiede, `targetShift` = quello del collega preso in
+ * cambio. Gli id dei turni non si usano: cambiano quando l'admin riscrive una giornata.
+ *
+ * Dopo l'approvazione di uno scambio i turni sono passati di mano: quello ceduto da chi chiede è
+ * ora del collega nello stesso giorno, e viceversa.
+ */
+export function requestShiftDays(r: {
+  type: string;
+  status: string;
+  profile_id: string;
+  target_profile_id: string | null;
+  start_date: string;
+  target_date: string | null;
+}): { shift: ShiftDay | null; targetShift: ShiftDay | null } {
+  if (r.type === "cambio_turno") {
+    return { shift: { profileId: r.profile_id, date: r.start_date }, targetShift: null };
+  }
+  if (r.type !== "scambio_turno") return { shift: null, targetShift: null };
+  const swapped = r.status === "approved" && Boolean(r.target_profile_id);
+  const requester = r.profile_id;
+  const colleague = r.target_profile_id;
+  return {
+    shift: { profileId: swapped ? colleague! : requester, date: r.start_date },
+    targetShift:
+      r.target_date && colleague
+        ? { profileId: swapped ? requester : colleague, date: r.target_date }
+        : null,
+  };
+}
+
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const ATTACHMENT_TYPES = [
   "application/pdf",

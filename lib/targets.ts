@@ -6,8 +6,10 @@
  * - Persone Vista e Jolly: valore WO = €/ora vista × ore pianificate; WO = round(valore ÷ PM vista).
  * - Persone Sole: valore sole = €/ora sole × ore; pezzi sole = round(valore ÷ PM sole).
  * - Voci con regola `assignment`: WO → WO calcolato; PZ_SOLE → pezzi calcolati per chi è in Sole,
- *   fisso 1 per Vista e Jolly ("Pz sole x ADV").
- * - Voci `pct_of`: round(base × pct), ma almeno 1 se la base è > 0 (0 se la base è 0).
+ *   fisso 1 per Vista e Jolly ("Pz sole x ADV"). WO e pezzi sole si propongono solo se ore totali,
+ *   valore e prezzo medio dell'area sono > 0: altrimenti nessuna proposta (non uno 0).
+ * - Voci `pct_of`: round(base × pct), ma almeno 1 se la base è > 0 (0 se la base è 0); se la voce
+ *   base non ha un valore (né calcolato né scritto a mano) nessuna proposta.
  * - Voci `fixed`: il valore. Voci senza regola: nessun obiettivo proposto (lo scrive l'admin).
  * - Chi non ha ore in vendita in settimana non riceve proposte automatiche: solo i valori scritti
  *   a mano (e le voci "% di …" calcolate su quelli).
@@ -71,6 +73,9 @@ export const PZ_SOLE_VISTA_FIXED = 1;
 
 const safeDiv = (a: number, b: number) => (b > 0 ? a / b : 0);
 
+/** Arrotonda a 2 decimali (come i numeri che si possono inserire). */
+export const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /** Calcola gli obiettivi proposti per ogni persona e i totali assegnati. */
 export function assignWeeklyTargets(
   store: StoreWeeklyTargets,
@@ -82,6 +87,9 @@ export function assignWeeklyTargets(
   const eurPerHourVista = safeDiv(store.vistaValueEur, store.totalHours);
   const eurPerHourSole = safeDiv(store.soleValueEur, store.totalHours);
   const rules = new Map(kpis.map((k) => [k.code, k.defaultTargetRule]));
+  // WO e pezzi sole si propongono solo se il calcolo dell'area ha i suoi numeri (ore, valore, PM).
+  const vistaOn = store.totalHours > 0 && store.vistaValueEur > 0 && store.vistaAvgPrice > 0;
+  const soleOn = store.totalHours > 0 && store.soleValueEur > 0 && store.soleAvgPrice > 0;
 
   const result = people.map((p): PersonTargets => {
     const hours = Math.max(0, p.plannedHours);
@@ -106,13 +114,14 @@ export function assignWeeklyTargets(
       if (rule?.type === "fixed") value = working ? rule.value : null;
       else if (rule?.type === "assignment") {
         if (!working) value = null;
-        else if (code === "WO") value = woTarget;
-        else if (code === "PZ_SOLE") value = isSole ? soleTarget : PZ_SOLE_VISTA_FIXED;
+        else if (code === "WO") value = vistaOn ? woTarget : null;
+        else if (code === "PZ_SOLE")
+          value = isSole ? (soleOn ? soleTarget : null) : PZ_SOLE_VISTA_FIXED;
       } else if (rule?.type === "pct_of") {
-        const raw = compute(rule.kpi, new Set([...visiting, code]));
-        const base = raw ?? 0;
-        value =
-          !working && raw === null ? null : base > 0 ? Math.max(1, Math.round(base * rule.pct)) : 0;
+        // Senza un valore sulla voce base (né calcolato né scritto a mano) non si propone nulla:
+        // uno 0 diventerebbe un obiettivo "già raggiunto".
+        const base = compute(rule.kpi, new Set([...visiting, code]));
+        if (base !== null) value = base > 0 ? Math.max(1, Math.round(base * rule.pct)) : 0;
       }
       cache.set(code, value);
       return value;
@@ -160,8 +169,11 @@ export function weekProgress(
   entries: (number | { value: number })[],
   target: number,
 ): WeekProgress {
-  const done = entries.reduce<number>((s, e) => s + (typeof e === "number" ? e : e.value), 0);
-  return { done, remaining: Math.max(0, target - done), reached: done >= target };
+  // Somma arrotondata a 2 decimali: 0,7 + 0,1 deve dare 0,8 (e non 0,7999…).
+  const done = round2(
+    entries.reduce<number>((s, e) => s + (typeof e === "number" ? e : e.value), 0),
+  );
+  return { done, remaining: round2(Math.max(0, target - done)), reached: done >= target };
 }
 
 export type PerformerInput = {

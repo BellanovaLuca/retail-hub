@@ -47,7 +47,14 @@ export function AutoSaveTextarea({
     const text = latest.current;
     if (text === saved.current) return;
     setStatus("saving");
-    const res = await saveRef.current(text);
+    let res: { ok: boolean; message?: string };
+    try {
+      res = await saveRef.current(text);
+    } catch {
+      // Server non raggiungibile: il testo resta nel campo e si riprova alla prossima modifica,
+      // uscendo dal campo o lasciando la pagina.
+      res = { ok: false, message: "Non salvato: controlla la connessione." };
+    }
     if (res.ok) {
       saved.current = text;
       setStatus(latest.current === text ? "saved" : "pending");

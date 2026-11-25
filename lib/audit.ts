@@ -3,6 +3,7 @@
 export const ENTITY_LABELS: Record<string, string> = {
   profiles: "Dipendente",
   profile_departments: "Reparti di un dipendente",
+  profile_admin_notes: "Note riservate su un dipendente",
   departments: "Reparto",
   store_settings: "Impostazioni negozio",
   shift_templates: "Turno rapido",
@@ -52,6 +53,14 @@ const HIDDEN = new Set([
 ]);
 /** Campi che non vanno mai mostrati (dati riservati non necessari al registro). */
 const REDACTED = new Set(["admin_notes", "private_note"]);
+/** Colonne riservate solo in certe tabelle (altrove lo stesso nome è un campo qualsiasi). */
+const REDACTED_BY_ENTITY: Record<string, ReadonlySet<string>> = {
+  profile_admin_notes: new Set(["notes"]),
+};
+
+function isRedacted(key: string, entity?: string) {
+  return REDACTED.has(key) || Boolean(entity && REDACTED_BY_ENTITY[entity]?.has(key));
+}
 
 function show(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -62,20 +71,23 @@ function show(value: unknown): string {
   return s.length > 60 ? `${s.slice(0, 57)}…` : s;
 }
 
-/** Elenco "campo: prima → dopo" (modifica) o dei valori principali (creazione/eliminazione). */
-export function summarizeDiff(action: string, diff: unknown, max = 6): string[] {
+/**
+ * Elenco "campo: prima → dopo" (modifica) o dei valori principali (creazione/eliminazione).
+ * Con `entity` (la tabella della riga) si oscurano anche le colonne riservate di quella tabella.
+ */
+export function summarizeDiff(action: string, diff: unknown, max = 6, entity?: string): string[] {
   if (!diff || typeof diff !== "object") return [];
   const entries = Object.entries(diff as Record<string, unknown>).filter(([k]) => !HIDDEN.has(k));
   const lines =
     action === "update"
       ? entries.map(([k, v]) => {
-          if (REDACTED.has(k)) return `${k}: modificato`;
+          if (isRedacted(k, entity)) return `${k}: modificato`;
           const change = v as { before?: unknown; after?: unknown };
           return `${k}: ${show(change?.before)} → ${show(change?.after)}`;
         })
       : entries
           .filter(([, v]) => v !== null && v !== "" && v !== false)
-          .map(([k, v]) => (REDACTED.has(k) ? `${k}: (riservato)` : `${k}: ${show(v)}`));
+          .map(([k, v]) => (isRedacted(k, entity) ? `${k}: (riservato)` : `${k}: ${show(v)}`));
   return lines.length > max
     ? [...lines.slice(0, max), `… e altri ${lines.length - max} campi`]
     : lines;
@@ -87,7 +99,8 @@ export function subjectProfileId(
   entityId: string | null,
   diff: unknown,
 ): string | null {
-  if (entity === "profiles") return entityId;
+  // Per le note riservate l'id della riga è quello della persona.
+  if (entity === "profiles" || entity === "profile_admin_notes") return entityId;
   const d = (diff ?? {}) as Record<string, unknown>;
   const pid = d.profile_id as unknown;
   if (typeof pid === "string") return pid;

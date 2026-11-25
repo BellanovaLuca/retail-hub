@@ -22,6 +22,7 @@ import { formatHoursIt, leaveLabelAdmin } from "@/lib/schedule/view";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { CalendarFeed } from "./calendar-feed";
+import { parseMonthParam } from "./month-param";
 import { MonthCalendar } from "./month-calendar";
 
 export const metadata: Metadata = { title: "I miei orari" };
@@ -60,10 +61,9 @@ export default async function OrariPage({
   );
 
   if (view === "mese") {
-    const month =
-      params.mese && /^\d{4}-\d{2}$/.test(params.mese)
-        ? parseISO(`${params.mese}-01`)
-        : startOfMonth(now);
+    // Mese non valido (es. 2026-13) → mese corrente, non una pagina di errore.
+    const requested = parseMonthParam(params.mese);
+    const month = requested ? parseISO(requested) : startOfMonth(now);
     const from = toISODate(startOfMonth(month));
     const to = toISODate(endOfMonth(month));
     const [mine, { data: leaves }] = await Promise.all([

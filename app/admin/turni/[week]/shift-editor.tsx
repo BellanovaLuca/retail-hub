@@ -36,6 +36,7 @@ import {
   resolveZone,
   sortShifts,
 } from "@/lib/schedule/cells";
+import { isHolidayClosure } from "@/lib/schedule/opening";
 import type {
   LeaveRecord,
   PublishedShift,
@@ -55,9 +56,10 @@ import {
   weekHoursByPerson,
   withAbsenceShifts,
 } from "@/lib/schedule/view";
-import { parseShiftCell } from "@/lib/shifts/parse";
+import { formatShiftCompact, parseShiftCell } from "@/lib/shifts/parse";
 import { cn } from "@/lib/utils";
 import { saveShiftCells, saveShiftDay } from "../actions";
+import { createCellSaveQueue, type CellSaveHandlers } from "./cell-save-queue";
 import { DayDialog } from "./day-dialog";
 import { PublishDialog } from "./publish-dialog";
 import { WeekMenu } from "./week-menu";
@@ -111,12 +113,19 @@ export function ShiftEditor(props: EditorProps) {
 
   // Le celle modificate si accumulano in una coda e partono in un solo lotto dopo una breve
   // pausa (digitazione in fila, incolla, riempimento): una chiamata per lotto, non per cella.
-  const queue = useRef(new Map<string, { profileId: string; date: string; value: string }>());
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Salvataggi in corso: "Salvato" solo quando la coda è vuota e sono finiti tutti.
-  const inflight = useRef(0);
-  const failed = useRef<string | null>(null);
-  const busy = () => inflight.current > 0 || queue.current.size > 0;
+  // Se il server non risponde il lotto resta in coda e viene riprovato (vedi cell-save-queue).
+  const handlers = useRef<CellSaveHandlers>(null!);
+  useEffect(() => {
+    handlers.current = {
+      save: (batch) => saveShiftCells(week.id, batch),
+      onState: (state, text) => {
+        setSaveState(state);
+        if (state !== "saving") setMessage(text);
+      },
+      onSettled: () => router.refresh(),
+    };
+  });
+  const [saveQueue] = useState(() => createCellSaveQueue(() => handlers.current));
 
   // Le modifiche ottimistiche valgono finché il server non restituisce i dati aggiornati,
   // e comunque finché ci sono salvataggi in coda o in corso.
@@ -124,18 +133,18 @@ export function ShiftEditor(props: EditorProps) {
   useEffect(() => {
     if (lastShifts.current !== shifts) {
       lastShifts.current = shifts;
-      if (!busy()) setPending(new Map());
+      if (!saveQueue.busy()) setPending(new Map());
     }
-  }, [shifts]);
+  }, [shifts, saveQueue]);
 
   // Chiudere la pagina con salvataggi in coda o in corso farebbe perdere le ultime celle.
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (busy()) e.preventDefault();
+      if (saveQueue.busy()) e.preventDefault();
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, []);
+  }, [saveQueue]);
 
   const tplById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
   const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
@@ -144,9 +153,16 @@ export function ShiftEditor(props: EditorProps) {
     () => new Map(leaves.map((l) => [key(l.profileId, l.date), l])),
     [leaves],
   );
+  // "Chiuso" solo se nessuna eccezione riapre il negozio in quel festivo (come per le regole).
   const holidays = useMemo(
-    () => new Map(calendar.holidays.map((h) => [h.date, h])),
-    [calendar.holidays],
+    () =>
+      new Map(
+        calendar.holidays.map((h) => [
+          h.date,
+          { ...h, storeClosed: isHolidayClosure(h.date, calendar) },
+        ]),
+      ),
+    [calendar],
   );
   const hours = useMemo(() => weekHoursByPerson(shifts), [shifts]);
   const timesheetLeaves = useMemo(
@@ -218,13 +234,14 @@ export function ShiftEditor(props: EditorProps) {
       const k = key(profileId, date);
       if (pending.has(k)) return pending.get(k)!;
       const leave = leaveByDay.get(k);
-      const text = cellText(byDay.get(k) ?? [], tplById);
+      const person = peopleById.get(profileId);
+      const text = cellText(byDay.get(k) ?? [], tplById, (s) => resolveBackOffice(s, person));
       if (leave && isFullDayLeave(leave)) {
         return text ? `${leaveLabelAdmin(leave)} · ${text}` : leaveLabelAdmin(leave);
       }
       return text;
     },
-    [pending, leaveByDay, byDay, tplById],
+    [pending, leaveByDay, byDay, tplById, peopleById],
   );
 
   const getCellState = useCallback(
@@ -279,7 +296,10 @@ export function ShiftEditor(props: EditorProps) {
             />
           ) : null}
           <span className="truncate">{value}</span>
-          {backOffice ? <span className="text-[0.625rem] text-muted">BO</span> : null}
+          {/* Nelle giornate miste il testo porta già "BO" sul pezzo in back office. */}
+          {backOffice && !/\bBO\b/.test(value) ? (
+            <span className="text-[0.625rem] text-muted">BO</span>
+          ) : null}
           {needsZone ? (
             <span className="text-[0.625rem] text-warning" title="Scegli l'area">
               ?
@@ -308,41 +328,13 @@ export function ShiftEditor(props: EditorProps) {
       );
       if (parsed.kind === "error") return { error: parsed.message };
       if (parsed.kind === "template") return { value: parsed.code };
+      // Forma canonica (la stessa di `cellText`): riscrivere lo stesso orario con un altro
+      // trattino o formato ("10-19" su "10–19") non è una modifica e non tocca pausa e dettagli.
+      if (parsed.kind === "times") return { value: formatShiftCompact(parsed.segments) };
       return { value };
     },
     [templates],
   );
-
-  const FLUSH_DELAY_MS = 300;
-  const MAX_BATCH = 2000;
-
-  // Invia la coda in lotti (al massimo 2000 celle per chiamata, il limite dell'azione).
-  // Un lotto alla volta: così due modifiche alla stessa cella arrivano nell'ordine giusto.
-  const flush = useCallback(() => {
-    flushTimer.current = null;
-    if (inflight.current > 0 || queue.current.size === 0) return;
-    const batch = [...queue.current.values()].slice(0, MAX_BATCH);
-    for (const c of batch) queue.current.delete(key(c.profileId, c.date));
-    inflight.current += 1;
-    startTransition(async () => {
-      try {
-        const res = await saveShiftCells(week.id, batch);
-        if (!res.ok) failed.current = res.message ?? "Salvataggio non riuscito.";
-      } catch {
-        failed.current = "Salvataggio non riuscito: controlla la connessione e riprova.";
-      } finally {
-        inflight.current -= 1;
-      }
-      if (queue.current.size > 0) {
-        flush();
-        return;
-      }
-      setSaveState(failed.current ? "error" : "saved");
-      setMessage(failed.current);
-      failed.current = null;
-      router.refresh();
-    });
-  }, [week.id, router]);
 
   const onChange = useCallback(
     (changes: CellChange[]) => {
@@ -351,30 +343,18 @@ export function ShiftEditor(props: EditorProps) {
         for (const c of changes) next.set(key(c.rowId, c.colId), c.value);
         return next;
       });
-      for (const c of changes) {
-        queue.current.set(key(c.rowId, c.colId), {
-          profileId: c.rowId,
-          date: c.colId,
-          value: c.value,
-        });
-      }
-      setSaveState("saving");
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-      flushTimer.current = setTimeout(flush, FLUSH_DELAY_MS);
+      saveQueue.enqueue(
+        changes.map((c) => ({ profileId: c.rowId, date: c.colId, value: c.value })),
+      );
     },
-    [flush],
+    [saveQueue],
   );
 
   // Smontando l'editor (cambio vista) la coda parte subito.
-  useEffect(
-    () => () => {
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current);
-        flush();
-      }
-    },
-    [flush],
-  );
+  useEffect(() => {
+    saveQueue.revive();
+    return () => saveQueue.dispose();
+  }, [saveQueue]);
 
   // Da telefono o tablet (puntatore grossolano) il foglio dal basso offre, oltre al valore,
   // il dettaglio della giornata e, per i jolly senza area, la scelta rapida Vista/Sole.

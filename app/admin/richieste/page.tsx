@@ -28,26 +28,38 @@ export default async function AdminRichiestePage({
   const tab = TABS.find((t) => t.key === q.tab)?.key ?? "attesa";
   const supabase = await createClient();
 
-  let query = supabase.from("requests").select("*").order("start_date").limit(300);
-  if (tab === "approvate")
-    query = query.eq("status", "approved").order("decided_at", { ascending: false });
-  if (tab === "rifiutate") query = query.in("status", ["rejected", "peer_declined"]);
-  if (tab === "attesa") query = query.in("status", ["pending", "peer_accepted"]);
+  // In attesa: per data d'inizio (le più vicine in alto). Nelle altre schede dalle più recenti:
+  // con l'ordine crescente e il limite di 300 righe le ultime richieste sparirebbero dall'elenco.
+  let query = supabase.from("requests").select("*").limit(300);
+  if (tab === "attesa")
+    query = query.in("status", ["pending", "peer_accepted"]).order("start_date");
+  else if (tab === "approvate")
+    query = query
+      .eq("status", "approved")
+      .order("decided_at", { ascending: false, nullsFirst: false })
+      .order("start_date", { ascending: false });
+  else {
+    if (tab === "rifiutate") query = query.in("status", ["rejected", "peer_declined"]);
+    query = query.order("created_at", { ascending: false });
+  }
   const tipo = REQUEST_TYPES.find((t) => t.value === q.tipo)?.value;
   if (tipo) query = query.eq("type", tipo);
   if (q.persona) query = query.eq("profile_id", q.persona);
-  const [{ data }, names, { data: statuses }] = await Promise.all([
+  // Conteggi per la finestra «Azzera»: li conta il database (senza leggere le righe, che oltre
+  // le 1000 verrebbero troncate).
+  const countRequests = async (statuses?: RequestStatus[]) => {
+    let c = supabase.from("requests").select("id", { count: "exact", head: true });
+    if (statuses) c = c.in("status", statuses);
+    return (await c).count ?? 0;
+  };
+  const [{ data }, names, total, pending, approved] = await Promise.all([
     query,
     namesById(supabase),
-    supabase.from("requests").select("status"),
+    countRequests(),
+    countRequests(["pending", "peer_accepted"]),
+    countRequests(["approved"]),
   ]);
-  const all = statuses ?? [];
-  const counts = {
-    total: all.length,
-    pending: all.filter((r) => r.status === "pending" || r.status === "peer_accepted").length,
-    approved: all.filter((r) => r.status === "approved").length,
-    other: all.filter((r) => !["pending", "peer_accepted", "approved"].includes(r.status)).length,
-  };
+  const counts = { total, pending, approved, other: Math.max(0, total - pending - approved) };
 
   const rows = (data ?? [])
     .filter(

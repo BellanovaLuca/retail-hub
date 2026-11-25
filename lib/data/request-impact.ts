@@ -101,6 +101,8 @@ const LEAVE_WORDS: Record<string, string> = {
 /**
  * Effetto sulla copertura di una richiesta di assenza: avvisi che comparirebbero togliendo
  * i turni della persona in quei giorni (versione di lavoro dei turni). Al massimo 3 settimane.
+ * Sola lettura: `buildRuleContext` non crea le settimane che mancano (aprire la richiesta non
+ * deve lasciare settimane in bozza né righe nel registro).
  */
 export async function requestCoverageImpact(
   db: Db,

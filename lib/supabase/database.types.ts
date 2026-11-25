@@ -167,6 +167,8 @@ export type Database = {
           ran_at: string;
           created_at: string;
           updated_at: string;
+          status: "done" | "failed" | "running";
+          attempts: number;
         };
         Insert: {
           id?: string;
@@ -176,6 +178,8 @@ export type Database = {
           ran_at?: string;
           created_at?: string;
           updated_at?: string;
+          status?: "done" | "failed" | "running";
+          attempts?: number;
         };
         Update: {
           id?: string;
@@ -185,6 +189,8 @@ export type Database = {
           ran_at?: string;
           created_at?: string;
           updated_at?: string;
+          status?: "done" | "failed" | "running";
+          attempts?: number;
         };
         Relationships: [];
       };
@@ -881,6 +887,35 @@ export type Database = {
         };
         Relationships: [];
       };
+      profile_admin_notes: {
+        Row: {
+          profile_id: string;
+          notes: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          profile_id: string;
+          notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          profile_id?: string;
+          notes?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "profile_admin_notes_profile_id_fkey";
+            columns: ["profile_id"];
+            isOneToOne: true;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
       profile_departments: {
         Row: {
           profile_id: string;
@@ -985,7 +1020,6 @@ export type Database = {
           privacy_accepted_at: string | null;
           active: boolean;
           sort_order: number;
-          admin_notes: string | null;
           created_at: string;
           updated_at: string;
           ical_token: string;
@@ -1010,7 +1044,6 @@ export type Database = {
           privacy_accepted_at?: string | null;
           active?: boolean;
           sort_order?: number;
-          admin_notes?: string | null;
           created_at?: string;
           updated_at?: string;
           ical_token?: string;
@@ -1035,7 +1068,6 @@ export type Database = {
           privacy_accepted_at?: string | null;
           active?: boolean;
           sort_order?: number;
-          admin_notes?: string | null;
           created_at?: string;
           updated_at?: string;
           ical_token?: string;
@@ -2023,8 +2055,13 @@ export type Database = {
       is_responsibility_assignee: { Args: { p_responsibility_id: string; uid: string }; Returns: boolean };
       is_responsibility_assignee_on: { Args: { p_responsibility_id: string; uid: string; p_date: string }; Returns: boolean };
       is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
+      login_attempt_begin: { Args: { p_code: string; p_ip: string; p_max_code: number; p_max_ip: number; p_minutes: number }; Returns: Json };
+      remove_future_shifts: { Args: { p_profile_id: string; p_from: string }; Returns: Json };
+      replace_shift_days: { Args: { p_week_id: string; p_days: Json; p_rows: Json }; Returns: number };
       respond_to_swap: { Args: { p_request_id: string; p_accept: boolean }; Returns: undefined };
       responsibility_week_team: { Args: { p_responsibility_id: string; p_date: string }; Returns: string[] };
+      responsibility_week_teams: { Args: { p_week: string }; Returns: Json };
+      set_default_rule_set: { Args: { p_rule_set_id: string }; Returns: undefined };
       set_extra_task_done: { Args: { p_task_id: string; p_done: boolean }; Returns: undefined };
       set_performance_note: { Args: { p_goal_id: string; p_note: string }; Returns: undefined };
       today_rome: { Args: Record<PropertyKey, never>; Returns: string };

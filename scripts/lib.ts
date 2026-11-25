@@ -12,6 +12,16 @@ export function loadEnv() {
   }
 }
 
+/** true se l'URL punta a questa macchina (stack locale): localhost, 127.0.0.1, ::1. */
+export function isLocalUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
 export function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

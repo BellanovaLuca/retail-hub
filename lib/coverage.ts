@@ -2,13 +2,14 @@
  * Indicatori di copertura per fascia (§7.1, §7.2): TESTE, DELTA, Vista, Sole, COP. OTT.
  *
  * Scelte documentate:
- * - Una persona è presente in una fascia se un suo turno copre TUTTA la fascia
- *   (con fasce da 30' un turno 10:15–… conta dalla fascia 10:30–11:00).
+ * - Una persona è presente in una fascia se i suoi turni, uniti, coprono TUTTA la fascia
+ *   (con fasce da 30' un turno 10:15–… conta dalla fascia 10:30–11:00; due pezzi contigui,
+ *   es. back office fino alle 10:15 e vendita dalle 10:15, coprono la fascia 10:00–10:30).
  * - Le pause (`breakMinutes`) non hanno una posizione nella giornata, quindi NON riducono la
  *   presenza: riducono solo le ore. Per far "vedere" una pausa alle coperture, il turno va spezzato
  *   (es. 10–13 e 14–19, come nel foglio orario).
- * - Back office: se nella fascia la persona ha solo turni in back office conta in TESTE ma non nella
- *   forza vendita; se ha anche un turno di vendita che copre la fascia, conta come vendita.
+ * - Back office: conta nella forza vendita chi copre la fascia con i soli turni di vendita; chi la
+ *   copre anche solo in parte in back office conta in TESTE ma non nella forza vendita.
  * - Area: quella del turno; se manca, l'area di base della persona (i jolly senza area non contano
  *   né in Vista né in Sole, ma contano in DELTA).
  * - Reparto (COP. OTT.): `shift.departmentId ?? persona.primaryDepartmentId`. Se risulta "Management",
@@ -18,8 +19,8 @@
  */
 import { DEPARTMENT_NAMES } from "@/lib/domain/types";
 import type { DepartmentRef, ISODate, PersonInput, ShiftInput, Zone } from "@/lib/domain/types";
-import { fromMinutes, toMinutes, type MinuteRange } from "@/lib/domain/time";
-import { shiftNetHours } from "@/lib/hours";
+import { fromMinutes, mergeRanges, toMinutes, type MinuteRange } from "@/lib/domain/time";
+import { dayNetHours } from "@/lib/hours";
 import {
   hourCellValue,
   segmentsToSlots,
@@ -81,23 +82,39 @@ export function presenceIn(
   peopleById: Map<string, PersonInput>,
   departments: DepartmentRef[],
 ): PresenceEntry[] {
-  const byPerson = new Map<string, PresenceEntry>();
+  const piecesBy = new Map<string, ShiftInput[]>();
   for (const s of dayShifts) {
-    if (toMinutes(s.start) > range.start || toMinutes(s.end) < range.end) continue;
-    const prev = byPerson.get(s.profileId);
-    const sale = !s.backOffice;
-    if (prev && (prev.sale || !sale)) continue;
-    const person = peopleById.get(s.profileId);
+    const list = piecesBy.get(s.profileId);
+    if (list) list.push(s);
+    else piecesBy.set(s.profileId, [s]);
+  }
+  const covers = (pieces: ShiftInput[]) =>
+    mergeRanges(pieces.map((s) => ({ start: toMinutes(s.start), end: toMinutes(s.end) }))).some(
+      (r) => r.start <= range.start && r.end >= range.end,
+    );
+  const out: PresenceEntry[] = [];
+  for (const [profileId, pieces] of piecesBy) {
+    // Presente se i suoi pezzi, uniti, coprono tutta la fascia (anche due pezzi contigui che si
+    // danno il cambio a metà fascia); in vendita solo se la coprono i pezzi di vendita da soli.
+    const salePieces = pieces.filter((s) => !s.backOffice);
+    const sale = covers(salePieces);
+    if (!sale && !covers(pieces)) continue;
+    const touching = (sale ? salePieces : pieces)
+      .filter((s) => toMinutes(s.start) < range.end && toMinutes(s.end) > range.start)
+      .sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+    // Area e reparto: quelli del pezzo in corso all'inizio della fascia.
+    const s = touching[0];
+    const person = peopleById.get(profileId);
     const dep = workingDepartment(s, person, departments);
-    byPerson.set(s.profileId, {
-      profileId: s.profileId,
+    out.push({
+      profileId,
       sale,
       zone: shiftZone(s, person),
       departmentId: dep.raw,
       effectiveDepartmentId: dep.effective,
     });
   }
-  return [...byPerson.values()];
+  return out;
 }
 
 export type CoverageSlot = {
@@ -173,13 +190,16 @@ export function dailyTotals(
   date: ISODate,
   shifts: ShiftInput[],
 ): { byPerson: Record<string, number>; total: number } {
-  const byPerson: Record<string, number> = {};
-  let total = 0;
+  const pieces: Record<string, ShiftInput[]> = {};
   for (const s of shifts) {
     if (s.date !== date) continue;
-    const h = shiftNetHours(s);
-    byPerson[s.profileId] = (byPerson[s.profileId] ?? 0) + h;
-    total += h;
+    (pieces[s.profileId] ??= []).push(s);
+  }
+  const byPerson: Record<string, number> = {};
+  let total = 0;
+  for (const [profileId, list] of Object.entries(pieces)) {
+    byPerson[profileId] = dayNetHours(list);
+    total += byPerson[profileId];
   }
   return { byPerson, total };
 }

@@ -16,3 +16,18 @@ export function fileResponse(body: Buffer, type: string, filename: string): Resp
 export function errorResponse(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
+
+/**
+ * Pezzo di nome file sicuro per `Content-Disposition`: solo `a-z`, `0-9` e trattini (gli accenti
+ * si tolgono). Un nome scelto dall'admin (es. il reparto) può contenere virgolette o caratteri
+ * fuori Latin-1, che romperebbero l'intestazione.
+ */
+export function fileSlug(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}

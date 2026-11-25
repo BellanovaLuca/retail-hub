@@ -1,7 +1,8 @@
 "use client";
 
 import { formatInRome } from "@/lib/dates";
-import { Calculator, Copy, Send } from "lucide-react";
+import { Calculator, Copy, Plus, Send } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import {
@@ -36,7 +37,7 @@ import {
 } from "@/lib/kpi/simple-assignment";
 import type { DefaultTargetRule, StoreWeeklyTargets, TargetZone } from "@/lib/targets";
 import { cn } from "@/lib/utils";
-import { confirmAssignment, getPreviousAssignment } from "../actions";
+import { confirmAssignment, getPreviousAssignment, quickAddKpi } from "../actions";
 
 type Person = {
   profileId: string;
@@ -136,6 +137,20 @@ export function AssignmentEditor(props: {
   );
   const [comments, setComments] = React.useState<Record<string, string>>(initialComments);
   const [editingComment, setEditingComment] = React.useState<string | null>(null);
+  const [newKpi, setNewKpi] = React.useState("");
+  const onAddKpi = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKpi.trim()) return;
+    startTransition(async () => {
+      const res = await quickAddKpi(newKpi);
+      setResult(res);
+      if (res.ok) {
+        setNewKpi("");
+        // La colonna nuova arriva con il refresh; le celle già scritte restano.
+        router.refresh();
+      }
+    });
+  };
   const unpublishedComments = props.comments.filter((c) => c.body && !c.published).length;
 
   const [overrides, setOverrides] = React.useState<Record<string, number | null>>(() => {
@@ -221,7 +236,12 @@ export function AssignmentEditor(props: {
   );
   const getCellState = React.useCallback(
     (profileId: string, col: string): CellState | undefined => {
-      if (col === HOURS) return { readOnly: true, tone: "muted" };
+      if (col === HOURS)
+        return {
+          readOnly: true,
+          tone: "muted",
+          title: "Ore dai turni della settimana: si cambiano dal foglio Turni.",
+        };
       if (col === COMMENT) {
         const body = comments[profileId] ?? "";
         return {
@@ -233,11 +253,9 @@ export function AssignmentEditor(props: {
         };
       }
       const key = cellKey(profileId, col);
-      if (!personKpi.has(key))
-        return {
-          tone: "muted",
-          title: "Voce non presente nel foglio della persona: scrivi un obiettivo per aggiungerla.",
-        };
+      // Nessuna cella bloccata: una voce fuori dal foglio della persona si scrive lo stesso
+      // (alla conferma entra nel suo foglio).
+      if (!personKpi.has(key)) return { title: "Scrivi un obiettivo anche per questa voce." };
       const cell = preview.cells.get(key);
       if (cell?.overridden && cell.computed !== null)
         return {
@@ -264,10 +282,15 @@ export function AssignmentEditor(props: {
       const added = numbers.filter(
         (c) => !personKpi.has(cellKey(c.rowId, c.colId)) && typeof parseCount(c.value) === "number",
       );
-      if (added.length)
+      // …e se poi la si svuota, torna fuori dal foglio (niente proposta automatica al suo posto).
+      const cleared = numbers.filter((c) => parseCount(c.value) === null);
+      if (added.length || cleared.length)
         setExtra((prev) => {
           const next = { ...prev };
           for (const c of added) next[c.rowId] = [...new Set([...(next[c.rowId] ?? []), c.colId])];
+          for (const c of cleared)
+            if (next[c.rowId]?.includes(c.colId))
+              next[c.rowId] = next[c.rowId].filter((id) => id !== c.colId);
           return next;
         });
       setOverrides((prev) => {
@@ -405,9 +428,9 @@ export function AssignmentEditor(props: {
               Obiettivi della settimana
             </h2>
             <p className="mt-1 max-w-2xl text-sm text-muted">
-              Una riga per persona: scrivi direttamente nelle celle cosa deve fare in settimana e,
-              nella colonna «Commento» un messaggio per la persona (lo vedrà in evidenza in cima
-              alla sua pagina Obiettivi). Poi «Conferma e avvisa».
+              Una riga per persona: tutte le celle sono libere, scrivi direttamente cosa deve fare
+              in settimana e, nella colonna «Commento» un messaggio per la persona (lo vedrà in
+              evidenza in cima alla sua pagina Obiettivi). Poi «Conferma e avvisa».
               {calcOn
                 ? " Le celle vuote prendono la proposta del calcolo automatico; quelle corrette a mano restano sottolineate."
                 : ""}
@@ -460,6 +483,27 @@ export function AssignmentEditor(props: {
             showDensityToggle
           />
         )}
+
+        <form onSubmit={onAddKpi} className="flex flex-wrap items-center gap-2">
+          <Input
+            aria-label="Nome della nuova voce"
+            placeholder="Nuova voce (es. Lenti a contatto)"
+            value={newKpi}
+            maxLength={60}
+            onChange={(e) => setNewKpi(e.target.value)}
+            disabled={pending}
+            className="w-full sm:w-72"
+          />
+          <Button type="submit" variant="secondary" size="sm" disabled={pending || !newKpi.trim()}>
+            <Plus aria-hidden /> Aggiungi colonna
+          </Button>
+          <Link
+            href={`/admin/obiettivi/${weekStart}/voci`}
+            className="ml-1 link-underline text-sm text-muted"
+          >
+            Rinomina, riordina o togli le voci
+          </Link>
+        </form>
 
         <dl className="grid gap-4 border-t border-line pt-4 text-sm sm:grid-cols-3">
           <Summary

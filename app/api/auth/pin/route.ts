@@ -1,11 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import {
-  LOCKOUT_MINUTES,
-  MAX_FAILED_PER_CODE,
-  MAX_FAILED_PER_IP,
-  lockedUntil,
-} from "@/lib/auth/lockout";
+import { beginLoginAttempt, clientIp, markAttemptSucceeded } from "@/lib/auth/attempts";
+import { lockoutMessage } from "@/lib/auth/lockout";
 import { normalizeEmployeeCode, syntheticEmail } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -18,25 +14,6 @@ const bodySchema = z.object({
 
 const WRONG_CREDENTIALS = "Codice o PIN non corretti.";
 
-/** IP del client: prima quello messo dalla piattaforma (Vercel), poi x-forwarded-for. */
-function clientIp(request: NextRequest) {
-  return (
-    request.headers.get("x-real-ip")?.trim() ||
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    "sconosciuto"
-  );
-}
-
-function lockedResponse(until: Date) {
-  const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
-  return NextResponse.json(
-    {
-      error: `Troppi tentativi errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`,
-    },
-    { status: 429 },
-  );
-}
-
 /** Accesso con codice dipendente + PIN (§4). */
 export async function POST(request: NextRequest) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
@@ -45,21 +22,15 @@ export async function POST(request: NextRequest) {
   }
 
   const code = normalizeEmployeeCode(parsed.data.code);
-  const ip = clientIp(request);
+  const ip = clientIp(request.headers);
   const admin = createAdminClient();
-  const since = new Date(Date.now() - LOCKOUT_MINUTES * 60_000).toISOString();
 
-  const [byCode, byIp] = await Promise.all([
-    admin.from("login_attempts").select("at, success").eq("employee_code", code).gte("at", since),
-    admin.from("login_attempts").select("at, success").eq("ip", ip).gte("at", since),
-  ]);
-  const toAttempts = (rows: { at: string; success: boolean }[] | null) =>
-    (rows ?? []).map((r) => ({ at: new Date(r.at), success: r.success }));
-
-  const locked =
-    lockedUntil(toAttempts(byCode.data), MAX_FAILED_PER_CODE) ??
-    lockedUntil(toAttempts(byIp.data), MAX_FAILED_PER_IP);
-  if (locked) return lockedResponse(locked);
+  // Controllo del blocco e registrazione del tentativo in un solo passo: il tentativo nasce
+  // «fallito» e diventa riuscito solo in fondo. Richieste in parallelo non aggirano la soglia.
+  const gate = await beginLoginAttempt(admin, code, ip);
+  if (!gate.ok) {
+    return NextResponse.json({ error: lockoutMessage(gate.lockedUntil) }, { status: 429 });
+  }
 
   // Il PIN non è la password di Supabase: lo è la sua impronta legata all'utente (lib/auth/secret).
   const { data: account } = await admin
@@ -76,7 +47,6 @@ export async function POST(request: NextRequest) {
     : { data: { user: null }, error: new Error("account inesistente") };
 
   if (error || !data.user) {
-    await admin.from("login_attempts").insert({ employee_code: code, ip, success: false });
     // Account disattivato (bannato in Supabase Auth): messaggio chiaro invece di quello generico.
     if (error && "code" in error && error.code === "user_banned") {
       return NextResponse.json(
@@ -95,14 +65,13 @@ export async function POST(request: NextRequest) {
 
   if (!profile?.active) {
     await supabase.auth.signOut({ scope: "local" });
-    await admin.from("login_attempts").insert({ employee_code: code, ip, success: false });
     return NextResponse.json(
       { error: "Questo account è disattivato. Rivolgiti a un responsabile." },
       { status: 403 },
     );
   }
 
-  await admin.from("login_attempts").insert({ employee_code: code, ip, success: true });
+  await markAttemptSucceeded(admin, gate.attemptId);
 
   const onboarding = profile.must_change_pin || !profile.privacy_accepted_at;
   return NextResponse.json({ redirectTo: onboarding ? "/primo-accesso" : "/" });

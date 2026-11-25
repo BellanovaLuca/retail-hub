@@ -4,7 +4,7 @@ import { it } from "date-fns/locale";
 import { getAdminWeek, getSchedulePeople, getTemplates } from "@/lib/data/schedule";
 import { notify, notifyEach } from "@/lib/notifications";
 import type { createClient } from "@/lib/supabase/server";
-import { buildSnapshot, type DayChange } from "./cells";
+import { buildSnapshot, publishRecipients, type DayChange } from "./cells";
 import type { PublishedShift } from "./types";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
@@ -92,7 +92,8 @@ export async function publishSnapshot(
   const weekLabel = `settimana del ${format(parseISO(weekStart), "d MMMM", { locale: it })}`;
   const link = `/orari?settimana=${weekStart}`;
   if (firstPublish || opts.mode === "all") {
-    await notify([...new Set(snapshot.map((s) => s.profile_id))], {
+    // Anche chi è stato tolto dalla settimana: non è più nell'istantanea ma i suoi orari sono cambiati.
+    await notify(publishRecipients(snapshot, firstPublish ? [] : changes), {
       kind: "week_published",
       title: firstPublish ? "Orari pubblicati" : "Orari aggiornati",
       body: `Sono disponibili i tuoi orari della ${weekLabel}.`,

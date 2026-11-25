@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { NotificationBell } from "@/components/notifications/bell";
-import { signOut } from "@/lib/auth/actions";
 import { cn } from "@/lib/utils";
 import {
   adminEntry,
@@ -16,7 +15,7 @@ import {
   isActive,
   type NavItem,
 } from "./nav";
-import { clearOfflineCopy } from "./offline-copy";
+import { signOutThisDevice } from "./sign-out";
 import { Wordmark } from "./wordmark";
 
 type ShellProps = {
@@ -91,7 +90,7 @@ export function AppShell({
             <p className="truncate text-sm text-muted">{userName}</p>
             <NotificationBell profileId={profileId} initialCount={unreadCount} />
           </div>
-          <form action={signOut} onSubmit={clearOfflineCopy}>
+          <form action={signOutThisDevice}>
             <button
               type="submit"
               className="flex min-h-10 w-full items-center gap-3 rounded-md px-3 text-sm text-muted transition-colors hover:bg-surface hover:text-foreground"

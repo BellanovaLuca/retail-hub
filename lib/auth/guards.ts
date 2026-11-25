@@ -1,5 +1,5 @@
 import "server-only";
-import { getCurrentProfile } from "@/lib/auth/session";
+import { getCurrentProfile, isOnboarded } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/supabase/types";
 
@@ -9,10 +9,16 @@ export type ActionResult<T = undefined> =
 
 export class ActionError extends Error {}
 
-/** Per le Server Actions: profilo attivo e client con la sessione dell'utente. */
+/**
+ * Per le Server Actions: profilo attivo che ha completato il primo accesso, e client con la
+ * sessione dell'utente. Con il PIN provvisorio (o senza informativa accettata) si possono usare
+ * solo cambio PIN, uscita e tema, che non passano da qui (lib/auth/actions.ts).
+ */
 export async function authedAction() {
   const profile = await getCurrentProfile();
   if (!profile || !profile.active) throw new ActionError("Sessione scaduta: accedi di nuovo.");
+  if (!isOnboarded(profile))
+    throw new ActionError("Completa il primo accesso: scegli il tuo PIN e accetta l'informativa.");
   return { profile, supabase: await createClient() };
 }
 

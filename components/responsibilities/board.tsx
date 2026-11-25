@@ -152,7 +152,12 @@ export function ResponsibilityBoard({
                       ) : row.weekly ? (
                         row.supports.length ? (
                           <strong className="font-semibold text-foreground">
-                            {row.supports.map((s) => name(s)).join(", ")}
+                            {row.supports.map((s, i) => (
+                              <span key={s.id}>
+                                {i > 0 ? ", " : ""}
+                                {name(s)}
+                              </span>
+                            ))}
                           </strong>
                         ) : (
                           <span className="text-warning">Nessuno assegnato</span>

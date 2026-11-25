@@ -52,17 +52,23 @@ async function directory(db: Db) {
   return { people, byId: new Map(people.map((p) => [p.id, p])) };
 }
 
-/** Assegnazioni settimanali fino alla settimana indicata (compresa), per attività. */
+/**
+ * Assegnazione settimanale in vigore per ogni attività nella settimana indicata (quella della
+ * settimana stessa o l'ultima precedente): una riga per attività, calcolata dal database.
+ */
 export async function getWeekTeams(db: Db, uptoWeek: string): Promise<Map<string, WeekTeam[]>> {
-  const { data } = await db
-    .from("responsibility_week_assignments")
-    .select("responsibility_id, week_start, profile_ids")
-    .lte("week_start", uptoWeek);
+  const { data, error } = await db.rpc("responsibility_week_teams", { p_week: uptoWeek });
+  if (error) throw new Error(`Assegnazioni settimanali non lette: ${error.message}`);
+  const rows = (Array.isArray(data) ? data : []) as {
+    responsibility_id: string;
+    week_start: string;
+    profile_ids: string[] | null;
+  }[];
   const out = new Map<string, WeekTeam[]>();
-  for (const row of data ?? []) {
-    const list = out.get(row.responsibility_id) ?? [];
-    list.push({ weekStart: row.week_start, profileIds: row.profile_ids });
-    out.set(row.responsibility_id, list);
+  for (const row of rows) {
+    out.set(row.responsibility_id, [
+      { weekStart: row.week_start, profileIds: row.profile_ids ?? [] },
+    ]);
   }
   return out;
 }
@@ -227,17 +233,28 @@ export async function getExtraTasks(
   opts: { recentDays?: number; people?: Map<string, Person>; includeCancelled?: boolean } = {},
 ): Promise<ExtraTask[]> {
   const since = new Date(Date.now() - (opts.recentDays ?? 30) * 86_400_000).toISOString();
-  const [{ data: open }, { data: closed }, { data: assignees }, byId] = await Promise.all([
+  const [{ data: open }, { data: closed }, byId] = await Promise.all([
     db.from("extra_tasks").select("*").eq("status", "open"),
     db
       .from("extra_tasks")
       .select("*")
       .in("status", opts.includeCancelled ? ["done", "cancelled"] : ["done"])
       .gte("updated_at", since),
-    db.from("extra_task_assignees").select("task_id, profile_id"),
     opts.people ? Promise.resolve(opts.people) : directory(db).then((d) => d.byId),
   ]);
   const rows = [...(open ?? []), ...(closed ?? [])];
+  // Solo gli assegnatari delle attività mostrate (a blocchi: gli id viaggiano nell'indirizzo).
+  const assignees: { task_id: string; profile_id: string }[] = [];
+  for (let i = 0; i < rows.length; i += 100) {
+    const { data } = await db
+      .from("extra_task_assignees")
+      .select("task_id, profile_id")
+      .in(
+        "task_id",
+        rows.slice(i, i + 100).map((t) => t.id),
+      );
+    assignees.push(...(data ?? []));
+  }
   return rows
     .map((t) => ({
       id: t.id,
@@ -245,9 +262,7 @@ export async function getExtraTasks(
       descriptionMd: t.description_md,
       dueDate: t.due_date,
       status: t.status,
-      assignees: (assignees ?? [])
-        .filter((a) => a.task_id === t.id)
-        .map((a) => ref(byId, a.profile_id)),
+      assignees: assignees.filter((a) => a.task_id === t.id).map((a) => ref(byId, a.profile_id)),
       createdByName: t.created_by ? (byId.get(t.created_by)?.displayName ?? null) : null,
       doneByName: t.done_by ? (byId.get(t.done_by)?.displayName ?? null) : null,
       doneAt: t.done_at,
@@ -313,7 +328,8 @@ export async function getTodayDuties(
     db
       .from("extra_task_assignees")
       .select("task_id, extra_tasks!inner(*)")
-      .eq("profile_id", profileId),
+      .eq("profile_id", profileId)
+      .eq("extra_tasks.status", "open"),
   ]);
   const duties = dutiesForPerson(items, profileId, date, onShift);
   return {
@@ -529,4 +545,29 @@ export async function getWeekPlanner(db: Db, weekStart: string): Promise<WeekPla
       .filter((p) => p.active)
       .map((p) => ({ id: p.id, name: p.displayName, color: p.color })),
   };
+}
+
+/** Chi è in turno in ciascun giorno indicato (null = turni di quel giorno non pubblicati). */
+export async function getOnShiftByDay(
+  db: Db,
+  days: string[],
+): Promise<Record<string, string[] | null>> {
+  if (days.length === 0) return {};
+  const sorted = [...days].sort();
+  const { data } = await db
+    .from("published_shifts")
+    .select("profile_id, date, is_absence")
+    .gte("date", sorted[0])
+    .lte("date", sorted[sorted.length - 1]);
+  const shifts = (data ?? []).map((s) => ({
+    profile_id: s.profile_id!,
+    date: s.date!,
+    is_absence: s.is_absence ?? false,
+  }));
+  return Object.fromEntries(
+    days.map((d) => {
+      const set = peopleOnShift(shifts, d);
+      return [d, set ? [...set] : null];
+    }),
+  );
 }

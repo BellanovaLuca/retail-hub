@@ -14,6 +14,7 @@ import {
 } from "@/lib/kpi/sheet";
 import type { createClient } from "@/lib/supabase/server";
 import type { DefaultTargetRule, StoreWeeklyTargets, TargetZone } from "@/lib/targets";
+import { fetchAllRows } from "./paginate";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -151,14 +152,18 @@ export async function getEntries(
   to: string,
   profileIds?: string[],
 ): Promise<EntryValue[]> {
-  let query = db
-    .from("daily_entries")
-    .select("profile_id, kpi_id, date, value")
-    .gte("date", from)
-    .lte("date", to);
-  if (profileIds) query = query.in("profile_id", profileIds);
-  const { data } = await query;
-  return (data ?? []).map((e) => ({
+  // A pagine: una settimana di tutto il negozio (persone × voci × giorni) supera le 1000 righe.
+  // L'ordinamento segue la chiave univoca (persona, giorno, voce): pagine stabili.
+  const data = await fetchAllRows((start, end) => {
+    let query = db
+      .from("daily_entries")
+      .select("profile_id, kpi_id, date, value", { count: "exact" })
+      .gte("date", from)
+      .lte("date", to);
+    if (profileIds) query = query.in("profile_id", profileIds);
+    return query.order("date").order("profile_id").order("kpi_id").range(start, end);
+  });
+  return data.map((e) => ({
     profileId: e.profile_id,
     kpiId: e.kpi_id,
     date: e.date,
@@ -446,20 +451,38 @@ export async function getMissingCompilers(db: Db, dates: string[]): Promise<Miss
   const sorted = [...dates].sort();
   const from = sorted[0];
   const to = sorted[sorted.length - 1];
-  const [{ data: shifts }, { data: filled }] = await Promise.all([
-    db
-      .from("published_shifts")
-      .select("profile_id, date, start_time, is_absence")
-      .gte("date", from)
-      .lte("date", to),
-    db.from("daily_entries").select("profile_id, date").gte("date", from).lte("date", to),
+  // Entrambe a pagine: su più giorni le righe superano le 1000 e chi resta fuori risulterebbe
+  // "non ha compilato" (o non in turno) senza motivo.
+  const [shifts, filled] = await Promise.all([
+    fetchAllRows((start, end) =>
+      db
+        .from("published_shifts")
+        .select("profile_id, date, start_time, is_absence", { count: "exact" })
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+        .order("profile_id")
+        .order("id")
+        .range(start, end),
+    ),
+    fetchAllRows((start, end) =>
+      db
+        .from("daily_entries")
+        .select("profile_id, date", { count: "exact" })
+        .gte("date", from)
+        .lte("date", to)
+        .order("date")
+        .order("profile_id")
+        .order("kpi_id")
+        .range(start, end),
+    ),
   ]);
   return missingCompilers({
     dates,
-    onShift: (shifts ?? [])
+    onShift: shifts
       .filter((s) => !s.is_absence && s.start_time && s.profile_id && s.date)
       .map((s) => ({ profileId: s.profile_id!, date: s.date! })),
-    filled: (filled ?? []).map((f) => ({ profileId: f.profile_id, date: f.date })),
+    filled: filled.map((f) => ({ profileId: f.profile_id, date: f.date })),
   });
 }
 

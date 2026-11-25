@@ -10,11 +10,17 @@ import {
   formatRange,
   requestTypeLabel,
   requestWarnings,
+  resolveShiftRequest,
   type RequestType,
 } from "@/lib/requests";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Orario non valido (es. 10:30).");
+const isoDate = z.iso.date();
+
+/** Cambio e scambio partono da un turno pubblicato: il giorno è quello del turno. */
+const isShiftBased = (type: string): type is "cambio_turno" | "scambio_turno" =>
+  type === "cambio_turno" || type === "scambio_turno";
 
 const requestSchema = z
   .object({
@@ -28,8 +34,10 @@ const requestSchema = z
       "malattia",
       "altro",
     ]),
-    startDate: z.iso.date("Indica la data di inizio."),
-    endDate: z.iso.date("Indica la data di fine."),
+    // Per cambio e scambio le date si ricavano sul server dal turno scelto: qui si controllano
+    // solo per gli altri tipi (vedi superRefine).
+    startDate: z.string().max(10),
+    endDate: z.string().max(10),
     startTime: time.nullable(),
     endTime: time.nullable(),
     hours: z
@@ -48,17 +56,33 @@ const requestSchema = z
     shiftId: z.uuid("Scegli un turno.").nullable(),
     targetProfileId: z.uuid("Scegli il collega.").nullable(),
     targetShiftId: z.uuid("Scegli il turno del collega.").nullable(),
-    targetDate: z.iso.date("Data del turno del collega non valida.").nullable(),
+    // Ignorata: il giorno del turno del collega si ricava da `targetShiftId`.
+    targetDate: z.string().max(10).nullable().optional(),
     message: z.string().trim().max(2000, "Il messaggio può avere al massimo 2000 caratteri."),
     attachmentPath: z.string().max(300, "Allegato non valido.").nullable(),
   })
   .superRefine((v, ctx) => {
-    if (v.endDate < v.startDate)
-      ctx.addIssue({
-        code: "custom",
-        path: ["endDate"],
-        message: "La fine deve seguire l'inizio.",
-      });
+    if (isShiftBased(v.type)) {
+      if (!v.shiftId)
+        ctx.addIssue({ code: "custom", path: ["shiftId"], message: "Scegli un turno." });
+    } else {
+      const startOk = isoDate.safeParse(v.startDate).success;
+      const endOk = isoDate.safeParse(v.endDate).success;
+      if (!startOk)
+        ctx.addIssue({
+          code: "custom",
+          path: ["startDate"],
+          message: "Indica la data di inizio.",
+        });
+      if (!endOk)
+        ctx.addIssue({ code: "custom", path: ["endDate"], message: "Indica la data di fine." });
+      if (startOk && endOk && v.endDate < v.startDate)
+        ctx.addIssue({
+          code: "custom",
+          path: ["endDate"],
+          message: "La fine deve seguire l'inizio.",
+        });
+    }
     if (v.type === "scambio_turno" && !v.targetProfileId) {
       ctx.addIssue({ code: "custom", path: ["targetProfileId"], message: "Scegli il collega." });
     }
@@ -178,30 +202,82 @@ export async function createRequest(input: RequestInput): Promise<ActionResult<{
       return { ok: false, message: "Allegato non valido." };
     }
 
+    // Cambio e scambio: i giorni NON sono quelli inviati dal browser ma quelli dei turni
+    // pubblicati scelti, dopo aver verificato di chi sono (il mio è mio, l'altro è del collega).
+    let startDate = v.startDate;
+    let endDate = v.endDate;
+    let targetDate: string | null = null;
+    if (isShiftBased(v.type)) {
+      const ids = [v.shiftId, v.type === "scambio_turno" ? v.targetShiftId : null].filter(
+        (id): id is string => Boolean(id),
+      );
+      const { data: found, error: shiftsError } = await supabase
+        .from("published_shifts")
+        .select("id, profile_id, date, start_time, is_absence")
+        .in("id", ids);
+      if (shiftsError) {
+        return { ok: false, message: "Turni non disponibili in questo momento. Riprova." };
+      }
+      const resolved = resolveShiftRequest({
+        type: v.type,
+        me: profile.id,
+        shiftId: v.shiftId,
+        targetProfileId: v.targetProfileId,
+        targetShiftId: v.type === "scambio_turno" ? v.targetShiftId : null,
+        shifts: (found ?? []).flatMap((s) =>
+          s.id && s.profile_id && s.date
+            ? [
+                {
+                  id: s.id,
+                  profileId: s.profile_id,
+                  date: s.date,
+                  startTime: s.start_time,
+                  isAbsence: s.is_absence ?? false,
+                },
+              ]
+            : [],
+        ),
+      });
+      if (!resolved.ok) return { ok: false, message: resolved.message };
+      startDate = resolved.startDate;
+      endDate = resolved.startDate;
+      targetDate = resolved.targetDate;
+    }
+
     const { data, error } = await supabase
       .from("requests")
       .insert({
         profile_id: profile.id,
         type: v.type,
-        start_date: v.startDate,
-        end_date: v.endDate,
+        start_date: startDate,
+        end_date: endDate,
         start_time: v.startTime,
         end_time: v.endTime,
         hours: v.type === "permesso" ? v.hours : null,
         recurring_weekdays: v.type === "indisponibilita" ? v.recurringWeekdays : null,
-        shift_id: v.shiftId,
+        // Gli id dei turni non si salvano: quelli dell'istantanea pubblicata possono non esistere
+        // più nella tabella di lavoro (l'admin riscrive le giornate) e violerebbero la chiave
+        // esterna. Il turno è identificato da persona + giorno, come nel trigger dello scambio.
+        shift_id: null,
         target_profile_id: v.type === "scambio_turno" ? v.targetProfileId : null,
-        target_shift_id: v.type === "scambio_turno" ? v.targetShiftId : null,
-        target_date: v.type === "scambio_turno" ? v.targetDate : null,
+        target_shift_id: null,
+        target_date: targetDate,
         message: v.message || null,
         attachment_path: v.attachmentPath,
       })
       .select("id")
       .single();
-    if (error || !data)
-      return { ok: false, message: dbErrorMessage(error, "Richiesta non inviata.") };
+    if (error || !data) {
+      return {
+        ok: false,
+        message:
+          error?.code === "23503"
+            ? "Il collega o il turno indicato non c'è più: ricarica la pagina e riprova."
+            : dbErrorMessage(error, "Richiesta non inviata."),
+      };
+    }
 
-    const what = `${requestTypeLabel(v.type)} · ${formatRange(v.startDate, v.endDate)}`;
+    const what = `${requestTypeLabel(v.type)} · ${formatRange(startDate, endDate)}`;
     if (v.type === "scambio_turno") {
       await notify([v.targetProfileId!], {
         kind: "swap_proposed",

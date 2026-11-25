@@ -31,3 +31,9 @@ export function lockedUntil(
   const trigger = failures[failures.length - maxFailed];
   return new Date(trigger.at.getTime() + LOCKOUT_MINUTES * 60_000);
 }
+
+/** Messaggio mostrato quando l'accesso è bloccato fino a `until`. */
+export function lockoutMessage(until: Date, now: Date = new Date()): string {
+  const minutes = Math.max(1, Math.ceil((until.getTime() - now.getTime()) / 60_000));
+  return `Troppi tentativi errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`;
+}

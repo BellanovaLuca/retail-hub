@@ -10,11 +10,18 @@ import {
   runAction,
   type ActionResult,
 } from "@/lib/auth/guards";
-import { getSchedulePeople, getTemplates, toShiftRecord } from "@/lib/data/schedule";
+import { getSchedulePeople, getTemplates } from "@/lib/data/schedule";
 import { publishSnapshot } from "@/lib/schedule/publish";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import type { createClient } from "@/lib/supabase/server";
-import type { TablesInsert } from "@/lib/supabase/types";
+import type { Tables } from "@/lib/supabase/types";
+import {
+  buildDayRows,
+  planCopyRows,
+  type CopySource,
+  type DayRow,
+  type ExistingShift,
+} from "./day-rows";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -32,98 +39,47 @@ function revalidateWeek(weekStart: string) {
   revalidatePath("/admin");
 }
 
-type Segment = { start: string; end: string; isBackOffice?: boolean | null };
-type DayOptions = {
-  templateId?: string | null;
-  breakMinutes?: number;
-  departmentId?: string | null;
-  zone?: "vista" | "sole" | null;
-  note?: string | null;
-  isBackOffice?: boolean | null;
-};
+/** I 7 giorni lun→dom della settimana. */
+const weekDaysOf = (weekStart: string) =>
+  Array.from({ length: 7 }, (_, i) => format(addDays(parseISO(weekStart), i), "yyyy-MM-dd"));
+
+const dayKey = (profileId: string, date: string) => `${profileId}|${date}`;
+
+/** Turni di lavoro tra due date, letti a pagine (PostgREST restituisce al massimo 1000 righe). */
+async function loadShiftsBetween(db: Db, from: string, to: string): Promise<Tables<"shifts">[]> {
+  const PAGE = 1000;
+  const out: Tables<"shifts">[] = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await db
+      .from("shifts")
+      .select("*")
+      .gte("date", from)
+      .lte("date", to)
+      .order("id")
+      .range(page * PAGE, page * PAGE + PAGE - 1);
+    if (error) throw new ActionError(dbErrorMessage(error, "Turni non disponibili."));
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
 
 /**
- * Sostituisce i turni di una persona in un giorno. Mantiene reparto, area, back office
- * e nota della giornata precedente se non indicati.
+ * Sostituisce i turni delle giornate indicate in un'unica transazione (RPC `replace_shift_days`):
+ * o si salvano tutte, o nessuna. Il segnale di conflitto con le assenze lo calcola il database.
  */
-async function replaceDay(
+async function replaceDays(
   db: Db,
   weekId: string,
-  profileId: string,
-  date: string,
-  segments: Segment[],
-  opts: DayOptions,
-  homeZone: "vista" | "sole" | "jolly" | undefined,
+  days: { profile_id: string; date: string }[],
+  rows: DayRow[],
 ) {
-  const { data: existing } = await db
-    .from("shifts")
-    .select("*")
-    .eq("profile_id", profileId)
-    .eq("date", date)
-    .order("start_time");
-  const prev = existing?.[0];
-  // Un turno di lavoro in un giorno di assenza a giornata intera resta segnalato come conflitto.
-  const { data: leave } = await db
-    .from("leaves")
-    .select("hours")
-    .eq("profile_id", profileId)
-    .eq("date", date)
-    .maybeSingle();
-  const conflict = Boolean(leave && !leave.hours && segments.length > 0);
-
-  const { error: delError } = await db
-    .from("shifts")
-    .delete()
-    .eq("profile_id", profileId)
-    .eq("date", date);
-  if (delError) throw new ActionError(dbErrorMessage(delError, "Turno non salvato."));
-  if (segments.length === 0 && !opts.templateId) return;
-
-  const zone =
-    opts.zone !== undefined
-      ? opts.zone
-      : (prev?.zone ?? (homeZone && homeZone !== "jolly" ? homeZone : null));
-  const base = {
-    week_id: weekId,
-    profile_id: profileId,
-    date,
-    working_as_department_id:
-      opts.departmentId !== undefined
-        ? opts.departmentId
-        : (prev?.working_as_department_id ?? null),
-    zone,
-    note: opts.note !== undefined ? opts.note : (prev?.note ?? null),
-    conflict,
-  };
-
-  const rows: TablesInsert<"shifts">[] =
-    segments.length === 0
-      ? [
-          {
-            ...base,
-            template_id: opts.templateId!,
-            start_time: null,
-            end_time: null,
-            break_minutes: 0,
-            is_back_office: null,
-          },
-        ]
-      : segments.map((seg, i) => ({
-          ...base,
-          template_id: segments.length === 1 ? (opts.templateId ?? null) : null,
-          start_time: seg.start,
-          end_time: seg.end,
-          // La pausa esplicita vale per il pezzo più lungo; i vuoti tra pezzi sono già pausa.
-          break_minutes: i === 0 ? (opts.breakMinutes ?? 0) : 0,
-          is_back_office:
-            seg.isBackOffice !== undefined
-              ? seg.isBackOffice
-              : opts.isBackOffice !== undefined
-                ? opts.isBackOffice
-                : (prev?.is_back_office ?? null),
-        }));
-
-  const { error } = await db.from("shifts").insert(rows);
+  if (days.length === 0) return;
+  const { error } = await db.rpc("replace_shift_days", {
+    p_week_id: weekId,
+    p_days: days,
+    p_rows: rows,
+  });
   if (error) throw new ActionError(dbErrorMessage(error, "Turno non salvato."));
 }
 
@@ -141,15 +97,21 @@ export async function saveShiftCells(
     const { supabase } = await adminAction();
     const week = await loadWeek(supabase, z.uuid().parse(weekId));
     const list = cellChangesSchema.parse(changes);
-    const days = new Set(
-      Array.from({ length: 7 }, (_, i) =>
-        format(addDays(parseISO(week.week_start), i), "yyyy-MM-dd"),
-      ),
-    );
-    const [templates, people] = await Promise.all([
-      getTemplates(supabase),
-      getSchedulePeople(supabase),
-    ]);
+    const dayList = weekDaysOf(week.week_start);
+    const days = new Set(dayList);
+    // Letture una volta per lotto: turni rapidi, persone, turni e assenze della settimana.
+    const [templates, people, existingRows, { data: leaveRows, error: leavesError }] =
+      await Promise.all([
+        getTemplates(supabase),
+        getSchedulePeople(supabase),
+        loadShiftsBetween(supabase, dayList[0], dayList[6]),
+        supabase
+          .from("leaves")
+          .select("profile_id, date, hours")
+          .gte("date", dayList[0])
+          .lte("date", dayList[6]),
+      ]);
+    if (leavesError) throw new ActionError(dbErrorMessage(leavesError, "Assenze non disponibili."));
     const tplInput = templates.map((t) => ({
       code: t.code,
       startTime: t.startTime,
@@ -159,23 +121,26 @@ export async function saveShiftCells(
     }));
     const tplByCode = new Map(templates.map((t) => [t.code, t]));
     const zoneOf = new Map(people.map((p) => [p.id, p.homeZone]));
+    const existingByDay = new Map<string, ExistingShift[]>();
+    for (const s of existingRows) {
+      const k = dayKey(s.profile_id, s.date);
+      existingByDay.set(k, [...(existingByDay.get(k) ?? []), s]);
+    }
     const errors: { profileId: string; date: string; message: string }[] = [];
-    const { data: leaveRows } = await supabase
-      .from("leaves")
-      .select("profile_id, date, hours")
-      .gte("date", week.week_start)
-      .lte("date", format(addDays(parseISO(week.week_start), 6), "yyyy-MM-dd"));
     const absentDays = new Set(
-      (leaveRows ?? []).filter((l) => !l.hours).map((l) => `${l.profile_id}|${l.date}`),
+      (leaveRows ?? []).filter((l) => !l.hours).map((l) => dayKey(l.profile_id, l.date)),
     );
 
+    // A parità di cella vale l'ultima modifica del lotto.
+    const writes = new Map<string, { profile_id: string; date: string; rows: DayRow[] }>();
     for (const change of list) {
+      const k = dayKey(change.profileId, change.date);
       if (!days.has(change.date)) {
         errors.push({ ...change, message: "Giorno fuori dalla settimana." });
         continue;
       }
       // Giorno di assenza: dal foglio si può solo svuotare; il resto passa dal dettaglio.
-      if (absentDays.has(`${change.profileId}|${change.date}`) && change.value.trim() !== "") {
+      if (absentDays.has(k) && change.value.trim() !== "") {
         errors.push({
           ...change,
           message: "Giornata di assenza: modifica il turno dal dettaglio del giorno.",
@@ -187,43 +152,45 @@ export async function saveShiftCells(
         errors.push({ profileId: change.profileId, date: change.date, message: parsed.message });
         continue;
       }
+      const existing = existingByDay.get(k) ?? [];
+      const homeZone = zoneOf.get(change.profileId);
+      let rows: DayRow[];
       if (parsed.kind === "empty") {
-        await replaceDay(
-          supabase,
-          week.id,
-          change.profileId,
-          change.date,
-          [],
-          {},
-          zoneOf.get(change.profileId),
-        );
+        rows = [];
       } else if (parsed.kind === "template") {
         const tpl = tplByCode.get(parsed.code)!;
         const segments =
           tpl.isAbsence || !tpl.startTime || !tpl.endTime
             ? []
             : [{ start: tpl.startTime, end: tpl.endTime }];
-        await replaceDay(
-          supabase,
-          week.id,
+        rows = buildDayRows(
           change.profileId,
           change.date,
+          existing,
           segments,
-          { templateId: tpl.id, breakMinutes: tpl.breakMinutes },
-          zoneOf.get(change.profileId),
+          { templateId: tpl.id, breakMinutes: tpl.breakMinutes, keepDetailsIfSameTimes: true },
+          homeZone,
         );
       } else {
-        await replaceDay(
-          supabase,
-          week.id,
+        rows = buildDayRows(
           change.profileId,
           change.date,
+          existing,
           parsed.segments,
-          { templateId: null, breakMinutes: 0 },
-          zoneOf.get(change.profileId),
+          { templateId: null, breakMinutes: 0, keepDetailsIfSameTimes: true },
+          homeZone,
         );
       }
+      writes.set(k, { profile_id: change.profileId, date: change.date, rows });
     }
+
+    const batch = [...writes.values()];
+    await replaceDays(
+      supabase,
+      week.id,
+      batch.map((w) => ({ profile_id: w.profile_id, date: w.date })),
+      batch.flatMap((w) => w.rows),
+    );
 
     revalidateWeek(week.week_start);
     return {
@@ -266,13 +233,19 @@ export async function saveShiftDay(input: z.input<typeof daySchema>): Promise<Ac
     if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
     const v = parsed.data;
     const week = await loadWeek(supabase, v.weekId);
-    const segments = [...v.segments].sort((a, b) => a.start.localeCompare(b.start));
-    await replaceDay(
-      supabase,
-      week.id,
+    if (!weekDaysOf(week.week_start).includes(v.date))
+      return { ok: false, message: "Giorno fuori dalla settimana." };
+    const { data: existing, error: readError } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("profile_id", v.profileId)
+      .eq("date", v.date);
+    if (readError) throw new ActionError(dbErrorMessage(readError, "Turno non salvato."));
+    const rows = buildDayRows(
       v.profileId,
       v.date,
-      segments,
+      existing ?? [],
+      v.segments,
       {
         templateId: v.templateId,
         breakMinutes: v.breakMinutes,
@@ -282,6 +255,7 @@ export async function saveShiftDay(input: z.input<typeof daySchema>): Promise<Ac
       },
       undefined,
     );
+    await replaceDays(supabase, week.id, [{ profile_id: v.profileId, date: v.date }], rows);
     revalidateWeek(week.week_start);
     return { ok: true, message: "Salvato" };
   });
@@ -310,7 +284,10 @@ export async function publishWeek(
   });
 }
 
-/** Copia i turni della settimana precedente nelle giornate ancora vuote (salta ferie e assenze). */
+/**
+ * Copia i turni della settimana precedente nelle giornate ancora libere. Tra le assenze si copia
+ * solo il riposo (R): ferie, malattia e permessi di una settimana non valgono per quella dopo.
+ */
 export async function duplicatePreviousWeek(weekId: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
@@ -322,66 +299,65 @@ export async function duplicatePreviousWeek(weekId: string): Promise<ActionResul
       .eq("week_start", prevStart)
       .maybeSingle();
     if (!prevWeek) return { ok: false, message: "La settimana precedente è vuota." };
-    return copyShifts(
-      supabase,
-      week,
-      (await supabase.from("shifts").select("*").eq("week_id", prevWeek.id)).data ?? [],
-      7,
-    );
+    const { data: previous, error } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("week_id", prevWeek.id);
+    if (error) return { ok: false, message: dbErrorMessage(error, "Copia non riuscita.") };
+    const source = (previous ?? []).map((s) => ({
+      ...s,
+      date: format(addDays(parseISO(s.date), 7), "yyyy-MM-dd"),
+    }));
+    return copyShifts(supabase, week, source, "rest");
   });
 }
 
-type DbShift = Parameters<typeof toShiftRecord>[0] & { template_id: string | null };
-
+/**
+ * Inserisce i turni sorgente (già con le date della settimana di destinazione) nelle giornate
+ * libere: senza turni e senza assenze a giornata intera (un permesso di qualche ora non blocca).
+ */
 async function copyShifts(
   db: Db,
   week: { id: string; week_start: string },
-  source: DbShift[],
-  dayOffset: number | ((s: DbShift) => string),
+  source: CopySource[],
+  absences: "rest" | "all",
 ): Promise<ActionResult> {
-  const days = Array.from({ length: 7 }, (_, i) =>
-    format(addDays(parseISO(week.week_start), i), "yyyy-MM-dd"),
-  );
-  const [{ data: current }, { data: leaves }, { data: active }] = await Promise.all([
+  const days = weekDaysOf(week.week_start);
+  const [current, leaves, active, templates, departments] = await Promise.all([
     db.from("shifts").select("profile_id, date").eq("week_id", week.id),
-    db.from("leaves").select("profile_id, date").gte("date", days[0]).lte("date", days[6]),
+    db
+      .from("leaves")
+      .select("profile_id, date")
+      .gte("date", days[0])
+      .lte("date", days[6])
+      .is("hours", null),
     db.from("profiles").select("id").eq("active", true),
+    db.from("shift_templates").select("id, code, is_absence"),
+    db.from("departments").select("id"),
   ]);
-  const taken = new Set(
-    [...(current ?? []), ...(leaves ?? [])].map((s) => `${s.profile_id}|${s.date}`),
-  );
-  const activeIds = new Set((active ?? []).map((p) => p.id));
+  const readError =
+    current.error ?? leaves.error ?? active.error ?? templates.error ?? departments.error;
+  if (readError) return { ok: false, message: dbErrorMessage(readError, "Copia non riuscita.") };
 
-  const rows = source
-    .map((s) => ({
-      week_id: week.id,
-      profile_id: s.profile_id,
-      date:
-        typeof dayOffset === "number"
-          ? format(addDays(parseISO(s.date), dayOffset), "yyyy-MM-dd")
-          : dayOffset(s),
-      template_id: s.template_id,
-      start_time: s.start_time,
-      end_time: s.end_time,
-      break_minutes: s.break_minutes,
-      working_as_department_id: s.working_as_department_id,
-      zone: s.zone,
-      is_back_office: s.is_back_office,
-      note: s.note,
-    }))
-    .filter(
-      (r) =>
-        activeIds.has(r.profile_id) &&
-        days.includes(r.date) &&
-        !taken.has(`${r.profile_id}|${r.date}`),
-    );
+  const rows = planCopyRows(source, {
+    days,
+    activeIds: new Set((active.data ?? []).map((p) => p.id)),
+    taken: new Set(
+      [...(current.data ?? []), ...(leaves.data ?? [])].map((s) => dayKey(s.profile_id, s.date)),
+    ),
+    templates: new Map(
+      (templates.data ?? []).map((t) => [t.id, { code: t.code, isAbsence: t.is_absence }]),
+    ),
+    departmentIds: new Set((departments.data ?? []).map((d) => d.id)),
+    absences,
+  });
 
   if (rows.length === 0)
     return { ok: true, message: "Nessuna giornata da copiare: sono già tutte compilate." };
-  const { error } = await db.from("shifts").insert(rows);
+  const { error } = await db.from("shifts").insert(rows.map((r) => ({ week_id: week.id, ...r })));
   if (error) return { ok: false, message: dbErrorMessage(error, "Copia non riuscita.") };
   revalidateWeek(week.week_start);
-  const filled = new Set(rows.map((r) => `${r.profile_id}|${r.date}`)).size;
+  const filled = new Set(rows.map((r) => dayKey(r.profile_id, r.date))).size;
   return { ok: true, message: `Copiate ${filled} giornate.` };
 }
 
@@ -422,13 +398,28 @@ export async function applyWeekTemplate(weekId: string, templateId: string): Pro
       .eq("id", z.uuid().parse(templateId))
       .single();
     if (!tpl) return { ok: false, message: "Modello non trovato." };
-    const source = (tpl.shifts as unknown as (DbShift & { weekday: number })[]).map((s) => ({
-      ...s,
-      id: "",
-      date: format(addDays(parseISO(week.week_start), s.weekday - 1), "yyyy-MM-dd"),
-      conflict: false,
-    }));
-    return copyShifts(supabase, week, source, 0);
+    // Il modello è un JSON salvato tempo fa: si legge con prudenza (giorni validi, niente
+    // riferimenti a turni rapidi o reparti eliminati: li toglie planCopyRows).
+    const source = (Array.isArray(tpl.shifts) ? (tpl.shifts as unknown[]) : []).flatMap((raw) => {
+      const s = raw as Partial<CopySource> & { weekday?: number };
+      const weekday = Number(s.weekday);
+      if (!s.profile_id || !Number.isInteger(weekday) || weekday < 1 || weekday > 7) return [];
+      return [
+        {
+          profile_id: s.profile_id,
+          date: format(addDays(parseISO(week.week_start), weekday - 1), "yyyy-MM-dd"),
+          template_id: s.template_id ?? null,
+          start_time: s.start_time ?? null,
+          end_time: s.end_time ?? null,
+          break_minutes: s.break_minutes ?? 0,
+          working_as_department_id: s.working_as_department_id ?? null,
+          zone: s.zone ?? null,
+          is_back_office: s.is_back_office ?? null,
+          note: s.note ?? null,
+        } satisfies CopySource,
+      ];
+    });
+    return copyShifts(supabase, week, source, "all");
   });
 }
 
@@ -454,7 +445,14 @@ export async function setWeekNote(weekId: string, note: string): Promise<ActionR
       .eq("id", week.id);
     if (error) return { ok: false, message: dbErrorMessage(error, "Nota non salvata.") };
     revalidateWeek(week.week_start);
-    return { ok: true, message: "Nota salvata: sarà visibile alla prossima pubblicazione." };
+    // La nota non fa parte dell'istantanea: nelle settimane già pubblicate si vede subito.
+    return {
+      ok: true,
+      message:
+        week.status === "published"
+          ? "Nota salvata: i dipendenti la vedono da subito negli orari."
+          : "Nota salvata: sarà visibile quando pubblichi la settimana.",
+    };
   });
 }
 

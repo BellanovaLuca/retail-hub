@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { requireAdmin } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { parseOpeningHours } from "@/lib/settings";
 import { toISODate, nowInRome } from "@/lib/dates";
@@ -7,6 +8,7 @@ import { ExceptionsEditor, OpeningHoursForm } from "./hours-forms";
 export const metadata: Metadata = { title: "Orari di apertura" };
 
 export default async function OrariPage() {
+  await requireAdmin();
   const supabase = await createClient();
   const [{ data: settings }, { data: exceptions }] = await Promise.all([
     supabase.from("store_settings").select("opening_hours").eq("id", true).single(),

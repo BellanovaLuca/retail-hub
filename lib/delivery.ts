@@ -1,9 +1,13 @@
 import "server-only";
 import webpush from "web-push";
+import { isAllowedPushEndpoint, vapidSubject } from "@/lib/notifications/push-endpoint";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type DeliveryPayload = { kind: string; title: string; body?: string; link?: string };
 export type NotificationPrefs = { push: boolean; email: boolean; shift_reminder: boolean };
+
+/** Tempo massimo di un invio: un servizio che non risponde non deve bloccare azioni e cron. */
+const SEND_TIMEOUT_MS = 10_000;
 
 export const DEFAULT_PREFS: NotificationPrefs = { push: true, email: false, shift_reminder: false };
 
@@ -22,7 +26,7 @@ function ensureVapid() {
   const pub = process.env.VAPID_PUBLIC_KEY;
   const priv = process.env.VAPID_PRIVATE_KEY;
   if (!pub || !priv) return (vapidReady = false);
-  webpush.setVapidDetails(`mailto:${process.env.EMAIL_FROM ?? "staff@example.com"}`, pub, priv);
+  webpush.setVapidDetails(vapidSubject(process.env.EMAIL_FROM), pub, priv);
   return (vapidReady = true);
 }
 
@@ -57,11 +61,20 @@ export async function sendPush(profileIds: string[], payload: DeliveryPayload) {
     (subs ?? [])
       .filter((s) => allowed.has(s.profile_id))
       .map(async (s) => {
+        // Solo i servizi push dei browser: una riga con un altro indirizzo non si contatta.
+        if (!isAllowedPushEndpoint(s.endpoint)) {
+          await db.from("push_subscriptions").delete().eq("id", s.id);
+          return;
+        }
         try {
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: s.keys as { p256dh: string; auth: string } },
             body,
-            { TTL: 60 * 60 * 12, urgency: payload.kind === "daily_reminder" ? "normal" : "high" },
+            {
+              TTL: 60 * 60 * 12,
+              urgency: payload.kind === "daily_reminder" ? "normal" : "high",
+              timeout: SEND_TIMEOUT_MS,
+            },
           );
           sent++;
         } catch (error) {
@@ -108,6 +121,7 @@ ${url ? `<p><a href="${escapeHtml(url)}" style="color:#0a0a0a">Apri il portale</
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
         body: JSON.stringify({
           from,
           to: p.email,

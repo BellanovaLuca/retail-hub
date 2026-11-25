@@ -18,6 +18,7 @@ import {
 } from "@/lib/announcements/model";
 import { notifyAnnouncement, remindAnnouncement } from "@/lib/announcements/notify";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
+import { resolvePublishAt } from "./publish-at";
 
 function revalidateAll(id?: string) {
   revalidatePath("/admin/comunicazioni");
@@ -55,9 +56,12 @@ export async function saveAnnouncement(
       .eq("id", id)
       .maybeSingle();
 
-    const publishAt = v.publishAt
-      ? fromRomeLocalInput(v.publishAt)!
-      : (existing?.publish_at ?? new Date().toISOString());
+    // Data vuota = "subito": una programmata non ancora uscita esce adesso (prima restava
+    // programmata alla vecchia data), una già pubblicata conserva la data originale.
+    const publishAt = resolvePublishAt(
+      v.publishAt ? fromRomeLocalInput(v.publishAt) : null,
+      existing?.publish_at,
+    );
     const row = {
       title: v.title,
       body_md: v.body,

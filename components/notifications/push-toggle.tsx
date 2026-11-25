@@ -4,7 +4,11 @@ import { BellOff, BellRing } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form";
-import { deletePushSubscription, savePushSubscription } from "@/lib/notifications/actions";
+import {
+  deletePushSubscription,
+  isPushSubscriptionMine,
+  savePushSubscription,
+} from "@/lib/notifications/actions";
 
 function urlBase64ToUint8Array(base64: string) {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -51,7 +55,9 @@ export function PushToggle({
       }
       const reg = await registerServiceWorker();
       const sub = await reg?.pushManager.getSubscription();
-      setState(sub ? "on" : "off");
+      // Il browser conserva la sottoscrizione anche se sul dispositivo è entrato un altro utente:
+      // «attive» solo se sul server è registrata a nome di chi è collegato ora.
+      setState(sub && (await isPushSubscriptionMine(sub.endpoint)) ? "on" : "off");
     })().catch(() => setState("unsupported"));
   }, [vapidPublicKey]);
 

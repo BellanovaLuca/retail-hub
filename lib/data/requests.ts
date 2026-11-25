@@ -1,7 +1,9 @@
 import "server-only";
-import type { RequestStatus } from "@/lib/requests";
+import { requestShiftDays, type RequestStatus, type ShiftDay } from "@/lib/requests";
+import { publishedDayText } from "@/lib/schedule/cells";
 import type { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/lib/supabase/types";
+import { getPublishedDays } from "./schedule";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -36,23 +38,20 @@ export async function getRequestDetail(db: Db, id: string): Promise<RequestDetai
     db.from("request_comments").select("*").eq("request_id", id).order("created_at"),
   ]);
 
-  async function shiftText(shiftId: string | null) {
-    if (!shiftId) return null;
-    const { data } = await db
-      .from("published_shifts")
-      .select("date, start_time, end_time")
-      .eq("id", shiftId)
-      .limit(1);
-    const s = data?.[0];
-    if (!s?.date) return null;
-    return {
-      date: s.date,
-      text:
-        s.start_time && s.end_time
-          ? `${s.start_time.slice(0, 5)}–${s.end_time.slice(0, 5)}`
-          : "Assenza",
-    };
-  }
+  // I turni della richiesta si cercano per persona + giorno nei turni pubblicati (come fa il
+  // trigger dello scambio), non per id: gli id cambiano quando l'admin riscrive una giornata.
+  const days = requestShiftDays(r);
+  const wanted = [days.shift, days.targetShift].filter((d): d is ShiftDay => d !== null);
+  const published = await getPublishedDays(
+    db,
+    [...new Set(wanted.map((d) => d.profileId))],
+    [...new Set(wanted.map((d) => d.date))],
+  );
+  const shiftText = (day: ShiftDay | null) => {
+    if (!day) return null;
+    const pieces = published.filter((s) => s.profile_id === day.profileId && s.date === day.date);
+    return { date: day.date, text: publishedDayText(pieces, true) || "nessun turno pubblicato" };
+  };
 
   let attachmentUrl: string | null = null;
   if (r.attachment_path) {
@@ -72,8 +71,8 @@ export async function getRequestDetail(db: Db, id: string): Promise<RequestDetai
       body: c.body,
       createdAt: c.created_at,
     })),
-    shift: await shiftText(r.shift_id),
-    targetShift: await shiftText(r.target_shift_id),
+    shift: shiftText(days.shift),
+    targetShift: shiftText(days.targetShift),
     attachmentUrl,
   };
 }

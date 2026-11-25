@@ -15,8 +15,15 @@ export function sortShifts<T extends { start?: string | null; start_time?: strin
 /**
  * Testo della cella persona × giorno, quello che si edita e si copia nel foglio:
  * il codice del turno rapido se la giornata è esattamente quel turno, altrimenti gli orari.
+ * Con `backOfficeOf` (back office risolto del pezzo) una giornata mista «back office + vendita»
+ * porta il marcatore `BO` sui pezzi in back office: così copia/incolla e annulla la riportano
+ * con gli stessi pezzi, invece di unirli in un turno solo.
  */
-export function cellText(dayShifts: ShiftRecord[], templates: Map<string, TemplateRecord>): string {
+export function cellText(
+  dayShifts: ShiftRecord[],
+  templates: Map<string, TemplateRecord>,
+  backOfficeOf?: (shift: ShiftRecord) => boolean,
+): string {
   if (dayShifts.length === 0) return "";
   const sorted = sortShifts(dayShifts);
   if (sorted.length === 1 && sorted[0].templateId) {
@@ -28,9 +35,14 @@ export function cellText(dayShifts: ShiftRecord[], templates: Map<string, Templa
       return tpl.code;
     }
   }
-  const segments = sorted
-    .filter((s) => s.start && s.end)
-    .map((s) => ({ start: s.start!, end: s.end! }));
+  const timed = sorted.filter((s) => s.start && s.end);
+  const flags = timed.map((s) => (backOfficeOf ? backOfficeOf(s) : false));
+  const mixed = flags.includes(true) && flags.includes(false);
+  const segments = timed.map((s, i) => ({
+    start: s.start!,
+    end: s.end!,
+    ...(mixed ? { isBackOffice: flags[i] } : {}),
+  }));
   return segments.length ? formatShiftCompact(segments) : "";
 }
 
@@ -73,9 +85,17 @@ export function buildSnapshot(
   people: Map<string, SchedulePerson>,
   previous: PublishedShift[],
 ): { snapshot: PublishedShift[]; changes: DayChange[] } {
+  const previousById = new Map(previous.map((s) => [s.id, s]));
+  const previousByDay = groupByDay(previous);
   const snapshot: PublishedShift[] = shifts.map((s) => {
     const tpl = s.templateId ? templates.get(s.templateId) : undefined;
     const person = people.get(s.profileId);
+    // Persona non più in elenco (disattivata): i suoi predefiniti (area di base, back office,
+    // reparto principale) non si possono più risolvere. Si tengono quelli già pubblicati, così
+    // la ripubblicazione non produce modifiche fantasma né cambia le coperture pubblicate.
+    const kept = person
+      ? undefined
+      : (previousById.get(s.id) ?? previousByDay.get(`${s.profileId}|${s.date}`)?.[0]);
     return {
       id: s.id,
       profile_id: s.profileId,
@@ -86,9 +106,10 @@ export function buildSnapshot(
       template_code: tpl?.code ?? null,
       template_label: tpl?.label ?? null,
       is_absence: tpl?.isAbsence ?? false,
-      zone: resolveZone(s, person),
-      is_back_office: resolveBackOffice(s, person),
-      department_id: s.departmentId ?? person?.primaryDepartmentId ?? null,
+      zone: s.zone ?? kept?.zone ?? resolveZone(s, person),
+      is_back_office: s.isBackOffice ?? kept?.is_back_office ?? resolveBackOffice(s, person),
+      department_id:
+        s.departmentId ?? kept?.department_id ?? person?.primaryDepartmentId ?? null,
       note: s.note,
       changed: false,
     };
@@ -112,21 +133,65 @@ function groupByDay(list: PublishedShift[]) {
   return map;
 }
 
-/** Giornate (persona, data) diverse tra due istantanee, con il prima e dopo leggibile. */
+const ZONE_LABEL = { vista: "Vista", sole: "Sole" } as const;
+
+/**
+ * Confronto di una giornata pubblicata: testo (orari o assenza) e dettagli che non si vedono
+ * negli orari (area, pausa, back office). I pezzi si ordinano per orario: l'ordine in cui
+ * arrivano dal database non conta.
+ */
+function daySignature(list: PublishedShift[]) {
+  const sorted = sortShifts(list);
+  const text = publishedDayText(sorted, true);
+  const timed = sorted.filter((s) => s.start_time && s.end_time);
+  if (timed.length === 0 || sorted.some((s) => s.is_absence)) return { text, key: text, details: "" };
+  const pause = timed.reduce((sum, s) => sum + (s.break_minutes ?? 0), 0);
+  const zones = [...new Set(timed.map((s) => s.zone).filter((z) => z !== null))];
+  const inBackOffice = timed.filter((s) => s.is_back_office).length;
+  const details = [
+    ...zones.map((z) => ZONE_LABEL[z]),
+    ...(pause > 0 ? [`pausa ${pause}′`] : []),
+    ...(inBackOffice === 0
+      ? []
+      : [inBackOffice === timed.length ? "back office" : "in parte back office"]),
+  ].join(", ");
+  const key = JSON.stringify([
+    timed.map((s) => [hhmm(s.start_time), hhmm(s.end_time), s.zone, s.is_back_office]),
+    pause,
+  ]);
+  return { text, key, details };
+}
+
+/**
+ * Giornate (persona, data) diverse tra due istantanee, con il prima e dopo leggibile. Contano
+ * orari, assenze, area, pausa (totale della giornata) e back office; se gli orari sono gli stessi
+ * il prima e dopo riportano tra parentesi il dettaglio cambiato ("10:00–20:00 (pausa 60′)").
+ */
 export function diffSnapshots(before: PublishedShift[], after: PublishedShift[]): DayChange[] {
   const a = groupByDay(before);
   const b = groupByDay(after);
   const keys = new Set([...a.keys(), ...b.keys()]);
   const out: DayChange[] = [];
   for (const key of keys) {
-    const beforeText = publishedDayText(a.get(key) ?? [], true);
-    const afterText = publishedDayText(b.get(key) ?? [], true);
-    const zoneBefore = (a.get(key) ?? []).map((s) => s.zone).join();
-    const zoneAfter = (b.get(key) ?? []).map((s) => s.zone).join();
-    if (beforeText !== afterText || zoneBefore !== zoneAfter) {
-      const [profileId, date] = key.split("|");
-      out.push({ profileId, date, before: beforeText || "Libero", after: afterText || "Libero" });
-    }
+    const was = daySignature(a.get(key) ?? []);
+    const is = daySignature(b.get(key) ?? []);
+    if (was.key === is.key) continue;
+    const [profileId, date] = key.split("|");
+    const sameText = was.text === is.text;
+    const label = (d: { text: string; details: string }) =>
+      d.text ? (sameText && d.details ? `${d.text} (${d.details})` : d.text) : "Libero";
+    out.push({ profileId, date, before: label(was), after: label(is) });
   }
   return out.sort((x, y) => x.date.localeCompare(y.date) || x.profileId.localeCompare(y.profileId));
+}
+
+/**
+ * Destinatari dell'avviso "orari pubblicati/aggiornati" a tutti: chi ha turni nell'istantanea e
+ * chi li aveva ma è stato tolto dalla settimana (compare solo tra le giornate cambiate, §10).
+ */
+export function publishRecipients(
+  snapshot: Pick<PublishedShift, "profile_id">[],
+  changes: Pick<DayChange, "profileId">[],
+): string[] {
+  return [...new Set([...snapshot.map((s) => s.profile_id), ...changes.map((c) => c.profileId)])];
 }

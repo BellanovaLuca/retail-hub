@@ -209,6 +209,7 @@ export async function removeLeaveRange(input: unknown): Promise<ActionResult<Sav
   });
 }
 
+// Stessi limiti del form Impostazioni → Negozio (saveStoreSettings): 0–50, vuoto = nessuna soglia.
 const thresholdsSchema = z.record(z.uuid(), z.number().int().min(0).max(50).nullable());
 
 /** Soglie per reparto: massimo di persone in ferie nello stesso giorno (vuoto = nessuna). */

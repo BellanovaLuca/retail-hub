@@ -83,7 +83,10 @@ export default async function HomePage() {
     .sort()
     .find((d) => d > today || (d === today && byDate(d).some((s) => (s.end_time ?? "") > nowTime)));
   const nextShifts = next ? byDate(next).filter((s) => !s.is_absence) : [];
-  const nextStart = nextShifts.map((s) => s.start_time!).sort()[0];
+  // Tutti i pezzi del turno (più di uno se è spezzato): il conto alla rovescia sceglie quello giusto.
+  const nextPieces = nextShifts
+    .filter((s) => s.start_time)
+    .map((s) => ({ start: s.start_time!, end: s.end_time }));
   const weekShifts = mine.filter((s) => s.date >= days[0] && s.date <= days[6]);
   const names = new Map(people.map((p) => [p.id, p.displayName]));
   const todayTeam = [
@@ -112,7 +115,9 @@ export default async function HomePage() {
                 {dayWord(next, today)} ·{" "}
                 <span className="nums">{publishedDayText(nextShifts)}</span>
               </p>
-              {next === today && nextStart ? <Countdown date={next} start={nextStart} /> : null}
+              {next === today && nextPieces.length ? (
+                <Countdown date={next} pieces={nextPieces} />
+              ) : null}
               {nextShifts[0]?.zone ? (
                 <p className="mt-2 text-sm text-muted">
                   {nextShifts[0].zone === "vista" ? "Vista" : "Sole"}

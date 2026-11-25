@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { safeReturnPath } from "@/lib/auth/return-path";
 import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = { title: "Accesso" };
@@ -9,8 +10,8 @@ export default async function AccessoPage({
   searchParams: Promise<{ da?: string; disattivato?: string }>;
 }) {
   const { da, disattivato } = await searchParams;
-  // Solo percorsi interni: niente "//host" né "/\\host" (che i browser leggono come esterni).
-  const next = da && /^\/(?![/\\])/.test(da) ? da : "/";
+  // Solo percorsi interni (lib/auth/return-path): niente "//host", "/\\host" né tab o a-capo.
+  const next = safeReturnPath(typeof da === "string" ? da : undefined);
 
   return (
     <>

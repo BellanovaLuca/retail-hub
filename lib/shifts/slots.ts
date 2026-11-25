@@ -99,3 +99,90 @@ export function hourCellValue(slots: ReadonlyArray<boolean | SlotMark>, hour: nu
   const count = [slots[first], slots[first + 1]].filter((v) => !!v).length;
   return count === 2 ? 1 : count === 1 ? 0.5 : 0;
 }
+
+type MinuteSegment = { start: number; end: number; backOffice: boolean };
+
+/** Toglie la fascia [from, to) da ogni segmento (che può spezzarsi in due). */
+function subtract(segments: MinuteSegment[], from: number, to: number): MinuteSegment[] {
+  const out: MinuteSegment[] = [];
+  for (const s of segments) {
+    if (s.end <= from || s.start >= to) {
+      out.push(s);
+      continue;
+    }
+    if (s.start < from) out.push({ ...s, end: from });
+    if (s.end > to) out.push({ ...s, start: to });
+  }
+  return out;
+}
+
+/**
+ * Giornata ridipinta → fasce da salvare, partendo dai turni com'erano (`original`) e applicando
+ * solo le mezze celle che sono cambiate rispetto a quelle dipinte dai turni stessi. Così ciò che
+ * non è stato toccato resta identico: un inizio alle 10:15 non diventa 10:00 e le ore fuori dalla
+ * griglia 07–22 (es. un turno 06:00–14:00) non vengono tagliate.
+ *
+ * - mezza cella svuotata: quella mezz'ora si toglie dai turni;
+ * - mezza cella dipinta dove non c'era nulla: si aggiunge la mezz'ora e, se la cella accanto era
+ *   dipinta solo in parte dallo stesso tipo di turno (finiva alle 18:45), il turno si allunga
+ *   fino al bordo senza lasciare un vuoto di un quarto d'ora;
+ * - cambio vendita ↔ back office: cambia il tipo, gli orari restano quelli.
+ */
+export function repaintedSegments(original: MarkedSegment[], marks: SlotMark[]): MarkedSegment[] {
+  const base = segmentsToMarkedSlots(original);
+  let segs: MinuteSegment[] = original.map((s) => ({
+    start: toMinutes(s.start),
+    end: toMinutes(s.end),
+    backOffice: s.backOffice,
+  }));
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    const mark = marks[i] ?? null;
+    if (mark === base[i]) continue;
+    const from = FIRST + i * SLOT_MINUTES;
+    const to = from + SLOT_MINUTES;
+    if (mark === null) {
+      segs = subtract(segs, from, to);
+      continue;
+    }
+    const backOffice = mark === "bo";
+    if (base[i] !== null) {
+      // Cambio di tipo: le parti dei turni dentro la mezza cella passano all'altro tipo.
+      const inside = segs
+        .filter((s) => s.start < to && s.end > from)
+        .map((s) => ({ start: Math.max(s.start, from), end: Math.min(s.end, to), backOffice }));
+      segs = [...subtract(segs, from, to), ...inside];
+      continue;
+    }
+    // Il turno dello stesso tipo che finisce (o inizia) a metà della cella accanto arriva al bordo.
+    if (i > 0 && marks[i - 1] === mark) {
+      const before = segs
+        .filter((s) => s.backOffice === backOffice && s.end > from - SLOT_MINUTES && s.end < from)
+        .sort((a, b) => b.end - a.end)[0];
+      if (before) before.end = from;
+    }
+    if (i + 1 < SLOT_COUNT && marks[i + 1] === mark) {
+      const after = segs
+        .filter((s) => s.backOffice === backOffice && s.start > to && s.start < to + SLOT_MINUTES)
+        .sort((a, b) => a.start - b.start)[0];
+      if (after) after.start = to;
+    }
+    segs.push({ start: from, end: to, backOffice });
+  }
+
+  // Ordina e unisce i pezzi dello stesso tipo che si toccano o si sovrappongono.
+  const merged: MinuteSegment[] = [];
+  for (const s of segs.filter((x) => x.end > x.start).sort((a, b) => a.start - b.start)) {
+    const last = merged[merged.length - 1];
+    if (last && last.backOffice === s.backOffice && s.start <= last.end) {
+      last.end = Math.max(last.end, s.end);
+    } else if (last && s.start < last.end) {
+      // Tipi diversi sovrapposti (dati sporchi): il secondo parte dove finisce il primo.
+      if (s.end > last.end) merged.push({ ...s, start: last.end });
+    } else merged.push({ ...s });
+  }
+  return merged.map((s) => ({
+    start: fromMinutes(s.start),
+    end: fromMinutes(s.end),
+    backOffice: s.backOffice,
+  }));
+}

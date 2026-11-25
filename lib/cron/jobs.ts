@@ -10,8 +10,12 @@ import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { communicationJobs } from "./communication-jobs";
+import { existingRunDecision } from "./runs";
 
 type Db = ReturnType<typeof createAdminClient>;
+
+/** Giorni di conservazione dei tentativi di accesso (login_attempts). */
+export const LOGIN_ATTEMPTS_RETENTION_DAYS = 30;
 
 export type CronContext = { db: Db; now: Date; today: string; time: string; weekday: number };
 
@@ -137,52 +141,113 @@ export function cronContext(): CronContext {
   };
 }
 
+type Claim = { claimed: true } | { claimed: false; outcome: string; failed: boolean };
+
 /**
- * Esegue i job dovuti. Ogni job gira al massimo una volta per chiave: il dispatcher può essere
- * chiamato spesso (es. ogni 15 minuti) senza duplicare le notifiche.
+ * Prenota l'esecuzione di un job per la sua chiave (riga «running» in cron_runs). Due chiamate
+ * concorrenti non lo eseguono due volte: vince chi inserisce la riga o chi la riprende con
+ * l'aggiornamento condizionato sullo stato letto.
+ */
+async function claimRun(db: Db, job: string, runKey: string): Promise<Claim> {
+  const { error } = await db
+    .from("cron_runs")
+    .insert({ job, run_key: runKey, status: "running", attempts: 1 });
+  if (!error) return { claimed: true };
+  // 23505 = chiave già presente; qualsiasi altro errore è un guasto, non «già eseguito».
+  if (error.code !== "23505") {
+    console.error("cron", job, error);
+    return { claimed: false, outcome: `errore: ${error.message}`, failed: true };
+  }
+
+  const { data: run, error: readError } = await db
+    .from("cron_runs")
+    .select("status, attempts, ran_at")
+    .eq("run_key", runKey)
+    .maybeSingle();
+  if (readError || !run) {
+    return {
+      claimed: false,
+      outcome: `errore: ${readError?.message ?? "esecuzione non leggibile"}`,
+      failed: true,
+    };
+  }
+  const decision = existingRunDecision(run);
+  if (decision === "done") return { claimed: false, outcome: "già eseguito", failed: false };
+  if (decision === "busy") return { claimed: false, outcome: "in corso", failed: false };
+  if (decision === "exhausted")
+    return { claimed: false, outcome: "non riuscito: tentativi esauriti", failed: false };
+
+  const { data: retaken, error: retakeError } = await db
+    .from("cron_runs")
+    .update({ status: "running", attempts: run.attempts + 1, ran_at: new Date().toISOString() })
+    .eq("run_key", runKey)
+    .eq("status", run.status)
+    .eq("attempts", run.attempts)
+    .select("id");
+  if (retakeError)
+    return { claimed: false, outcome: `errore: ${retakeError.message}`, failed: true };
+  // Nessuna riga: un'altra chiamata l'ha ripreso un attimo prima.
+  if (!retaken?.length) return { claimed: false, outcome: "in corso", failed: false };
+  return { claimed: true };
+}
+
+/**
+ * Esegue i job dovuti. Ogni job gira al massimo una volta per chiave: il dispatcher va chiamato
+ * spesso (ogni 15 minuti) senza duplicare le notifiche. Un job in errore resta «failed» e uno
+ * interrotto (timeout della funzione) resta «running»: alla chiamata successiva si riprova.
+ * `failed` elenca i job andati in errore in questa chiamata (la route risponde 500).
  */
 export async function runDueJobs(opts: { only?: string; force?: boolean } = {}) {
   const ctx = cronContext();
   const results: Record<string, unknown> = {};
+  const failed: string[] = [];
   // Le esecuzioni passate servono solo all'idempotenza: si tengono 60 giorni.
   await ctx.db
     .from("cron_runs")
     .delete()
     .lt("ran_at", new Date(Date.now() - 60 * 86_400_000).toISOString());
+  // I tentativi di accesso servono solo al blocco (15 minuti): si tengono 30 giorni.
+  await ctx.db
+    .from("login_attempts")
+    .delete()
+    .lt("at", new Date(Date.now() - LOGIN_ATTEMPTS_RETENTION_DAYS * 86_400_000).toISOString());
   for (const job of registry) {
     if (opts.only && job.name !== opts.only) continue;
     const due = ctx.time >= job.after && (!job.days?.length || job.days.includes(ctx.weekday));
     if (!due && !opts.force) continue;
     const runKey = job.key ? job.key(ctx) : `${job.name}:${ctx.today}`;
-    if (job.idempotent === false) {
-      try {
-        results[job.name] = await job.run(ctx);
-      } catch (error) {
-        console.error("cron", job.name, error);
-        results[job.name] = { error: String(error) };
-      }
-      continue;
-    }
-    if (!opts.force) {
-      const { error } = await ctx.db.from("cron_runs").insert({ job: job.name, run_key: runKey });
-      if (error) {
-        results[job.name] = "già eseguito";
+    // Con idempotenza propria, o forzato a mano: si esegue senza toccare cron_runs (un errore
+    // di un'esecuzione forzata non cancella né sporca quella pianificata).
+    const tracked = job.idempotent !== false && !opts.force;
+    if (tracked) {
+      const claim = await claimRun(ctx.db, job.name, runKey);
+      if (!claim.claimed) {
+        results[job.name] = claim.outcome;
+        if (claim.failed) failed.push(job.name);
         continue;
       }
     }
     try {
       const result = await job.run(ctx);
       results[job.name] = result;
-      await ctx.db
-        .from("cron_runs")
-        .update({ result: result as never })
-        .eq("run_key", runKey);
+      if (tracked) {
+        await ctx.db
+          .from("cron_runs")
+          .update({ status: "done", result: result as never })
+          .eq("run_key", runKey);
+      }
     } catch (error) {
       console.error("cron", job.name, error);
       results[job.name] = { error: String(error) };
-      // Si potrà riprovare alla prossima chiamata.
-      await ctx.db.from("cron_runs").delete().eq("run_key", runKey);
+      failed.push(job.name);
+      // Si riproverà alla prossima chiamata (fino a MAX_RUN_ATTEMPTS).
+      if (tracked) {
+        await ctx.db
+          .from("cron_runs")
+          .update({ status: "failed", result: { error: String(error) } as never })
+          .eq("run_key", runKey);
+      }
     }
   }
-  return { at: `${ctx.today} ${ctx.time}`, results };
+  return { at: `${ctx.today} ${ctx.time}`, results, failed };
 }

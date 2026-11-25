@@ -3,7 +3,7 @@ import { addDays, format, getISOWeek, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
 import { createElement, type ReactElement } from "react";
 import { BoardPdf } from "@/components/responsibilities/board-pdf";
-import { getCurrentProfile } from "@/lib/auth/session";
+import { getCurrentProfile, isOnboarded } from "@/lib/auth/session";
 import { getBoard } from "@/lib/data/responsibilities";
 import { normalizeWeekParam } from "@/lib/data/schedule";
 import { nowInRome, toISODate } from "@/lib/dates";
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const profile = await getCurrentProfile();
-  if (!profile || !profile.active) {
+  if (!profile || !profile.active || !isOnboarded(profile)) {
     return new Response("Accesso richiesto.", { status: 401 });
   }
 

@@ -51,7 +51,8 @@ export function AnnouncementEditor({
       setResult(null);
       const payload: AnnouncementInput = {
         ...v,
-        // "Subito": per una nuova vale adesso; per una già pubblicata resta la data originale.
+        // "Subito": per una nuova (o una programmata non ancora uscita) vale adesso; per una
+        // già pubblicata resta la data originale.
         publishAt: schedule || alreadyPublished ? v.publishAt : "",
       };
       const res = await saveAnnouncement(payload);
