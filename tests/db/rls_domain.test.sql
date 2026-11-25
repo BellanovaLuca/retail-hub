@@ -13,6 +13,9 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-00000000000a', 'Anna', 'Admin', 'Anna', 'ADM-001', 'admin'),
   ('00000000-0000-0000-0000-0000000000e1', 'Francesca', 'Uno', 'Francesca', 'CRD-001', 'employee'),
   ('00000000-0000-0000-0000-0000000000e2', 'Francesca', 'Due', 'Francy', 'CRD-002', 'employee');
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 
 -- Dati preparati come service role (nessun utente).
 insert into public.schedule_weeks (id, week_start, status, published_shifts) values
@@ -337,8 +340,8 @@ insert into public.notifications (profile_id, kind, title) values
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
 do $$
 begin
-  if public.responsibility_week_team('00000000-0000-0000-0000-000000000f02', public.today_rome() + 7)
-     <> '{00000000-0000-0000-0000-0000000000e1}'::uuid[] then
+  if not public.is_responsibility_assignee_on(
+       '00000000-0000-0000-0000-000000000f02', auth.uid(), public.today_rome() + 7) then
     raise exception 'FALLITO: la settimana seguente non riprende l''ultima assegnazione';
   end if;
   insert into public.responsibility_checks (responsibility_id, date, done_by)

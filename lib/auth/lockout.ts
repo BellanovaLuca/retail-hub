@@ -35,5 +35,10 @@ export function lockedUntil(
 /** Messaggio mostrato quando l'accesso è bloccato fino a `until`. */
 export function lockoutMessage(until: Date, now: Date = new Date()): string {
   const minutes = Math.max(1, Math.ceil((until.getTime() - now.getTime()) / 60_000));
+  // Tetto nelle 24 ore: l'attesa è lunga, conviene farsi dare un nuovo PIN.
+  if (minutes > 90) {
+    const hours = Math.ceil(minutes / 60);
+    return `Troppi tentativi errati. Riprova tra circa ${hours} ore, oppure chiedi a un responsabile un nuovo PIN.`;
+  }
   return `Troppi tentativi errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`;
 }

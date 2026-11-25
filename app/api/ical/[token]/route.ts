@@ -6,7 +6,8 @@ import type { PublishedShift } from "@/lib/schedule/types";
 
 /**
  * Feed iCal personale (/api/ical/<token>.ics). Il token segreto sostituisce la sessione:
- * restituisce solo i turni PUBBLICATI della persona, da 4 settimane fa a 12 settimane avanti.
+ * restituisce solo i turni PUBBLICATI della persona, da 4 settimane fa a 12 settimane avanti,
+ * esclusi i giorni in cui risulta assente per l'intera giornata.
  */
 export async function GET(
   _request: NextRequest,
@@ -37,6 +38,16 @@ export async function GET(
     .select("store_name")
     .eq("id", true)
     .single();
+  // Assenze a giornata intera (ferie approvate dopo la pubblicazione…): quel giorno il turno
+  // rimasto nell'orario pubblicato non va nel calendario.
+  const { data: leaves } = await db
+    .from("leaves")
+    .select("date")
+    .eq("profile_id", profile.id)
+    .is("hours", null)
+    .gte("date", from)
+    .lte("date", to);
+  const away = new Set((leaves ?? []).map((l) => l.date));
 
   const shifts = (weeks ?? [])
     .flatMap((w) =>
@@ -50,6 +61,7 @@ export async function GET(
         s.profile_id === profile.id &&
         s.date >= from &&
         s.date <= to &&
+        !away.has(s.date) &&
         !s.is_absence &&
         s.start_time &&
         s.end_time,

@@ -92,6 +92,14 @@ export function AssignmentEditor(props: {
   const [pending, startTransition] = React.useTransition();
   const [dirty, setDirty] = React.useState(false);
 
+  // Chiudere o ricaricare la pagina con numeri non confermati li farebbe perdere in silenzio.
+  React.useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
   /* ------------------------------------------------- numeri del negozio */
 
   const initialStore: Required<StoreWeeklyTargets> = {
@@ -322,19 +330,24 @@ export function AssignmentEditor(props: {
         for (const p of members) delete next[cellKey(p.profileId, column.kpiId)];
         return next;
       });
-      setDirty(true);
       setConfirmRemove(null);
     };
-    // Una colonna «mista» non fa parte del gruppo: basta svuotarla.
+    // Una colonna «mista» non fa parte del gruppo: basta svuotarla (vale con la conferma).
     if (column.mixed) {
       clear();
-      setManageResult({ ok: true, message: `Colonna «${column.label}» svuotata.` });
+      setDirty(true);
+      setManageResult({
+        ok: true,
+        message: `Colonna «${column.label}» svuotata: diventa definitivo con «Conferma e avvisa».`,
+      });
       return;
     }
     const set = sets.find((s) => s.name === AREA_LABEL[area]);
     if (!set) return;
     startTransition(async () => {
-      const res = await removeGroupItem(set.id, column.kpiId);
+      // Il server toglie la voce dal gruppo e, insieme, gli obiettivi di questa settimana per le
+      // persone dell'area: qui si svuota la colonna senza altre conferme da dare.
+      const res = await removeGroupItem(set.id, column.kpiId, weekStart);
       setManageResult(
         res.ok
           ? {
@@ -343,10 +356,9 @@ export function AssignmentEditor(props: {
             }
           : res,
       );
-      if (res.ok) {
-        clear();
-        router.refresh();
-      }
+      if (res.ok) clear();
+      else setConfirmRemove(null);
+      router.refresh();
     });
   };
 
@@ -384,6 +396,11 @@ export function AssignmentEditor(props: {
       });
       setResult(res);
       if (res.ok) {
+        // Il server salva i commenti senza spazi ai bordi: lo stato locale si riallinea, così
+        // non restano segnati come «modificati».
+        setComments((prev) =>
+          Object.fromEntries(Object.entries(prev).map(([id, body]) => [id, body.trim()])),
+        );
         setDirty(false);
         router.refresh();
       }

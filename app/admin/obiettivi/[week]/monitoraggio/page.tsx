@@ -16,7 +16,7 @@ import {
   zoneTable,
   type ZoneTable,
 } from "@/lib/kpi/monitoring";
-import { formatCount } from "@/lib/kpi/sheet";
+import { formatCount, isEditableDate, shiftDate } from "@/lib/kpi/sheet";
 import { createClient } from "@/lib/supabase/server";
 import { bestPerformer } from "@/lib/targets";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,7 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
   const weekStart = normalizeWeekParam(param, nowInRome());
   const db = await createClient();
   const today = toISODate(nowInRome());
+  const yesterday = shiftDate(today, -1);
   // "Chi non ha compilato": gli ultimi due giorni della settimana scelta già trascorsi
   // (ieri e oggi nella settimana corrente; nulla nelle settimane future).
   const checkDays = weekDates(weekStart)
@@ -77,9 +78,14 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
         days: data.days,
         entries: data.entries,
         targets,
+        // Chi ha la voce nel foglio, o un obiettivo «misto» su quella voce in settimana.
         holders: new Set(
           data.people
-            .filter((p) => p.kpis.some((k) => k.kpiId === kpi.kpiId))
+            .filter(
+              (p) =>
+                p.kpis.some((k) => k.kpiId === kpi.kpiId) ||
+                targets[p.profileId]?.[kpi.kpiId] !== undefined,
+            )
             .map((p) => p.profileId),
         ),
       }),
@@ -177,17 +183,23 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
         </p>
         <div className="grid gap-6 sm:grid-cols-2">
           {missing.map((m) => {
-            const label = m.date === today ? "Oggi" : "Ieri";
+            // «Ieri» solo se è davvero ieri: nelle settimane passate resta la sola data.
+            const label = m.date === today ? "Oggi" : m.date === yesterday ? "Ieri" : null;
+            const day = format(parseISO(m.date), "EEE d MMM", { locale: it });
             return (
               <div key={m.date}>
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <h3 className="text-sm font-medium">
-                    {label}{" "}
-                    <span className="text-muted">
-                      · {format(parseISO(m.date), "EEE d MMM", { locale: it })}
-                    </span>
+                    {label ? (
+                      <>
+                        {label} <span className="text-muted">· {day}</span>
+                      </>
+                    ) : (
+                      <span className="first-letter:uppercase">{day}</span>
+                    )}
                   </h3>
-                  {m.profileIds.length ? (
+                  {/* Oltre 7 giorni i numeri non si possono più inserire: niente sollecito. */}
+                  {m.profileIds.length && isEditableDate(m.date, today) ? (
                     <RemindButton profileIds={m.profileIds} date={m.date} />
                   ) : null}
                 </div>

@@ -137,7 +137,16 @@ export function WeekMenu({
               <Button
                 variant="secondary"
                 disabled={pending || name.trim().length < 2}
-                onClick={() => run(() => saveWeekAsTemplate(weekId, name))}
+                onClick={() => {
+                  // Un nome già usato sostituirebbe il modello esistente: si chiede prima.
+                  const exists = weekTemplates.some((t) => t.name === name.trim());
+                  if (
+                    exists &&
+                    !confirm(`Esiste già un modello "${name.trim()}": sostituirlo con questa settimana?`)
+                  )
+                    return;
+                  run(() => saveWeekAsTemplate(weekId, name, exists));
+                }}
               >
                 Salva
               </Button>

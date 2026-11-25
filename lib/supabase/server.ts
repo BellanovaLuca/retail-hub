@@ -2,14 +2,14 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import type { Database } from "./database.types";
-import { SESSION_MAX_AGE_SECONDS, supabaseAnonKey, supabaseUrl } from "./env";
+import { sessionCookieOptions, supabaseAnonKey, supabaseUrl } from "./env";
 
 /** Client Supabase con la sessione dell'utente (Server Components, Server Actions, Route Handlers). */
 export async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient<Database>(supabaseUrl(), supabaseAnonKey(), {
-    cookieOptions: { maxAge: SESSION_MAX_AGE_SECONDS },
+    cookieOptions: sessionCookieOptions(),
     cookies: {
       getAll() {
         return cookieStore.getAll();

@@ -3,6 +3,7 @@ import { Markdown } from "@/components/announcements/markdown";
 import { Badge } from "@/components/ui/badge";
 import type { SignedAttachment } from "@/lib/announcements/storage";
 import type { ResponsibilityItem } from "@/lib/data/responsibilities";
+import { daysOfPerson } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
 import { DayLetters } from "./day-letters";
 import { scheduleLabel } from "./format";
@@ -25,6 +26,10 @@ export function ResponsibilityCards({
   );
   const supported = items.filter((r) => !r.weekly && r.supportIds.includes(personId));
   const allStaff = items.filter((r) => r.allStaff);
+
+  // Con l'assegnazione per giorno contano i giorni della persona, non quelli di tutto il gruppo.
+  const daysFor = (r: ResponsibilityItem, role: "owner" | "support" | "all") =>
+    role === "owner" && r.weekly ? daysOfPerson(r, personId) : r.scheduleDays;
 
   const card = (r: ResponsibilityItem, role: "owner" | "support" | "all") => (
     <li
@@ -69,10 +74,10 @@ export function ResponsibilityCards({
               : role === "owner" && !r.weekly && r.supports.length > 0
                 ? `Supporto: ${r.supports.map((s) => s.name).join(", ")} · `
                 : null}
-            {scheduleLabel(r.scheduleDays)}
+            {scheduleLabel(daysFor(r, role))}
           </p>
         </div>
-        <DayLetters days={r.scheduleDays} />
+        <DayLetters days={daysFor(r, role)} />
       </div>
       {r.descriptionMd.trim() || r.attachments.length > 0 ? (
         <details className="group mt-4" open={role === "owner" && items.length <= 3}>

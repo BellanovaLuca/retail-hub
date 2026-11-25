@@ -18,7 +18,12 @@ import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { dayNetHours } from "@/lib/hours";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
-import { formatHoursIt, leaveLabelAdmin } from "@/lib/schedule/view";
+import {
+  dayBreakMinutes,
+  formatHoursIt,
+  isFullDayLeave,
+  leaveLabelAdmin,
+} from "@/lib/schedule/view";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { CalendarFeed } from "./calendar-feed";
@@ -27,10 +32,14 @@ import { MonthCalendar } from "./month-calendar";
 
 export const metadata: Metadata = { title: "I miei orari" };
 
-function dayHours(list: PublishedShift[]) {
+/**
+ * Ore pianificate. I giorni in `away` (assenza a giornata intera) non contano: il turno può
+ * essere ancora nell'orario pubblicato, ma quel giorno la persona non lavora.
+ */
+function dayHours(list: PublishedShift[], away: ReadonlySet<string> = new Set()) {
   const byDay = new Map<string, { start: string; end: string; breakMinutes: number }[]>();
   for (const s of list) {
-    if (!s.start_time || !s.end_time) continue;
+    if (!s.start_time || !s.end_time || away.has(s.date)) continue;
     const pieces = byDay.get(s.date) ?? [];
     pieces.push({ start: s.start_time, end: s.end_time, breakMinutes: s.break_minutes });
     byDay.set(s.date, pieces);
@@ -76,7 +85,8 @@ export default async function OrariPage({
         .gte("date", from)
         .lte("date", to),
     ]);
-    const total = dayHours(mine);
+    const away = new Set((leaves ?? []).filter(isFullDayLeave).map((l) => l.date));
+    const total = dayHours(mine, away);
     return (
       <>
         <PageHeader eyebrow="Orari" title={format(month, "MMMM yyyy", { locale: it })}>
@@ -105,10 +115,16 @@ export default async function OrariPage({
               {
                 text: publishedDayText(mine.filter((s) => s.date === d)),
                 changed: mine.some((s) => s.date === d && s.changed),
+                work: mine.some((s) => s.date === d && !s.is_absence && Boolean(s.start_time)),
               },
             ]),
           )}
-          leaves={Object.fromEntries((leaves ?? []).map((l) => [l.date, leaveLabelAdmin(l)]))}
+          leaves={Object.fromEntries(
+            (leaves ?? []).map((l) => [
+              l.date,
+              { label: leaveLabelAdmin(l), fullDay: isFullDayLeave(l) },
+            ]),
+          )}
         />
         <CalendarFeed token={profile.ical_token} />
       </>
@@ -135,7 +151,9 @@ export default async function OrariPage({
   const names = new Map(people.map((p) => [p.id, p.displayName]));
   const mine = all.filter((s) => s.profile_id === profile.id);
   const leaveByDate = new Map((myLeaves ?? []).map((l) => [l.date, l]));
-  const total = dayHours(mine);
+  // Assenze a giornata intera: prevalgono sul turno rimasto nell'orario pubblicato.
+  const away = new Set((myLeaves ?? []).filter(isFullDayLeave).map((l) => l.date));
+  const total = dayHours(mine, away);
   const prev = toISODate(addDays(parseISO(weekStart), -7));
   const next = toISODate(addDays(parseISO(weekStart), 7));
   const published = week?.status === "published";
@@ -199,6 +217,10 @@ export default async function OrariPage({
                 ...new Map(colleagues.map((c) => [c.profile_id, c])).values(),
               ];
               const first = list[0];
+              const pause = dayBreakMinutes(list);
+              // Assenza approvata (o inserita dal responsabile) in un giorno che nell'orario
+              // pubblicato ha ancora il turno: si vede l'assenza, con il turno come nota.
+              const offDay = Boolean(leave && isFullDayLeave(leave) && text && !absence);
               return (
                 <li
                   key={d}
@@ -212,7 +234,17 @@ export default async function OrariPage({
                     {format(parseISO(d), "EEEE d", { locale: it })}
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    {text && !absence ? (
+                    {offDay && leave ? (
+                      <>
+                        <p className="font-display text-2xl font-light text-muted">
+                          {leaveLabelAdmin(leave)}
+                        </p>
+                        <p className="text-xs text-muted">
+                          Nell&apos;orario pubblicato c&apos;è ancora il turno{" "}
+                          <span className="nums">{text}</span>: quel giorno risulti assente.
+                        </p>
+                      </>
+                    ) : text && !absence ? (
                       <p className="flex flex-wrap items-center gap-2">
                         <span className="font-display text-2xl font-light nums">{text}</span>
                         {list.some((s) => s.changed) ? (
@@ -228,9 +260,9 @@ export default async function OrariPage({
                     ) : (
                       <p className="font-display text-2xl font-light text-subtle">Libero</p>
                     )}
-                    {first && !absence ? (
+                    {first && !absence && !offDay ? (
                       <p className="flex flex-wrap gap-x-3 text-xs text-muted">
-                        {first.break_minutes ? <span>Pausa {first.break_minutes}′</span> : null}
+                        {pause ? <span>Pausa {pause}′</span> : null}
                         {first.zone ? (
                           <span>{first.zone === "vista" ? "Vista" : "Sole"}</span>
                         ) : null}
@@ -238,8 +270,11 @@ export default async function OrariPage({
                         <span className="nums">{formatHoursIt(dayHours(list))} h</span>
                       </p>
                     ) : null}
+                    {leave && !isFullDayLeave(leave) && text && !absence ? (
+                      <p className="text-xs text-muted">{leaveLabelAdmin(leave)}</p>
+                    ) : null}
                     {first?.note ? <p className="text-sm">{first.note}</p> : null}
-                    {uniqueColleagues.length > 0 && text && !absence ? (
+                    {uniqueColleagues.length > 0 && text && !absence && !offDay ? (
                       <p className="text-xs text-muted">
                         Con te:{" "}
                         {uniqueColleagues
@@ -249,7 +284,7 @@ export default async function OrariPage({
                       </p>
                     ) : null}
                   </div>
-                  {first && !absence && d >= today ? (
+                  {first && !absence && !offDay && d >= today ? (
                     <div className="sm:pt-1">
                       <Button asChild variant="ghost" size="sm">
                         <Link

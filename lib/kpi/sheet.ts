@@ -25,6 +25,28 @@ export type SheetRow = SheetKpi & {
   comment: string;
 };
 
+/**
+ * Voci del foglio di una persona più, in fondo, quelle fuori dal foglio per cui in settimana ha un
+ * obiettivo («misto») o dei numeri: è la regola unica di pagina Obiettivi, card della Home,
+ * scheda Persone ed export. `available` = voci attive (le altre non si aggiungono).
+ */
+export function withExtraSheetKpis<K extends SheetKpi>(
+  sheet: K[],
+  extraKpiIds: Iterable<string>,
+  available: SheetKpi[],
+): (K | SheetKpi)[] {
+  const have = new Set(sheet.map((k) => k.kpiId));
+  const byId = new Map(available.map((k) => [k.kpiId, k]));
+  const out: (K | SheetKpi)[] = [...sheet];
+  for (const id of extraKpiIds) {
+    const k = byId.get(id);
+    if (!k || have.has(id)) continue;
+    have.add(id);
+    out.push({ kpiId: k.kpiId, code: k.code, label: k.label });
+  }
+  return out;
+}
+
 /** Giorni da lunedì a domenica a partire dal lunedì `weekStart` (yyyy-MM-dd). */
 export function weekDates(weekStart: string): string[] {
   const monday = parseISO(weekStart);

@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
@@ -26,10 +27,16 @@ const BASE = "/admin/comunicazioni/responsabilita";
 export function ResponsibilityEditor({
   initial,
   isNew,
+  gridManaged = false,
   people,
 }: {
   initial: ResponsibilityValue;
   isNew: boolean;
+  /**
+   * L'attività ha un'assegnazione settimanale in vigore (griglia «Chi fa cosa»): persone e giorni
+   * si scelgono lì, e qui non si mostrano (dalla scheda non avrebbero effetto).
+   */
+  gridManaged?: boolean;
   people: PickerPerson[];
 }) {
   const router = useRouter();
@@ -88,6 +95,8 @@ export function ResponsibilityEditor({
     });
   }
 
+  // Con «Per tutti» i giorni tornano qui: è l'unico posto in cui si scelgono.
+  const fromGrid = gridManaged && !v.allStaff;
   const supportCandidates = people.filter(
     (p) => p.id !== v.ownerId && !v.supportIds.includes(p.id),
   );
@@ -114,47 +123,60 @@ export function ResponsibilityEditor({
         </div>
       </div>
 
-      <fieldset>
-        <legend className="mb-3 eyebrow">Giorni previsti</legend>
-        <div className="flex flex-wrap gap-2">
-          {DAY_LETTERS.map((letter, i) => {
-            const day = i + 1;
-            const on = v.scheduleDays.includes(day);
-            return (
-              <button
-                key={day}
-                type="button"
-                aria-pressed={on}
-                aria-label={DAY_NAMES[i]}
-                title={DAY_NAMES[i]}
-                onClick={() => toggleDay(day)}
-                className={cn(
-                  "grid size-11 place-items-center rounded-md border text-sm font-semibold",
-                  on
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-line-strong text-muted hover:border-foreground",
-                )}
-              >
-                {letter}
-              </button>
-            );
-          })}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-11"
-            onClick={() => set("scheduleDays", [1, 2, 3, 4, 5, 6, 7])}
-          >
-            Tutti i giorni
-          </Button>
-        </div>
-        {errors.scheduleDays ? (
-          <p role="alert" className="mt-2 text-sm text-danger">
-            {errors.scheduleDays}
+      {fromGrid ? (
+        <div className="max-w-2xl rounded-md border border-line px-4 py-3 text-sm">
+          <p className="font-medium">Persone e giorni si scelgono dalla griglia «Chi fa cosa»</p>
+          <p className="mt-1 text-muted">
+            Questa attività è assegnata settimana per settimana: chi se ne occupa, e in quali
+            giorni, si cambia da lì. Qui restano il nome, la procedura e gli allegati.
           </p>
-        ) : null}
-      </fieldset>
+          <Link href={BASE} className="mt-2 inline-block link-underline font-medium">
+            Apri «Chi fa cosa questa settimana»
+          </Link>
+        </div>
+      ) : (
+        <fieldset>
+          <legend className="mb-3 eyebrow">Giorni previsti</legend>
+          <div className="flex flex-wrap gap-2">
+            {DAY_LETTERS.map((letter, i) => {
+              const day = i + 1;
+              const on = v.scheduleDays.includes(day);
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={DAY_NAMES[i]}
+                  title={DAY_NAMES[i]}
+                  onClick={() => toggleDay(day)}
+                  className={cn(
+                    "grid size-11 place-items-center rounded-md border text-sm font-semibold",
+                    on
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-line-strong text-muted hover:border-foreground",
+                  )}
+                >
+                  {letter}
+                </button>
+              );
+            })}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-11"
+              onClick={() => set("scheduleDays", [1, 2, 3, 4, 5, 6, 7])}
+            >
+              Tutti i giorni
+            </Button>
+          </div>
+          {errors.scheduleDays ? (
+            <p role="alert" className="mt-2 text-sm text-danger">
+              {errors.scheduleDays}
+            </p>
+          ) : null}
+        </fieldset>
+      )}
 
       <fieldset className="flex flex-col gap-5">
         <legend className="mb-3 eyebrow">Chi se ne occupa</legend>
@@ -164,14 +186,20 @@ export function ResponsibilityEditor({
           checked={v.allStaff}
           onCheckedChange={(x) => set("allStaff", x)}
         />
-        {!v.allStaff ? (
+        {gridManaged && v.allStaff !== initial.allStaff ? (
+          <p className="max-w-2xl text-sm text-warning">
+            Salvando, le assegnazioni della griglia «Chi fa cosa» per questa attività vengono tolte
+            da questa settimana in poi{v.allStaff ? "" : ": poi la riassegni dalla griglia"}.
+          </p>
+        ) : null}
+        {!v.allStaff && !fromGrid ? (
           <p className="mb-2 max-w-2xl text-sm text-muted">
             Facoltativo: di solito le persone si assegnano settimana per settimana dalla griglia
             «Chi fa cosa questa settimana». Responsabile e supporto qui sotto valgono solo finché
             l&apos;attività non è mai stata assegnata con la griglia.
           </p>
         ) : null}
-        {!v.allStaff ? (
+        {!v.allStaff && !fromGrid ? (
           <div className="grid gap-8 lg:grid-cols-2">
             <Field
               label="Responsabile"

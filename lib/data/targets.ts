@@ -8,6 +8,7 @@ import { missingCompilers, type MissingByDay } from "@/lib/kpi/monitoring";
 import {
   buildPersonSheet,
   weekDates,
+  withExtraSheetKpis,
   type EntryValue,
   type SheetKpi,
   type SheetRow,
@@ -45,6 +46,11 @@ export async function getKpiDefinitions(db: Db): Promise<KpiDefinition[]> {
     sortOrder: k.sort_order,
     active: k.active,
   }));
+}
+
+/** Le voci attive nella forma del foglio (per `withExtraSheetKpis`). */
+export function activeSheetKpis(defs: KpiDefinition[]): SheetKpi[] {
+  return defs.filter((d) => d.active).map((d) => ({ kpiId: d.id, code: d.code, label: d.label }));
 }
 
 export type KpiSet = {
@@ -264,6 +270,22 @@ export async function getWeekComments(
   }));
 }
 
+/**
+ * Obiettivi assegnati per voce nella settimana, sommati su tutto il negozio (funzione
+ * store_weekly_assigned): visibile a tutto lo staff, senza alcun dato per persona.
+ */
+export async function getStoreAssigned(db: Db, weekStart: string): Promise<Record<string, number>> {
+  const { data } = await db.rpc("store_weekly_assigned", { p_week: weekStart });
+  const out: Record<string, number> = {};
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    for (const [kpiId, total] of Object.entries(data)) {
+      const n = Number(total);
+      if (Number.isFinite(n)) out[kpiId] = n;
+    }
+  }
+  return out;
+}
+
 /** Totali del negozio per voce (vista store_weekly_totals, visibile a tutti). */
 export async function getStoreTotals(db: Db, weekStart: string): Promise<Record<string, number>> {
   const { data } = await db
@@ -286,6 +308,8 @@ export type MyWeek = {
   filledDates: string[];
   store: {
     totals: Record<string, number>;
+    /** Somma degli obiettivi assegnati per voce (tutto il negozio). */
+    assigned: Record<string, number>;
     targets: StoreTargetsRecord | null;
     bestPerformerName: string | null;
   };
@@ -300,7 +324,7 @@ export async function getMyWeek(
 ): Promise<MyWeek> {
   const days = weekDates(weekStart);
   const defs = await getKpiDefinitions(db);
-  const [kpisByPerson, entries, targets, comments, { data: note }, totals, storeTargets] =
+  const [kpisByPerson, entries, targets, comments, { data: note }, totals, storeTargets, assigned] =
     await Promise.all([
       getPeopleKpis(db, [{ id: profile.id, zone: profile.home_zone }], defs),
       getEntries(db, days[0], days[6], [profile.id]),
@@ -314,23 +338,16 @@ export async function getMyWeek(
         .maybeSingle(),
       getStoreTotals(db, weekStart),
       getStoreTargets(db, weekStart),
+      getStoreAssigned(db, weekStart),
     ]);
   const published = comments.filter((c) => c.published && c.body.trim());
-  const kpis = kpisByPerson.get(profile.id) ?? [];
-  // Voci con un obiettivo assegnato ma tolte dal foglio della persona: restano visibili.
-  for (const t of targets) {
-    if (kpis.some((k) => k.kpiId === t.kpiId)) continue;
-    const d = defs.find((x) => x.id === t.kpiId && x.active);
-    if (d)
-      kpis.push({
-        kpiId: d.id,
-        code: d.code,
-        label: d.label,
-        labelOverride: null,
-        sortOrder: 999,
-        fromGroup: false,
-      });
-  }
+  // Voci con un obiettivo assegnato ma fuori dal foglio della persona (obiettivi «misti»):
+  // restano visibili, in fondo.
+  const kpis = withExtraSheetKpis(
+    kpisByPerson.get(profile.id) ?? [],
+    targets.map((t) => t.kpiId),
+    activeSheetKpis(defs),
+  );
   const rows = buildPersonSheet({
     days,
     kpis,
@@ -358,8 +375,8 @@ export async function getMyWeek(
     generalComment: published.find((c) => c.kpiId === null)?.body ?? null,
     note: note?.body ?? "",
     filledDates: [...new Set(entries.map((e) => e.date))],
-    store: { totals, targets: storeTargets, bestPerformerName },
-    kpis: defs.filter((d) => d.active).map((d) => ({ kpiId: d.id, code: d.code, label: d.label })),
+    store: { totals, assigned, targets: storeTargets, bestPerformerName },
+    kpis: activeSheetKpis(defs),
   };
 }
 
@@ -406,8 +423,9 @@ export async function getMyWeekSummary(
     .eq("id", profileId)
     .maybeSingle();
   const zone = (me?.home_zone ?? "vista") as TargetZone;
+  const defs = await getKpiDefinitions(db);
   const [kpisByPerson, entries, targets, { count }] = await Promise.all([
-    getPeopleKpis(db, [{ id: profileId, zone }]),
+    getPeopleKpis(db, [{ id: profileId, zone }], defs),
     getEntries(db, days[0], days[6], [profileId]),
     getWeeklyTargets(db, weekStart, [profileId]),
     db
@@ -418,7 +436,12 @@ export async function getMyWeekSummary(
   ]);
   const rows = buildPersonSheet({
     days,
-    kpis: kpisByPerson.get(profileId) ?? [],
+    // Come nella pagina Obiettivi: anche gli obiettivi «misti» (voci fuori dal foglio).
+    kpis: withExtraSheetKpis(
+      kpisByPerson.get(profileId) ?? [],
+      targets.map((t) => t.kpiId),
+      activeSheetKpis(defs),
+    ),
     entries,
     targets: targetsByPerson(targets)[profileId] ?? {},
   });

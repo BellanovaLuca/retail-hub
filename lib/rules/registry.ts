@@ -83,8 +83,18 @@ export function validateRuleParams(
   return def.parse(params);
 }
 
-/** Avviso ignorato: `date` null = per tutta la settimana. */
-export type RuleOverride = { ruleId: string; date: ISODate | null };
+/**
+ * Avviso ignorato: `date` null = per tutta la settimana; con `profileId` vale solo per gli avvisi
+ * di quella persona (senza, per tutti: regole di negozio e avvisi ignorati prima che esistesse).
+ */
+export type RuleOverride = { ruleId: string; date: ISODate | null; profileId?: string | null };
+
+/** L'avviso ignorato `o` copre la violazione `v`? */
+export function overrideCovers(o: RuleOverride, v: Violation): boolean {
+  if (o.ruleId !== v.ruleId) return false;
+  if (o.date !== null && o.date !== v.date) return false;
+  return !o.profileId || o.profileId === v.profileId;
+}
 
 function configViolation(rule: RuleRecord, reason: string): Violation {
   return {
@@ -114,7 +124,8 @@ function compareViolations(a: Violation, b: Violation): number {
  * Valuta le regole sulla settimana. Non lancia mai: parametri non validi, variabili mancanti, tipi
  * sconosciuti o errori interni diventano una violazione "info" che segnala la regola mal configurata.
  * Le regole non attive sono saltate; gli override eliminano le violazioni di quella regola in quel
- * giorno (o in tutta la settimana se `date` è null). Risultato ordinato per data e ora.
+ * giorno (o in tutta la settimana se `date` è null), per la sola persona indicata se c'è.
+ * Risultato ordinato per data e ora.
  */
 export function evaluateRules(
   ctx: RuleContext,
@@ -144,12 +155,7 @@ export function evaluateRules(
     }
   }
   return out
-    .filter(
-      (v) =>
-        !overrides.some(
-          (o) => o.ruleId === v.ruleId && (o.date === null || (v.date && o.date === v.date)),
-        ),
-    )
+    .filter((v) => !overrides.some((o) => overrideCovers(o, v)))
     .sort(compareViolations);
 }
 

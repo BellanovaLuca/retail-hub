@@ -9,7 +9,8 @@ import { FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import type { CoverageSlot } from "@/lib/coverage";
 import type { Violation } from "@/lib/rules/types";
-import { ignoreViolation, restoreViolation } from "@/app/admin/impostazioni/regole/actions";
+import { restoreViolation } from "@/app/admin/impostazioni/regole/actions";
+import { ignoreWeekViolation } from "../actions";
 import { ShiftEditor, type EditorProps } from "./shift-editor";
 
 export type DayCoverage = Record<
@@ -29,7 +30,13 @@ export function EditorWithRules({
   "sidePanelExtra" | "cellWarning" | "footerExtra" | "warningsCount" | "warningsList"
 > & {
   violations: Violation[];
-  ignored: { id: string; ruleId: string; date: string | null; note: string }[];
+  ignored: {
+    id: string;
+    ruleId: string;
+    date: string | null;
+    profileId: string | null;
+    note: string;
+  }[];
   ruleNames: Record<string, string>;
   coverage: DayCoverage;
 }) {
@@ -115,6 +122,7 @@ export function EditorWithRules({
           violations={violations}
           ignored={ignored}
           ruleNames={ruleNames}
+          personNames={Object.fromEntries(props.people.map((p) => [p.id, p.displayName]))}
         />
       }
     />
@@ -144,11 +152,19 @@ function ViolationsPanel({
   violations,
   ignored,
   ruleNames,
+  personNames,
 }: {
   weekId: string;
   violations: Violation[];
-  ignored: { id: string; ruleId: string; date: string | null; note: string }[];
+  ignored: {
+    id: string;
+    ruleId: string;
+    date: string | null;
+    profileId: string | null;
+    note: string;
+  }[];
   ruleNames: Record<string, string>;
+  personNames: Record<string, string>;
 }) {
   const router = useRouter();
   const [ignoring, setIgnoring] = useState<Violation | null>(null);
@@ -206,10 +222,13 @@ function ViolationsPanel({
                   onSubmit={(e) => {
                     e.preventDefault();
                     startTransition(async () => {
-                      const res = await ignoreViolation({
+                      // Un avviso su una persona si ignora solo per lei: quelli dei colleghi
+                      // sulla stessa regola restano.
+                      const res = await ignoreWeekViolation({
                         weekId,
                         ruleId: v.ruleId,
                         date: v.date ?? null,
+                        profileId: v.profileId ?? null,
                         note,
                       });
                       setResult(res);
@@ -260,6 +279,7 @@ function ViolationsPanel({
               <li key={o.id} className="flex items-start justify-between gap-2">
                 <span>
                   {ruleNames[o.ruleId] ?? "Regola"}
+                  {o.profileId ? ` · ${personNames[o.profileId] ?? "persona non più in elenco"}` : ""}
                   {o.date ? ` · ${o.date.slice(8)}/${o.date.slice(5, 7)}` : " · tutta la settimana"}
                   <span className="block text-muted">{o.note}</span>
                 </span>

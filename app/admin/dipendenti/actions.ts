@@ -13,7 +13,7 @@ import {
 } from "@/lib/auth/guards";
 import { credentialsMessage, generatePin, syntheticEmail } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
-import { nowInRome, toISODate } from "@/lib/dates";
+import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { sameName } from "@/lib/employees/confirm";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
@@ -101,29 +101,6 @@ async function saveAdminNotes(db: Db, profileId: string, notes: string | null | 
   if (error) throw new ActionError(dbErrorMessage(error, "Note non salvate."));
 }
 
-/** Le voci degli obiettivi della persona partono dal gruppo della sua area (§8.3). */
-async function assignDefaultKpis(db: Db, profileId: string, homeZone: EmployeeValues["homeZone"]) {
-  const setName = homeZone === "sole" ? "Sole" : "Vista";
-  const { data: set } = await db.from("kpi_sets").select("id").eq("name", setName).maybeSingle();
-  if (!set) return;
-  const { data: items } = await db
-    .from("kpi_set_items")
-    .select("kpi_id, label_override, sort_order")
-    .eq("set_id", set.id);
-  if (!items?.length) return;
-  const { error } = await db.from("profile_kpis").upsert(
-    items.map((i) => ({
-      profile_id: profileId,
-      kpi_id: i.kpi_id,
-      label_override: i.label_override,
-      sort_order: i.sort_order,
-    })),
-    { onConflict: "profile_id,kpi_id", ignoreDuplicates: true },
-  );
-  // Non blocca la creazione: le voci si assegnano comunque alla prima conferma degli obiettivi.
-  if (error) console.error("nuovo dipendente: voci degli obiettivi non assegnate", error);
-}
-
 function withFieldErrors<T>(fn: () => Promise<ActionResult<T>>) {
   return runAction<T>(async () => {
     try {
@@ -199,7 +176,8 @@ export async function createEmployee(
       if (undoError) console.error("nuovo dipendente: annullamento non riuscito", undoError);
       throw error;
     }
-    await assignDefaultKpis(supabase, id, v.homeZone);
+    // Niente copia personale delle voci degli obiettivi: il foglio di ciascuno segue il gruppo
+    // della sua area (§20); `profile_kpis` nasce solo quando si personalizza una persona a mano.
 
     revalidatePath("/admin/dipendenti");
     return {
@@ -376,6 +354,22 @@ export async function setEmployeeActive(id: string, active: boolean): Promise<Ac
 
     let removed: { shifts: number; weeks: number } | null = null;
     if (!wanted) {
+      // Fuori dalle responsabilità dalla settimana corrente in poi (assegnazioni settimanali e
+      // schede): altrimenti resterebbe «assegnata» senza poter più essere in turno. Ripetibile:
+      // se uno dei passi dopo fallisce, riprovando non cambia nulla.
+      const { error: dutiesError } = await supabase.rpc("remove_from_responsibilities", {
+        p_profile_id: personId,
+        p_week: toISODate(weekStart(nowInRome())),
+      });
+      if (dutiesError) {
+        return {
+          ok: false,
+          message: dbErrorMessage(
+            dutiesError,
+            "Non è stato possibile toglierla dalle responsabilità: l'account resta attivo. Riprova.",
+          ),
+        };
+      }
       const { data, error } = await supabase.rpc("remove_future_shifts", {
         p_profile_id: personId,
         p_from: toISODate(nowInRome()),
@@ -415,6 +409,11 @@ export async function setEmployeeActive(id: string, active: boolean): Promise<Ac
 
     revalidatePath("/admin/dipendenti");
     revalidatePath(`/admin/dipendenti/${personId}`);
+    if (!wanted) {
+      revalidatePath("/admin/comunicazioni/responsabilita", "layout");
+      revalidatePath("/comunicazioni/responsabilita", "layout");
+      revalidatePath("/");
+    }
     if (removed && (removed.shifts > 0 || removed.weeks > 0)) {
       revalidatePath("/admin/turni", "layout");
       revalidatePath("/admin");

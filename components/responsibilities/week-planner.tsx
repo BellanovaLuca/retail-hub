@@ -28,6 +28,7 @@ import {
 } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
 import { scheduleLabel } from "./format";
+import { useUnsavedGuard } from "./use-unsaved-guard";
 import { WeekDayGrid } from "./week-day-grid";
 
 type Person = { id: string; name: string; color: string | null };
@@ -104,6 +105,32 @@ export function WeekPlanner({
   const week = getISOWeek(parseISO(weekStart));
   const locked = !editable || pending;
 
+  // Dopo un salvataggio riuscito valgono i dati del server: le attività salvate escono da
+  // `plans` appena arrivano i dati nuovi (se nel frattempo non sono state toccate di nuovo).
+  // Altrimenti il valore locale coprirebbe per sempre ciò che cambia sul server (un altro admin,
+  // una persona disattivata) e verrebbe risalvato per sbaglio.
+  const justSaved = React.useRef(new Map<string, PersonDays>());
+  React.useEffect(() => {
+    if (justSaved.current.size === 0) return;
+    const saved = justSaved.current;
+    justSaved.current = new Map();
+    setPlans((s) => {
+      const rest = { ...s };
+      for (const [id, sent] of saved) {
+        if (rest[id] && samePersonDays(rest[id], sent)) delete rest[id];
+      }
+      return rest;
+    });
+  }, [initial]);
+
+  const unsaved =
+    changed.length > 0 ||
+    items.some((i) => dayDrafts[i.id] && dayDrafts[i.id].join() !== i.scheduleDays.join());
+  useUnsavedGuard(
+    unsaved,
+    "Hai modifiche alle responsabilità non ancora salvate: se cambi settimana o pagina si perdono. Continuare senza salvare?",
+  );
+
   /** Aggiunge o toglie una responsabilità: le spunte non ancora salvate restano. */
   const manage = (run: () => Promise<{ ok: boolean; message?: string }>, after?: () => void) =>
     startTransition(async () => {
@@ -125,15 +152,16 @@ export function WeekPlanner({
 
   const save = () =>
     startTransition(async () => {
-      const res = await saveWeekAssignments({
-        weekStart,
-        changes: changed.map((c) => ({
-          responsibilityId: c.id,
-          personDays: normalizePersonDays(plans[c.id] ?? {}),
-        })),
-      });
+      const changes = changed.map((c) => ({
+        responsibilityId: c.id,
+        personDays: normalizePersonDays(plans[c.id] ?? {}),
+      }));
+      const res = await saveWeekAssignments({ weekStart, changes });
       setResult(res);
-      if (res.ok) router.refresh();
+      if (res.ok) {
+        for (const c of changes) justSaved.current.set(c.responsibilityId, c.personDays);
+        router.refresh();
+      }
     });
 
   const pick = (id: string) => {

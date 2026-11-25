@@ -64,6 +64,8 @@ export default async function ObiettiviPage({
   const storeRows = storeTotalsRows({
     kpis: week.kpis,
     totals: week.store.totals,
+    // META, NUANCE…: obiettivo = somma di quelli assegnati in negozio (nessun dato per persona).
+    assigned: week.store.assigned,
     store: week.store.targets,
     headlineOnly: true,
   });

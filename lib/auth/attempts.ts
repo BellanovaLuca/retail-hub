@@ -4,7 +4,10 @@ import { LOCKOUT_MINUTES, MAX_FAILED_PER_CODE, MAX_FAILED_PER_IP } from "./locko
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-export type AttemptGate = { ok: true; attemptId: string } | { ok: false; lockedUntil: Date };
+export type AttemptGate =
+  /** `reachedLimit`: se questo tentativo fallisce, il codice resta bloccato. */
+  | { ok: true; attemptId: string; reachedLimit: boolean }
+  | { ok: false; lockedUntil: Date };
 
 /** IP del client: prima quello messo dalla piattaforma (Vercel), poi x-forwarded-for. */
 export function clientIp(headers: Headers): string {
@@ -34,8 +37,13 @@ export async function beginLoginAttempt(
     p_minutes: LOCKOUT_MINUTES,
   });
   if (error) throw new Error(`Tentativi di accesso non registrabili: ${error.message}`);
-  const gate = data as { attempt_id: string | null; locked_until: string | null } | null;
-  if (gate?.attempt_id) return { ok: true, attemptId: gate.attempt_id };
+  const gate = data as {
+    attempt_id: string | null;
+    locked_until: string | null;
+    reached_limit?: boolean;
+  } | null;
+  if (gate?.attempt_id)
+    return { ok: true, attemptId: gate.attempt_id, reachedLimit: gate.reached_limit === true };
   if (gate?.locked_until) return { ok: false, lockedUntil: new Date(gate.locked_until) };
   throw new Error("Tentativi di accesso: risposta inattesa.");
 }

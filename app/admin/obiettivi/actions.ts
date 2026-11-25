@@ -848,15 +848,62 @@ export async function renameGroupItem(
   });
 }
 
-export async function removeGroupItem(setId: string, kpiId: string): Promise<ActionResult> {
+/**
+ * Toglie una voce dal gruppo. Dalla tabella dell'Assegnazione (con `weekStart`) toglie anche gli
+ * obiettivi di quella settimana per quella voce alle persone dell'area: la voce esce davvero dai
+ * loro fogli, senza aspettare «Conferma e avvisa».
+ */
+export async function removeGroupItem(
+  setId: string,
+  kpiId: string,
+  weekStart?: string,
+): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
+    const set = z.uuid().parse(setId);
+    const kpi = z.uuid().parse(kpiId);
+    const week = weekStart === undefined ? null : monday.parse(weekStart);
     const { error } = await supabase
       .from("kpi_set_items")
       .delete()
-      .eq("set_id", z.uuid().parse(setId))
-      .eq("kpi_id", z.uuid().parse(kpiId));
+      .eq("set_id", set)
+      .eq("kpi_id", kpi);
     if (error) throw new ActionError(dbErrorMessage(error, "Gruppo non aggiornato."));
+
+    if (week) {
+      const { data: group } = await supabase
+        .from("kpi_sets")
+        .select("name")
+        .eq("id", set)
+        .maybeSingle();
+      // Solo per i gruppi di area: «Sole» → persone del Sole, «Vista» → Vista e jolly.
+      const zones =
+        group?.name === "Sole" ? ["sole"] : group?.name === "Vista" ? ["vista", "jolly"] : null;
+      if (zones) {
+        const { data: members, error: membersError } = await supabase
+          .from("profiles")
+          .select("id")
+          .in("home_zone", zones);
+        const ids = (members ?? []).map((m) => m.id);
+        const { error: targetsError } =
+          membersError || ids.length === 0
+            ? { error: membersError }
+            : await supabase
+                .from("weekly_targets")
+                .delete()
+                .eq("week_start", week)
+                .eq("kpi_id", kpi)
+                .in("profile_id", ids);
+        if (targetsError) {
+          revalidatePath("/admin/obiettivi", "layout");
+          return {
+            ok: false,
+            message:
+              "La voce è uscita dalla tabella, ma i suoi obiettivi della settimana non sono stati tolti: svuota la colonna e conferma.",
+          };
+        }
+      }
+    }
     revalidatePath("/admin/obiettivi", "layout");
     return { ok: true };
   });
@@ -934,14 +981,16 @@ export async function removePersonKpi(profileId: string, kpiId: string): Promise
   });
 }
 
-/** "Reimposta dal gruppo della sua area": sostituisce le voci della persona con quelle del gruppo. */
+/**
+ * "Reimposta dal gruppo della sua area": toglie le voci personali. Senza voci proprie il foglio
+ * della persona torna a seguire il gruppo della sua area, anche quando il gruppo cambia.
+ */
 export async function resetPersonKpis(profileId: string): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase } = await adminAction();
     const pid = z.uuid().parse(profileId);
     const { error } = await supabase.from("profile_kpis").delete().eq("profile_id", pid);
     if (error) throw new ActionError(dbErrorMessage(error, "Voci non reimpostate."));
-    await ensureProfileKpis(supabase, [pid]);
     revalidatePath("/admin/obiettivi", "layout");
     return { ok: true, message: "Voci reimpostate dal gruppo della sua area." };
   });

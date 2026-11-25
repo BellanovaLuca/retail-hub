@@ -19,6 +19,7 @@ import {
   type ResponsibilityAssignment,
   type WeekTeam,
 } from "@/lib/responsibilities/assignment";
+import { nowInRome, toISODate } from "@/lib/dates";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/types";
 
@@ -100,8 +101,14 @@ export async function getResponsibilities(
     opts.people ? Promise.resolve(opts.people) : directory(db).then((d) => d.byId),
     opts.week ? getWeekTeams(db, opts.week) : Promise.resolve(null),
   ]);
+  // Dalla settimana corrente in poi chi è stato disattivato non conta più tra gli assegnati
+  // (le settimane passate restano com'erano: lì ha lavorato davvero).
+  const hideInactive = !!opts.week && opts.week >= mondayOf(toISODate(nowInRome()));
+  const counts = (id: string) => !hideInactive || byId.get(id)?.active === true;
   return (rows ?? []).map((r) => {
-    const mine = (assignees ?? []).filter((a) => a.responsibility_id === r.id);
+    const mine = (assignees ?? []).filter(
+      (a) => a.responsibility_id === r.id && counts(a.profile_id),
+    );
     const owner = mine.find((a) => a.role === "owner");
     const supports = mine.filter((a) => a.role === "support");
     const plan = teams && opts.week ? effectiveWeekPlan(teams.get(r.id) ?? [], opts.week) : null;
@@ -122,7 +129,7 @@ export async function getResponsibilities(
       };
       const weekly = withWeekTeam(
         base,
-        plan.profileIds.filter((id) => byId.has(id)),
+        plan.profileIds.filter((id) => byId.has(id) && counts(id)),
         plan.personDays,
       );
       return { ...weekly, supports: weekly.supportIds.map((id) => ref(byId, id)) };

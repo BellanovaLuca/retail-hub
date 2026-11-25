@@ -24,6 +24,7 @@ import {
   REQUEST_TYPES,
   RESET_CONFIRM_WORD,
   requestTypeLabel,
+  swapErrorMessage,
   type RequestStatus,
 } from "@/lib/requests";
 
@@ -54,8 +55,10 @@ async function publishSwap(
       .select("status")
       .eq("week_start", w)
       .maybeSingle();
-    if (data?.status === "published")
-      await publishSnapshot(db, w, actorId, { mode: "changed", onlyDays: keys });
+    if (data?.status === "published") {
+      const res = await publishSnapshot(db, w, actorId, { mode: "changed", onlyDays: keys });
+      if (!res.ok) throw new Error(res.message);
+    }
   }
 }
 
@@ -73,6 +76,7 @@ export async function decideRequests(
     let done = 0;
     let failed = 0;
     let lastError = "";
+    let unpublished = 0;
 
     for (const r of requests ?? []) {
       if (!awaitsAdmin({ type: r.type, status: r.status as RequestStatus })) {
@@ -96,9 +100,7 @@ export async function decideRequests(
         .select("id");
       if (error) {
         failed++;
-        lastError = error.message.includes("Turni dello scambio")
-          ? "I turni dello scambio non esistono più: controlla il foglio turni."
-          : dbErrorMessage(error, "Decisione non salvata.");
+        lastError = swapErrorMessage(error) ?? dbErrorMessage(error, "Decisione non salvata.");
         continue;
       }
       if (!updated?.length) {
@@ -108,7 +110,14 @@ export async function decideRequests(
       }
       done++;
       if (decision === "approved" && r.type === "scambio_turno") {
-        await publishSwap(supabase, profile.id, r);
+        // Lo scambio è già fatto: se la ripubblicazione non riesce lo si dice, senza far
+        // risultare «non salvata» una decisione che invece è stata registrata.
+        try {
+          await publishSwap(supabase, profile.id, r);
+        } catch (publishError) {
+          console.error(publishError);
+          unpublished++;
+        }
       }
       const what = `${requestTypeLabel(r.type)} · ${formatRange(r.start_date, r.end_date)}`;
       const recipients =
@@ -135,7 +144,10 @@ export async function decideRequests(
       ok: true,
       message:
         `${done} richiest${done === 1 ? "a" : "e"} ${decision === "approved" ? "approvat" : "rifiutat"}${done === 1 ? "a" : "e"}` +
-        (failed ? ` · ${failed} non aggiornate: ${lastError}` : "."),
+        (failed ? ` · ${failed} non aggiornate: ${lastError}` : ".") +
+        (unpublished
+          ? " Lo scambio è fatto ma gli orari non sono stati ripubblicati: ripubblica la settimana dal foglio turni."
+          : ""),
       data: { done, failed },
     };
   });

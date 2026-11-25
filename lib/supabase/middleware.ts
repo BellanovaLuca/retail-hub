@@ -2,13 +2,20 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "./database.types";
 import { isSessionExpired } from "@/lib/auth/session-age";
-import { SESSION_MAX_AGE_SECONDS, supabaseAnonKey, supabaseUrl } from "./env";
+import { sessionCookieOptions, supabaseAnonKey, supabaseUrl } from "./env";
 
 /** Intestazione di risposta con l'id di chi è collegato, letta dal service worker. */
 export const USER_HEADER = "x-staff-user";
 
-/** Percorsi raggiungibili senza sessione. */
-const PUBLIC_PATHS = ["/accesso", "/privacy", "/api/auth/pin", "/api/ical/", "/api/cron/", "/dev/"];
+/** Percorsi raggiungibili senza sessione (`/dev/` solo in sviluppo: in produzione non esiste). */
+const PUBLIC_PATHS = [
+  "/accesso",
+  "/privacy",
+  "/api/auth/pin",
+  "/api/ical/",
+  "/api/cron/",
+  ...(process.env.NODE_ENV === "production" ? [] : ["/dev/"]),
+];
 
 export function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(
@@ -21,7 +28,7 @@ export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(supabaseUrl(), supabaseAnonKey(), {
-    cookieOptions: { maxAge: SESSION_MAX_AGE_SECONDS },
+    cookieOptions: sessionCookieOptions(),
     cookies: {
       getAll() {
         return request.cookies.getAll();

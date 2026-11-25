@@ -30,7 +30,13 @@ export function normalizeWeekParam(value: string | undefined, fallback: Date): s
 }
 
 export async function getTemplates(db: Db): Promise<TemplateRecord[]> {
-  const { data } = await db.from("shift_templates").select("*").order("sort_order").order("code");
+  const { data, error } = await db
+    .from("shift_templates")
+    .select("*")
+    .order("sort_order")
+    .order("code");
+  // Mai un elenco vuoto al posto di un errore: chi pubblica o esporta lavorerebbe su dati monchi.
+  if (error) throw error;
   return (data ?? []).map((t) => ({
     id: t.id,
     code: t.code,
@@ -44,17 +50,19 @@ export async function getTemplates(db: Db): Promise<TemplateRecord[]> {
 
 /** Persone attive con i dati che servono alla pianificazione (solo admin). */
 export async function getSchedulePeople(db: Db): Promise<SchedulePerson[]> {
-  const [{ data: profiles }, { data: memberships }] = await Promise.all([
-    db
-      .from("profiles")
-      .select(
-        "id, display_name, short_label, color, home_zone, weekly_hours, counts_for_coverage, sort_order",
-      )
-      .eq("active", true)
-      .order("sort_order")
-      .order("display_name"),
-    db.from("profile_departments").select("profile_id, department_id, is_primary"),
-  ]);
+  const [{ data: profiles, error }, { data: memberships, error: membershipsError }] =
+    await Promise.all([
+      db
+        .from("profiles")
+        .select(
+          "id, display_name, short_label, color, home_zone, weekly_hours, counts_for_coverage, sort_order",
+        )
+        .eq("active", true)
+        .order("sort_order")
+        .order("display_name"),
+      db.from("profile_departments").select("profile_id, department_id, is_primary"),
+    ]);
+  if (error ?? membershipsError) throw error ?? membershipsError;
   return (profiles ?? []).map((p) => {
     const mine = (memberships ?? []).filter((m) => m.profile_id === p.id);
     return {
@@ -188,29 +196,33 @@ export async function getAdminWeek(db: Db, weekStart: string): Promise<AdminWeek
 
 /**
  * Turni di lavoro (in ordine stabile: giorno, orario d'inizio, id) e assenze di una settimana.
- * Senza `weekId` (settimana non ancora creata) i turni sono vuoti.
+ * Senza `weekId` (settimana non ancora creata) i turni sono vuoti. Un errore di lettura viene
+ * rilanciato.
  */
 async function readWeekShiftsAndLeaves(
   db: Db,
   weekId: string | null,
   days: string[],
 ): Promise<{ shifts: ShiftRecord[]; leaves: LeaveRecord[] }> {
-  const [{ data: shifts }, { data: leaves }] = await Promise.all([
-    weekId
-      ? db
-          .from("shifts")
-          .select("*")
-          .eq("week_id", weekId)
-          .order("date")
-          .order("start_time")
-          .order("id")
-      : Promise.resolve({ data: [] as Parameters<typeof toShiftRecord>[0][] }),
-    db
-      .from("leaves")
-      .select("profile_id, date, type, hours, status, source, request_id")
-      .gte("date", days[0])
-      .lte("date", days[6]),
-  ]);
+  const [{ data: shifts, error: shiftsError }, { data: leaves, error: leavesError }] =
+    await Promise.all([
+      weekId
+        ? db
+            .from("shifts")
+            .select("*")
+            .eq("week_id", weekId)
+            .order("date")
+            .order("start_time")
+            .order("id")
+        : Promise.resolve({ data: [] as Parameters<typeof toShiftRecord>[0][], error: null }),
+      db
+        .from("leaves")
+        .select("profile_id, date, type, hours, status, source, request_id")
+        .gte("date", days[0])
+        .lte("date", days[6]),
+    ]);
+  // Una lettura fallita non è «settimana vuota»: pubblicando si cancellerebbero gli orari di tutti.
+  if (shiftsError ?? leavesError) throw shiftsError ?? leavesError;
   return {
     shifts: (shifts ?? []).map(toShiftRecord),
     leaves: (leaves ?? []).map((l) => ({

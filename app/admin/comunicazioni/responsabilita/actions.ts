@@ -58,6 +58,24 @@ export type ResponsibilityInput = z.input<typeof responsibilitySchema>;
 type Assignee = { profile_id: string; role: "owner" | "support"; sort_order: number };
 
 /**
+ * Stato delle assegnazioni settimanali di un'attività rispetto alla settimana corrente:
+ * `any` = ha righe; `inForce` = ne vale una (di questa settimana o ripresa da una precedente);
+ * `hasPast` = ne ha di settimane passate; `pastTeam` = quella che varrebbe, tolte le righe da
+ * questa settimana in poi, ha delle persone.
+ */
+function gridState(rows: { week_start: string; profile_ids: string[] }[], currentWeek: string) {
+  const past = rows
+    .filter((w) => w.week_start < currentWeek)
+    .sort((a, b) => (a.week_start < b.week_start ? 1 : -1))[0];
+  return {
+    any: rows.length > 0,
+    inForce: rows.some((w) => w.week_start <= currentWeek),
+    hasPast: !!past,
+    pastTeam: !!past && past.profile_ids.length > 0,
+  };
+}
+
+/**
  * Crea o modifica un'attività con le sue assegnazioni. Le assegnazioni cambiate si tolgono e si
  * rimettono (mai update): così il registro modifiche conserva lo storico completo di chi era
  * responsabile e da quando. I nuovi assegnatari ricevono la notifica `assignment_new`.
@@ -77,18 +95,39 @@ export async function saveResponsibility(
     const v = parsed.data;
     const { supabase } = await adminAction();
 
-    const [{ data: existing }, { data: oldAssignees }] = await Promise.all([
-      supabase.from("responsibilities").select("id, attachments").eq("id", v.id).maybeSingle(),
-      supabase
-        .from("responsibility_assignees")
-        .select("profile_id, role, sort_order")
-        .eq("responsibility_id", v.id),
-    ]);
+    const currentWeek = mondayOf(toISODate(nowInRome()));
+    const [{ data: existing }, { data: oldAssignees }, { data: weekRows, error: weekError }] =
+      await Promise.all([
+        supabase
+          .from("responsibilities")
+          .select("id, attachments, all_staff")
+          .eq("id", v.id)
+          .maybeSingle(),
+        supabase
+          .from("responsibility_assignees")
+          .select("profile_id, role, sort_order")
+          .eq("responsibility_id", v.id),
+        supabase
+          .from("responsibility_week_assignments")
+          .select("week_start, profile_ids")
+          .eq("responsibility_id", v.id)
+          .order("week_start", { ascending: false }),
+      ]);
+    if (weekError)
+      return { ok: false, message: dbErrorMessage(weekError, "Attività non salvata.") };
+    const grid = gridState(weekRows ?? [], currentWeek);
+    // Entrando o uscendo da «Per tutti» le assegnazioni della griglia da questa settimana in poi
+    // si tolgono: altrimenti, togliendo «Per tutti», tornerebbe in vigore un gruppo vecchio.
+    const clearGrid = grid.any && (v.allStaff || existing?.all_staff === true);
+    // Assegnata dalla griglia «Chi fa cosa»: persone e giorni si scelgono lì. Dalla scheda non
+    // si toccano (non avrebbero effetto) e nessuno viene avvisato di una responsabilità che non ha.
+    const gridManaged = !v.allStaff && (clearGrid ? grid.hasPast : grid.inForce);
 
+    const scheduleDays = [...new Set(v.scheduleDays)].sort();
     const row = {
       title: v.title,
       description_md: v.description,
-      schedule_days: [...new Set(v.scheduleDays)].sort(),
+      ...(gridManaged ? {} : { schedule_days: scheduleDays }),
       active: v.active,
       all_staff: v.allStaff,
       attachments: v.attachments,
@@ -109,20 +148,42 @@ export async function saveResponsibility(
       if (error) return { ok: false, message: dbErrorMessage(error, "Attività non salvata.") };
     }
 
-    // Assegnazioni desiderate.
-    const desired: Assignee[] = v.allStaff
-      ? []
-      : [
-          ...(v.ownerId ? [{ profile_id: v.ownerId, role: "owner" as const, sort_order: 0 }] : []),
-          ...v.supportIds.map((id, i) => ({
-            profile_id: id,
-            role: "support" as const,
-            sort_order: i + 1,
-          })),
-        ];
+    if (clearGrid) {
+      const { error } = await supabase
+        .from("responsibility_week_assignments")
+        .delete()
+        .eq("responsibility_id", v.id)
+        .gte("week_start", currentWeek);
+      if (error) return { ok: false, message: dbErrorMessage(error, "Assegnazioni non salvate.") };
+      // Se valeva un gruppo ripreso da una settimana passata, lo si chiude qui con una riga
+      // vuota: le settimane passate restano com'erano.
+      if (grid.pastTeam) {
+        const { error: emptyError } = await supabase
+          .from("responsibility_week_assignments")
+          .insert({ responsibility_id: v.id, week_start: currentWeek, profile_ids: [] });
+        if (emptyError)
+          return { ok: false, message: dbErrorMessage(emptyError, "Assegnazioni non salvate.") };
+      }
+    }
+
+    // Assegnazioni desiderate (con la griglia in vigore restano quelle che sono).
+    const old = (oldAssignees ?? []) as Assignee[];
+    const desired: Assignee[] = gridManaged
+      ? old
+      : v.allStaff
+        ? []
+        : [
+            ...(v.ownerId
+              ? [{ profile_id: v.ownerId, role: "owner" as const, sort_order: 0 }]
+              : []),
+            ...v.supportIds.map((id, i) => ({
+              profile_id: id,
+              role: "support" as const,
+              sort_order: i + 1,
+            })),
+          ];
     const same = (a: Assignee, b: Assignee) =>
       a.profile_id === b.profile_id && a.role === b.role && a.sort_order === b.sort_order;
-    const old = (oldAssignees ?? []) as Assignee[];
     const toRemove = old.filter((o) => !desired.some((d) => same(o, d)));
     const toAdd = desired.filter((d) => !old.some((o) => same(o, d)));
 
@@ -163,7 +224,7 @@ export async function saveResponsibility(
     // Notifica solo chi prima non era assegnato con quel ruolo.
     const oldKey = new Set(old.map((o) => `${o.profile_id}:${o.role}`));
     const newcomers = desired.filter((d) => !oldKey.has(`${d.profile_id}:${d.role}`));
-    const days = scheduleLabel(row.schedule_days);
+    const days = scheduleLabel(scheduleDays);
     await Promise.all(
       (["owner", "support"] as const).map((role) =>
         notify(
@@ -265,10 +326,7 @@ export async function saveWeekAssignments(
       for (const [id, days] of Object.entries(c.personDays)) {
         const old = daysOfPerson(r, id);
         if (old.join() === days.join()) continue;
-        news.set(id, [
-          ...(news.get(id) ?? []),
-          { title: r.title, days, isNew: old.length === 0 },
-        ]);
+        news.set(id, [...(news.get(id) ?? []), { title: r.title, days, isNew: old.length === 0 }]);
       }
     }
     const week = `Week ${getISOWeek(parseISO(weekStart))}`;

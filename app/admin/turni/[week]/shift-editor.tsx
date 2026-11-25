@@ -53,6 +53,7 @@ import type {
   TemplateRecord,
 } from "@/lib/schedule/types";
 import {
+  dayBreakMinutes,
   dayHeader,
   formatHoursIt,
   groupPeopleByDepartment,
@@ -431,7 +432,7 @@ export function ShiftEditor(props: EditorProps) {
             segments: sortShifts(dayShifts)
               .filter((s) => s.start && s.end)
               .map((s) => ({ start: s.start!, end: s.end!, isBackOffice: s.isBackOffice })),
-            breakMinutes: first?.breakMinutes ?? 0,
+            breakMinutes: dayBreakMinutes(dayShifts),
             departmentId: first?.departmentId ?? person?.primaryDepartmentId ?? null,
             zone,
             note: first?.note ?? null,

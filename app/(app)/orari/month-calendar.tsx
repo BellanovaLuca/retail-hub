@@ -10,8 +10,10 @@ export function MonthCalendar({
 }: {
   month: string;
   today: string;
-  days: Record<string, { text: string; changed: boolean }>;
-  leaves: Record<string, string>;
+  /** `work` = turno con orario (non un riposo o un'altra assenza scritta nel foglio). */
+  days: Record<string, { text: string; changed: boolean; work: boolean }>;
+  /** Assenze del mese: quelle a giornata intera prevalgono sul turno rimasto pubblicato. */
+  leaves: Record<string, { label: string; fullDay: boolean }>;
 }) {
   const first = startOfMonth(parseISO(`${month}-01`));
   const last = endOfMonth(first);
@@ -45,18 +47,28 @@ export function MonthCalendar({
               )}
             >
               <span className="text-xs text-muted nums">{d.getDate()}</span>
-              {entry?.text ? (
-                <span className="text-[0.6875rem] leading-tight nums sm:text-sm">
+              {leave?.fullDay ? (
+                <span className="text-[0.6875rem] text-muted sm:text-xs">{leave.label}</span>
+              ) : null}
+              {entry?.text && (entry.work || !leave?.fullDay) ? (
+                <span
+                  className={cn(
+                    "text-[0.6875rem] leading-tight nums sm:text-sm",
+                    // Turno ancora pubblicato in un giorno di assenza: resta, barrato.
+                    leave?.fullDay && "text-subtle line-through",
+                  )}
+                >
                   {entry.text}
-                  {entry.changed ? (
+                  {entry.changed && !leave?.fullDay ? (
                     <span
                       className="ml-1 inline-block size-1.5 rounded-full bg-warning"
                       aria-label="Modificato"
                     />
                   ) : null}
                 </span>
-              ) : leave ? (
-                <span className="text-[0.6875rem] text-muted sm:text-xs">{leave}</span>
+              ) : null}
+              {leave && !leave.fullDay ? (
+                <span className="text-[0.6875rem] text-muted sm:text-xs">{leave.label}</span>
               ) : null}
             </li>
           );

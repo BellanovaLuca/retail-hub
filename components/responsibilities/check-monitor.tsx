@@ -8,7 +8,7 @@ import * as React from "react";
 import { PersonDot } from "@/components/ui/table";
 import { formatInRome } from "@/lib/dates";
 import { toggleResponsibilityCheck } from "@/lib/responsibilities/actions";
-import { isoWeekdayOf, isScheduledOn } from "@/lib/responsibilities/assignment";
+import { hasAnyAssignee, isoWeekdayOf, isScheduledOn } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
 import { DayLettersInline } from "./day-letters";
 
@@ -60,8 +60,7 @@ export function CheckMonitor({
   /** La persona ha l'attività in quel giorno? */
   const isAssigned = (c: MonitorColumn, personId: string, d: string) =>
     c.allStaff || (c.personDays[personId]?.includes(isoWeekdayOf(d)) ?? false);
-  const hasAssignees = (c: MonitorColumn) =>
-    c.allStaff || Object.values(c.personDays).some((x) => x.length > 0);
+  const hasAssignees = (c: MonitorColumn) => hasAnyAssignee(c);
   /** Attività assegnate, previste in un giorno e non spuntate. */
   const missingOn = (d: string) =>
     columns.filter((c) => hasAssignees(c) && scheduled(c, d) && !checks[c.id]?.[d]);

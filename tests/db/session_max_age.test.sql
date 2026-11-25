@@ -9,6 +9,9 @@ insert into auth.users (id) values
 insert into public.profiles (id, first_name, last_name, display_name, employee_code, role) values
   ('00000000-0000-0000-0000-0000000002a1', 'Ada', 'Admin', 'Ada S', 'TST-S01', 'admin'),
   ('00000000-0000-0000-0000-0000000002e1', 'Elio', 'Uno', 'Elio S', 'TST-S02', 'employee');
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 
 set local role authenticated;
 select set_config('request.jwt.claim.role', 'authenticated', true);

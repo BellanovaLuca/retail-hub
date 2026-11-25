@@ -14,6 +14,9 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-00000000000a', 'Anna', 'Admin', 'Anna', 'ADM-001', 'admin', true),
   ('00000000-0000-0000-0000-0000000000e1', 'Elena', 'Attiva', 'Elena', 'CRD-001', 'employee', true),
   ('00000000-0000-0000-0000-0000000000e2', 'Dario', 'Disattivato', 'Dario', 'CRD-002', 'employee', false);
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 
 -- Dati preparati come service role: ce n'è per tutti, anche propri della persona disattivata.
 insert into public.announcements (title, body_md, audience) values ('Per tutti', 'testo', 'all');

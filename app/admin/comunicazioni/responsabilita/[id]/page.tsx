@@ -4,6 +4,7 @@ import { formatRomeDateTime } from "@/lib/announcements/model";
 import { ResponsibilityEditor } from "@/components/responsibilities/responsibility-editor";
 import { requireAdmin } from "@/lib/auth/session";
 import { getAssignmentHistory, getResponsibilities } from "@/lib/data/responsibilities";
+import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { getPickerData } from "../../editor-data";
 
@@ -20,10 +21,18 @@ export default async function ModificaResponsabilitaPage({
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const supabase = await createClient();
-  const [items, { people }, history] = await Promise.all([
+  const currentWeek = toISODate(weekStart(nowInRome()));
+  const [items, { people }, history, { data: weekRows }] = await Promise.all([
     getResponsibilities(supabase, { includeInactive: true }),
     getPickerData(supabase),
     getAssignmentHistory(supabase, id),
+    // C'è un'assegnazione settimanale in vigore (di questa settimana o ripresa da una prima)?
+    supabase
+      .from("responsibility_week_assignments")
+      .select("week_start")
+      .eq("responsibility_id", id)
+      .lte("week_start", currentWeek)
+      .limit(1),
   ]);
   const r = items.find((x) => x.id === id);
   if (!r) notFound();
@@ -33,6 +42,7 @@ export default async function ModificaResponsabilitaPage({
       <h2 className="mb-8 font-display text-2xl font-light tracking-tight">{r.title}</h2>
       <ResponsibilityEditor
         isNew={false}
+        gridManaged={(weekRows?.length ?? 0) > 0}
         people={people}
         initial={{
           id: r.id,

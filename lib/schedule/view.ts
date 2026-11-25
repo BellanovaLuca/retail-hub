@@ -47,6 +47,16 @@ export function groupShiftsByDay(shifts: ShiftRecord[]) {
   return map;
 }
 
+/**
+ * Pausa di una giornata: la somma delle pause dei suoi pezzi. Al salvataggio la pausa va sul pezzo
+ * più lungo non in back office, che non è per forza il primo: leggerla dal primo pezzo la perde.
+ */
+export function dayBreakMinutes(
+  pieces: { breakMinutes?: number | null; break_minutes?: number | null }[],
+): number {
+  return pieces.reduce((sum, p) => sum + (p.breakMinutes ?? p.break_minutes ?? 0), 0);
+}
+
 /** Ore nette per persona: la pausa vale per la giornata (vedi `dayNetHours`). */
 export function weekHoursByPerson(shifts: ShiftRecord[]) {
   const days = new Map<string, { start: string; end: string; breakMinutes: number }[]>();

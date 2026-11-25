@@ -14,6 +14,9 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-0000000001a0', 'Ada', 'Admin', 'Ada', 'ADM-101', 'admin'),
   ('00000000-0000-0000-0000-0000000001e1', 'Elia', 'Uno', 'Elia', 'CRD-101', 'employee'),
   ('00000000-0000-0000-0000-0000000001e2', 'Emma', 'Due', 'Emma', 'CRD-102', 'employee');
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 
 -- Dati preparati come service role (nessun utente).
 insert into public.profile_admin_notes (profile_id, notes) values

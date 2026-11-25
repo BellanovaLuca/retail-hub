@@ -152,6 +152,20 @@ export function assigneeIds(r: ResponsibilityAssignment): string[] {
   return [...new Set([...(r.ownerId ? [r.ownerId] : []), ...r.supportIds])];
 }
 
+/**
+ * C'è qualcuno a cui tocca l'attività? Le attività «per tutti» sì; le altre solo se almeno una
+ * persona ha almeno un giorno. È la regola unica di tabellone, controllo delle spunte e avvisi:
+ * un'attività senza nessuno assegnato non è «mancante» né «senza nessuno in turno», va prima
+ * assegnata.
+ */
+export function hasAnyAssignee(x: { allStaff: boolean; personDays: PersonDays }): boolean {
+  return x.allStaff || Object.values(x.personDays).some((days) => days.length > 0);
+}
+
+export function hasAssignees(r: ResponsibilityAssignment): boolean {
+  return hasAnyAssignee({ allStaff: r.allStaff, personDays: personDaysOf(r) });
+}
+
 /** Turno pubblicato ridotto a quello che serve qui. */
 export type ShiftLike = { profile_id: string; date: ISODate; is_absence: boolean };
 
@@ -287,6 +301,40 @@ export function uncoveredOn(
   // Senza turni pubblicati non si sa chi c'è: niente allarmi a vuoto.
   if (onShift === null) return [];
   return responsibilities.filter((r) => resolveDuty(r, date, onShift).kind === "uncovered");
+}
+
+/**
+ * Le attività «scoperte» di una data, distinte per motivo: `unassigned` = nessuno assegnato (va
+ * assegnata dalla griglia), `away` = chi è assegnato quel giorno non è in turno. Senza turni
+ * pubblicati non si sa chi c'è: nessuna delle due.
+ */
+export function uncoveredByReason<T extends ResponsibilityAssignment>(
+  responsibilities: T[],
+  date: ISODate,
+  onShift: Set<string> | null,
+): { unassigned: T[]; away: T[] } {
+  const out: { unassigned: T[]; away: T[] } = { unassigned: [], away: [] };
+  if (onShift === null) return out;
+  for (const r of responsibilities) {
+    if (resolveDuty(r, date, onShift).kind !== "uncovered") continue;
+    (hasAssignees(r) ? out.away : out.unassigned).push(r);
+  }
+  return out;
+}
+
+/**
+ * Attività ancora da spuntare in una data: previste quel giorno, con qualcuno assegnato e senza
+ * spunta. (Se è «mancante» o solo «da fare» dipende dalla data: vedi `cellState`.)
+ */
+export function uncheckedOn<T extends ResponsibilityAssignment>(
+  responsibilities: T[],
+  date: ISODate,
+  isChecked: (r: T) => boolean,
+): T[] {
+  return responsibilities.filter(
+    (r) =>
+      r.active !== false && hasAssignees(r) && isScheduledOn(r.scheduleDays, date) && !isChecked(r),
+  );
 }
 
 export type CellState =

@@ -22,10 +22,10 @@ import {
 import { normalizeWeekParam } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import {
-  cellState,
-  isScheduledOn,
+  hasAssignees,
   personDaysOf,
   shiftDate,
+  uncheckedOn,
 } from "@/lib/responsibilities/assignment";
 import { createClient } from "@/lib/supabase/server";
 import { getPickerData } from "../editor-data";
@@ -56,22 +56,15 @@ export default async function AdminResponsabilitaPage({
     getWeekPlanner(supabase, week),
   ]);
   const onShiftByDay = await getOnShiftByDay(supabase, board.days);
-  const { rows, days } = boardProps(board);
-  const missing = board.items.reduce(
-    (sum, r) =>
-      sum +
-      days.filter(
-        (d) =>
-          cellState({
-            scheduled: isScheduledOn(r.scheduleDays, d),
-            checked: !!board.checks[r.id]?.[d],
-            date: d,
-            today,
-          }) === "missed",
-      ).length,
-    0,
-  );
-  const uncoveredToday = rows.filter((r) => r.todayUncovered).length;
+  const { days } = boardProps(board);
+  // Stessa regola del controllo qui sotto e degli avvisi: contano solo le attività con qualcuno
+  // assegnato (le altre vanno prima assegnate, e sono segnalate a parte).
+  const missing = days
+    .filter((d) => d < today)
+    .reduce((sum, d) => sum + uncheckedOn(board.items, d, (r) => !!board.checks[r.id]?.[d]).length, 0);
+  const uncoveredToday = board.items.filter(
+    (r) => board.todayDuty?.[r.id]?.kind === "uncovered" && hasAssignees(r),
+  ).length;
   const loads = loadsByPerson(board.people, board.items, tasks);
 
   return (

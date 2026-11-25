@@ -5,12 +5,14 @@ import { evaluateRules, type RuleOverride } from "@/lib/rules/registry";
 import { resolveSeedRules, STANDARD_RULE_SET } from "@/lib/rules/seed";
 import type { RuleContext, RuleRecord, Variables, Violation } from "@/lib/rules/types";
 import { peopleToInputs, shiftRecordsToInputs } from "@/lib/schedule/adapters";
+import { withAbsenceShifts } from "@/lib/schedule/view";
 import type { createClient } from "@/lib/supabase/server";
 import type { Tables } from "@/lib/supabase/types";
 import { getDepartments } from "./people";
 import {
   getSchedulePeople,
   getStoreCalendar,
+  getTemplates,
   getWeekWorkingData,
   toShiftRecord,
   weekDates,
@@ -114,14 +116,16 @@ function toOpeningHours(map: Record<string, { open: string; close: string } | nu
 export async function buildRuleContext(db: Db, weekStart: string): Promise<RuleContext> {
   const days = weekDates(weekStart);
   const prevStart = format(addDays(parseISO(weekStart), -7), "yyyy-MM-dd");
-  const [week, people, departments, calendar, variables, { data: prevWeek }] = await Promise.all([
-    getWeekWorkingData(db, weekStart),
-    getSchedulePeople(db),
-    getDepartments(db),
-    getStoreCalendar(db, days[0], days[6]),
-    getVariables(db),
-    db.from("schedule_weeks").select("id").eq("week_start", prevStart).maybeSingle(),
-  ]);
+  const [week, people, departments, calendar, variables, templates, { data: prevWeek }] =
+    await Promise.all([
+      getWeekWorkingData(db, weekStart),
+      getSchedulePeople(db),
+      getDepartments(db),
+      getStoreCalendar(db, days[0], days[6]),
+      getVariables(db),
+      getTemplates(db),
+      db.from("schedule_weeks").select("id").eq("week_start", prevStart).maybeSingle(),
+    ]);
   const peopleMap = new Map(people.map((p) => [p.id, p]));
   const prevShifts = prevWeek
     ? (
@@ -141,7 +145,13 @@ export async function buildRuleContext(db: Db, weekStart: string): Promise<RuleC
     weekStart,
     days,
     shifts: shiftRecordsToInputs(week.shifts, peopleMap),
-    leaves: week.leaves.map((l) => ({
+    // Anche le assenze scritte nel foglio turni come turno rapido (F, MA, PE…): per le regole
+    // valgono come quelle del planning ferie (ore coperte, massimo di persone in ferie).
+    leaves: withAbsenceShifts(
+      week.leaves,
+      week.shifts,
+      new Map(templates.map((t) => [t.id, t])),
+    ).map((l) => ({
       profileId: l.profileId,
       date: l.date,
       type: l.type,
@@ -188,7 +198,13 @@ export async function getWeekRules(
 
 export type WeekEvaluation = {
   violations: Violation[];
-  ignored: { id: string; ruleId: string; date: string | null; note: string }[];
+  ignored: {
+    id: string;
+    ruleId: string;
+    date: string | null;
+    profileId: string | null;
+    note: string;
+  }[];
   context: RuleContext;
 };
 
@@ -203,15 +219,23 @@ export async function evaluateWeek(db: Db, weekStart: string): Promise<WeekEvalu
     .maybeSingle();
   const { rules } = await getWeekRules(db, week?.rule_set_id ?? null);
   const { data: overrides } = week
-    ? await db.from("rule_overrides").select("id, rule_id, date, note").eq("week_id", week.id)
+    ? await db
+        .from("rule_overrides")
+        .select("id, rule_id, date, profile_id, note")
+        .eq("week_id", week.id)
     : { data: [] };
-  const list: RuleOverride[] = (overrides ?? []).map((o) => ({ ruleId: o.rule_id, date: o.date }));
+  const list: RuleOverride[] = (overrides ?? []).map((o) => ({
+    ruleId: o.rule_id,
+    date: o.date,
+    profileId: o.profile_id,
+  }));
   return {
     violations: evaluateRules(context, rules, { overrides: list }),
     ignored: (overrides ?? []).map((o) => ({
       id: o.id,
       ruleId: o.rule_id,
       date: o.date,
+      profileId: o.profile_id,
       note: o.note,
     })),
     context,

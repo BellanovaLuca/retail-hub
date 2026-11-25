@@ -24,7 +24,7 @@ export default async function AccessoPage({
       ) : null}
       {scaduta && !disattivato ? (
         <p role="status" className="mb-6 border-l-2 border-line-strong pl-3 text-sm text-muted">
-          Sessione scaduta: per sicurezza, dopo 30 giorni si rientra con codice e PIN.
+          Sessione scaduta o chiusa: rientra con codice e PIN.
         </p>
       ) : null}
       <LoginForm next={next} />

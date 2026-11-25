@@ -125,6 +125,7 @@ export type Database = {
           at: string;
           created_at: string;
           updated_at: string;
+          actor_label: string | null;
         };
         Insert: {
           id?: string;
@@ -136,6 +137,7 @@ export type Database = {
           at?: string;
           created_at?: string;
           updated_at?: string;
+          actor_label?: string | null;
         };
         Update: {
           id?: string;
@@ -147,6 +149,7 @@ export type Database = {
           at?: string;
           created_at?: string;
           updated_at?: string;
+          actor_label?: string | null;
         };
         Relationships: [
           {
@@ -600,6 +603,32 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      login_sessions: {
+        Row: {
+          session_id: string;
+          profile_id: string;
+          created_at: string;
+        };
+        Insert: {
+          session_id: string;
+          profile_id: string;
+          created_at?: string;
+        };
+        Update: {
+          session_id?: string;
+          profile_id?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "login_sessions_profile_id_fkey";
+            columns: ["profile_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       notifications: {
         Row: {
@@ -2066,21 +2095,23 @@ export type Database = {
     };
     Functions: {
       cancel_request: { Args: { p_request_id: string }; Returns: undefined };
+      is_active_account: { Args: Record<PropertyKey, never>; Returns: boolean };
       is_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
-      is_responsibility_assignee: { Args: { p_responsibility_id: string; uid: string }; Returns: boolean };
       is_responsibility_assignee_on: { Args: { p_responsibility_id: string; uid: string; p_date: string }; Returns: boolean };
       is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
       login_attempt_begin: { Args: { p_code: string; p_ip: string; p_max_code: number; p_max_ip: number; p_minutes: number }; Returns: Json };
+      person_days_valid: { Args: { p_profile_ids: string[]; p_person_days: Json }; Returns: boolean };
+      remove_from_responsibilities: { Args: { p_profile_id: string; p_week: string }; Returns: Json };
       remove_future_shifts: { Args: { p_profile_id: string; p_from: string }; Returns: Json };
       remove_leave_days: { Args: { p_days: Json }; Returns: number };
       replace_shift_days: { Args: { p_week_id: string; p_days: Json; p_rows: Json }; Returns: number };
       respond_to_swap: { Args: { p_request_id: string; p_accept: boolean }; Returns: undefined };
-      responsibility_week_team: { Args: { p_responsibility_id: string; p_date: string }; Returns: string[] };
       responsibility_week_teams: { Args: { p_week: string }; Returns: Json };
       session_fresh: { Args: Record<PropertyKey, never>; Returns: boolean };
       set_default_rule_set: { Args: { p_rule_set_id: string }; Returns: undefined };
       set_extra_task_done: { Args: { p_task_id: string; p_done: boolean }; Returns: undefined };
       set_performance_note: { Args: { p_goal_id: string; p_note: string }; Returns: undefined };
+      store_weekly_assigned: { Args: { p_week: string }; Returns: Json };
       today_rome: { Args: Record<PropertyKey, never>; Returns: string };
     };
     Enums: Record<string, never>;
