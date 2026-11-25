@@ -65,6 +65,18 @@ export function leaveLabelPublic(type: LeaveType): "Ferie" | "Assente" {
   return type === "ferie" ? "Ferie" : "Assente";
 }
 
+/**
+ * Come i colleghi vedono un'assenza (vista `leaves_public`): "Ferie", "Assente" e, se è di poche
+ * ore, anche quante ("Assente 2 h", "Assente 4,5 h"). Mai il motivo.
+ */
+export function leavePublicText(
+  kind: "ferie" | "assente",
+  hours: number | null | undefined,
+): string {
+  const base = kind === "ferie" ? "Ferie" : "Assente";
+  return hours ? `${base} ${String(hours).replace(".", ",")} h` : base;
+}
+
 /** Etichetta completa per l'interessato e gli admin. */
 export function leaveLabel(type: LeaveType): string {
   return { ferie: "Ferie", permesso: "Permesso", malattia: "Malattia", altro: "Altra assenza" }[

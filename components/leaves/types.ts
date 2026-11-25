@@ -1,5 +1,5 @@
 import type { LeaveStatus, LeaveType } from "@/lib/domain/types";
-import { formatLeaveCell, leaveLabel, leaveLabelPublic } from "@/lib/leaves/parse";
+import { formatLeaveCell, leaveLabel, leaveLabelPublic, leavePublicText } from "@/lib/leaves/parse";
 
 /** "admin": planning completo e modificabile; "employee": sola lettura dai dati pubblici. */
 export type PlannerMode = "admin" | "employee";
@@ -30,11 +30,14 @@ export type PlannerDepartment = { id: string; name: string };
 export type PlannerView = "persone" | "calendario";
 export type PlannerPeriod = "mese" | "anno";
 
-/** Testo della cella: il codice (F, F?, PE4) per l'admin, "Ferie"/"Assente" per tutti gli altri. */
+/**
+ * Testo della cella: il codice (F, F?, PE4) per l'admin; per tutti gli altri "Ferie"/"Assente",
+ * con le ore se l'assenza è di poche ore ("Assente 2 h").
+ */
 export function cellText(leave: PlannerLeave, mode: PlannerMode): string {
   if (mode === "admin" && leave.type !== "assente")
     return formatLeaveCell({ ...leave, type: leave.type });
-  return leave.type === "ferie" ? "Ferie" : "Assente";
+  return leavePublicText(leave.type === "ferie" ? "ferie" : "assente", leave.hours);
 }
 
 /** Descrizione estesa (tooltip, dialog). */
@@ -45,16 +48,20 @@ export function leaveDescription(leave: PlannerLeave, mode: PlannerMode): string
       : mode === "admin"
         ? leaveLabel(leave.type)
         : leaveLabelPublic(leave.type);
-  const hours =
-    mode === "admin" && leave.hours ? ` ${String(leave.hours).replace(".", ",")} h` : "";
+  // Le ore si vedono anche nel planning pubblico (mai il motivo).
+  const hours = leave.hours ? ` ${String(leave.hours).replace(".", ",")} h` : "";
   const status = leave.status === "tentative" ? " · da confermare" : "";
   const source = leave.source === "request" ? " · da richiesta approvata" : "";
   return `${base}${hours}${status}${source}`;
 }
 
-/** Codice breve accanto al nome nel calendario (solo per l'admin e solo se non sono ferie). */
+/**
+ * Codice breve accanto al nome nel calendario: per l'admin il codice (PE4, MA…) se non sono
+ * ferie; per gli altri "assente", con le ore se l'assenza è di poche ore ("assente 2 h").
+ */
 export function chipSuffix(leave: PlannerLeave, mode: PlannerMode): string | null {
-  if (leave.type === "ferie") return null;
-  if (mode !== "admin" || leave.type === "assente") return "assente";
+  const hours = leave.hours ? `${String(leave.hours).replace(".", ",")} h` : null;
+  if (leave.type === "ferie") return mode === "admin" ? null : hours;
+  if (mode !== "admin" || leave.type === "assente") return hours ? `assente ${hours}` : "assente";
   return formatLeaveCell({ ...leave, type: leave.type, status: "confirmed" });
 }

@@ -33,15 +33,22 @@ export function exportCellCode(l: ExportLeave, audience: "admin" | "public") {
   if (audience === "admin" && l.type !== "assente") {
     return formatLeaveCell({ type: l.type, status: l.status, hours: l.hours });
   }
+  // Planning pubblico: F / A e, per un'assenza di poche ore, quante ("A2", "A4,5").
   const base = l.type === "ferie" ? "F" : "A";
-  return `${base}${l.status === "tentative" ? "?" : ""}`;
+  const hours = l.hours ? String(l.hours).replace(".", ",") : "";
+  return `${base}${hours}${l.status === "tentative" ? "?" : ""}`;
 }
 
-/** Nome nel calendario: "Luca", "Luca?" (da confermare), "Marta (PE4)", "Paolo (assente)". */
+/**
+ * Nome nel calendario: "Luca", "Luca?" (da confermare), "Marta (PE4)", "Paolo (assente)",
+ * "Paolo (assente 2 h)" per un'assenza di poche ore nel planning pubblico.
+ */
 export function exportChip(l: ExportLeave, name: string, audience: "admin" | "public") {
   const q = l.status === "tentative" ? "?" : "";
-  if (l.type === "ferie") return `${name}${q}`;
-  if (audience === "public" || l.type === "assente") return `${name}${q} (assente)`;
+  const hours = l.hours ? `${String(l.hours).replace(".", ",")} h` : "";
+  if (l.type === "ferie") return hours ? `${name}${q} (${hours})` : `${name}${q}`;
+  if (audience === "public" || l.type === "assente")
+    return `${name}${q} (assente${hours ? ` ${hours}` : ""})`;
   return `${name}${q} (${formatLeaveCell({ type: l.type, status: "confirmed", hours: l.hours })})`;
 }
 

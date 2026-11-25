@@ -29,6 +29,12 @@ export type GridGroup = { id: string; label: string; collapsible?: boolean };
 
 export type CellChange = { rowId: string; colId: string; value: string };
 
+/**
+ * Da dove arriva un lotto di modifiche: una modifica dell'utente (digitazione, incolla,
+ * riempimento, Canc) oppure Annulla / Ripeti, che riportano le celle a un valore già avuto.
+ */
+export type ChangeMeta = { source: "edit" | "undo" | "redo" };
+
 export type CellTone =
   "default" | "muted" | "danger" | "warning" | "success" | "hatched" | "dashed";
 
@@ -72,9 +78,10 @@ export type SpreadsheetGridProps = {
   getCellState?: (rowId: string, colId: string) => CellState | undefined;
   /**
    * Sempre a lotti: incolla, riempimento, Canc su un intervallo, annulla/ripeti = una sola chiamata.
-   * Assente o `readOnly` => sola lettura.
+   * Assente o `readOnly` => sola lettura. `meta.source` dice se è una modifica o un annulla/ripeti
+   * (chi tiene dati che la cella non mostra può ripristinarli insieme al testo).
    */
-  onChange?: (changes: CellChange[]) => void;
+  onChange?: (changes: CellChange[], meta: ChangeMeta) => void;
   /**
    * Valida/normalizza l'input digitato o incollato. In caso di errore la cella non cambia e
    * compare un messaggio breve. Non viene chiamata per il valore vuoto (svuotare è sempre lecito).

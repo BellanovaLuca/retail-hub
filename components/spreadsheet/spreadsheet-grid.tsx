@@ -343,7 +343,7 @@ export function SpreadsheetGrid({
     undoStack.current.push({ forward, backward });
     if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift();
     redoStack.current = [];
-    onChange(forward);
+    onChange(forward, { source: "edit" });
     return true;
   };
 
@@ -351,14 +351,14 @@ export function SpreadsheetGrid({
     const entry = undoStack.current.pop();
     if (!entry || !onChange) return;
     redoStack.current.push(entry);
-    onChange(entry.backward);
+    onChange(entry.backward, { source: "undo" });
   };
 
   const redo = () => {
     const entry = redoStack.current.pop();
     if (!entry || !onChange) return;
     undoStack.current.push(entry);
-    onChange(entry.forward);
+    onChange(entry.forward, { source: "redo" });
   };
 
   /** Valida un singolo valore digitato. */

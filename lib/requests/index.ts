@@ -455,8 +455,5 @@ export function swapShiftLines(i: {
     const text = shiftTimesText(i.shifts.filter((s) => s.profileId === who.id && s.date === date));
     return `Turno di ${who.name} · ${formatRange(date, date)}: ${text || "nessun turno"}`;
   };
-  return [
-    line(i.requester, i.startDate),
-    ...(i.targetDate ? [line(i.target, i.targetDate)] : []),
-  ];
+  return [line(i.requester, i.startDate), ...(i.targetDate ? [line(i.target, i.targetDate)] : [])];
 }

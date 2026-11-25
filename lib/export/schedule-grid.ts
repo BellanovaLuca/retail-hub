@@ -3,6 +3,7 @@
  * PDF A4 orizzontale per la bacheca). Puro: riceve dati già caricati.
  */
 import { weekNumber } from "@/lib/dates";
+import { leavePublicText } from "@/lib/leaves/parse";
 import { cellText, publishedDayText, resolveBackOffice } from "@/lib/schedule/cells";
 import { isHolidayClosure } from "@/lib/schedule/opening";
 import type {
@@ -132,12 +133,17 @@ export function buildAdminGridModel(input: {
   };
 }
 
+const isWork = (s: PublishedShift) => !s.is_absence && Boolean(s.start_time);
+const isFullDay = (leave: PublicLeave | undefined): boolean => leave !== undefined && !leave.hours;
+
 /** Assenza come la vede chiunque: "Ferie" o "Assente", mai il motivo. */
 export type PublicLeave = {
   profileId: string;
   date: string;
   kind: "ferie" | "assente";
   status: "tentative" | "confirmed";
+  /** Ore dell'assenza; null (o assente) = giornata intera. */
+  hours?: number | null;
 };
 
 /** Griglia della versione PUBBLICATA (per tutti i dipendenti): niente motivi né ore di contratto. */
@@ -170,12 +176,23 @@ export function buildPublishedGridModel(input: {
         const list = byDay.get(k) ?? [];
         const leave = leaveByDay.get(k);
         const absence = list.find((s) => s.is_absence);
-        if (absence || (leave && !list.some((s) => s.start_time))) {
+        const work = list.filter(isWork);
+        // Assenza a giornata intera: prevale anche sul turno rimasto nell'orario pubblicato.
+        if (leave && isFullDay(leave))
+          return { text: leavePublicText(leave.kind, null), tone: "absence" as GridCellTone };
+        // Assenza di poche ore: insieme al turno («10–19 · Assente 2 h»), o da sola.
+        if (leave) {
+          const away = leavePublicText(leave.kind, leave.hours);
+          return work.length
+            ? { text: `${publishedDayText(work)} · ${away}`, tone: "shift" as GridCellTone }
+            : { text: away, tone: "absence" as GridCellTone };
+        }
+        if (absence) {
           // Il motivo non si mostra mai ai colleghi: solo Riposo, Ferie o Assente.
           const label =
-            absence?.template_code === "R"
+            absence.template_code === "R"
               ? "Riposo"
-              : leave?.kind === "ferie" || absence?.template_code === "F"
+              : absence.template_code === "F"
                 ? "Ferie"
                 : "Assente";
           return { text: label, tone: "absence" as GridCellTone };
@@ -189,8 +206,10 @@ export function buildPublishedGridModel(input: {
   }));
 
   const present = (date: string) =>
-    people.filter((p) =>
-      (byDay.get(key(p.id, date)) ?? []).some((s) => s.start_time && !s.is_absence),
+    people.filter(
+      (p) =>
+        (byDay.get(key(p.id, date)) ?? []).some(isWork) &&
+        !isFullDay(leaveByDay.get(key(p.id, date))),
     ).length;
 
   return {

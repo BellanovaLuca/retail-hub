@@ -147,7 +147,7 @@ export default async function LeavesPage({
             profileId: l.profileId,
             date: l.date,
             type: l.kind === "ferie" ? "ferie" : "assente",
-            hours: null,
+            hours: l.hours,
             status: l.status,
             source: null,
           }))}
