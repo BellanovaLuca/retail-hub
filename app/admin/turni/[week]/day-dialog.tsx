@@ -223,8 +223,10 @@ export function DayDialog({
             )}
             {leave.source === "request" ? (
               <p className="text-xs text-muted">
-                Togliendo l&apos;assenza {person.displayName} riceve un avviso
-                {leaveRequest ? "; gli altri giorni della richiesta restano approvati." : "."}
+                Togliendo l&apos;assenza {person.displayName} riceve un avviso.
+                {leaveRequest
+                  ? " Gli altri giorni della richiesta restano approvati; se non ne restano, la richiesta torna «rifiutata»."
+                  : ""}
               </p>
             ) : null}
           </section>

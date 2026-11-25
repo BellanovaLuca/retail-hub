@@ -248,8 +248,9 @@ async function deleteRequestRows(db: Db, ids: string[], statuses: readonly Reque
       .in("status", [...statuses])
       .select("id, profile_id, attachment_path");
     if (error) {
-      // Gli allegati dei blocchi già eliminati vanno tolti comunque.
+      // Gli allegati dei blocchi già eliminati vanno tolti comunque, e l'elenco va aggiornato.
       await removeAttachmentFiles(ownAttachmentPaths(deleted));
+      revalidateAfterDelete();
       throw new ActionError(dbErrorMessage(error, "Richieste non eliminate."));
     }
     deleted.push(...(data ?? []));

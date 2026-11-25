@@ -82,9 +82,9 @@ export function RemoveLeavesDialog({
               {fromRequest === 1
                 ? "Un'assenza viene da una richiesta approvata"
                 : `${fromRequest} assenze vengono da richieste approvate`}
-              : il dipendente riceve un avviso e gli altri giorni della richiesta restano approvati.
-              Per togliere una richiesta intera apri il dettaglio della giornata (doppio clic sulla
-              cella).
+              : il dipendente riceve un avviso e gli altri giorni della richiesta restano approvati
+              (se non ne restano, la richiesta torna «rifiutata»). Per togliere subito una richiesta
+              intera apri il dettaglio della giornata (doppio clic sulla cella).
             </p>
           ) : null}
           <FormMessage result={result} />

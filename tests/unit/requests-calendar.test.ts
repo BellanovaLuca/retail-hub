@@ -146,8 +146,18 @@ describe("calendario delle richieste: giorni coperti", () => {
     const list = [
       req({ id: "anna-ok", start_date: "2026-12-14", end_date: "2026-12-15" }),
       req({ id: "bea-no", status: "rejected", start_date: "2026-12-14", end_date: "2026-12-14" }),
-      req({ id: "carlo-wait", status: "pending", start_date: "2026-12-13", end_date: "2026-12-14" }),
-      req({ id: "dario-ann", status: "cancelled", start_date: "2026-12-14", end_date: "2026-12-14" }),
+      req({
+        id: "carlo-wait",
+        status: "pending",
+        start_date: "2026-12-13",
+        end_date: "2026-12-14",
+      }),
+      req({
+        id: "dario-ann",
+        status: "cancelled",
+        start_date: "2026-12-14",
+        end_date: "2026-12-14",
+      }),
       req({ id: "elsa-ok", start_date: "2026-12-14", end_date: "2026-12-14" }),
     ];
     const byDay = requestsByDay(list, days);
@@ -215,6 +225,7 @@ describe("eliminazione delle richieste già decise", () => {
   it("tipi che creano assenze (revocabili dal foglio turni)", () => {
     for (const t of ["ferie", "permesso", "malattia", "giorno_libero", "indisponibilita"])
       expect(createsLeaves(t)).toBe(true);
-    for (const t of ["scambio_turno", "cambio_turno", "altro"]) expect(createsLeaves(t)).toBe(false);
+    for (const t of ["scambio_turno", "cambio_turno", "altro"])
+      expect(createsLeaves(t)).toBe(false);
   });
 });

@@ -60,7 +60,13 @@ export function WeekGrid({
     );
   }
   return (
-    <div className="overflow-x-auto rounded-md border border-line">
+    // Area scorrevole raggiungibile da tastiera (non contiene campi su cui fermarsi).
+    <div
+      className="overflow-x-auto rounded-md border border-line focus-visible:outline-2 focus-visible:outline-foreground"
+      role="region"
+      aria-label={caption}
+      tabIndex={0}
+    >
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
