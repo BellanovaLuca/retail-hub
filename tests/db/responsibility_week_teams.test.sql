@@ -62,4 +62,77 @@ begin
 end;
 $$;
 
+-- Giorni per persona (person_days): si spunta solo nei propri giorni.
+reset role;
+insert into public.responsibilities (id, title, schedule_days) values
+  ('00000000-0000-0000-0000-000000001f03', 'Giorni test', '{1,2,3,4,5,6}');
+insert into public.responsibility_week_assignments
+  (responsibility_id, week_start, profile_ids, person_days) values
+  -- Elio solo lunedì e mercoledì (2026-11-23 è lunedì).
+  ('00000000-0000-0000-0000-000000001f03', '2026-11-23',
+   '{00000000-0000-0000-0000-0000000001e1}',
+   '{"00000000-0000-0000-0000-0000000001e1": [1, 3]}'),
+  -- Dalla settimana dopo: assegnato senza giorni indicati (righe vecchie) → giorni dell'attività.
+  ('00000000-0000-0000-0000-000000001f03', '2026-11-30',
+   '{00000000-0000-0000-0000-0000000001e1}', '{}');
+
+do $$
+declare
+  elio constant uuid := '00000000-0000-0000-0000-0000000001e1';
+  ada constant uuid := '00000000-0000-0000-0000-0000000001a1';
+  resp constant uuid := '00000000-0000-0000-0000-000000001f03';
+  j jsonb;
+begin
+  if not public.is_responsibility_assignee_on(resp, elio, '2026-11-23') then
+    raise exception 'FALLITO: lunedì è un giorno di Elio';
+  end if;
+  if public.is_responsibility_assignee_on(resp, elio, '2026-11-24') then
+    raise exception 'FALLITO: martedì non è un giorno di Elio';
+  end if;
+  if not public.is_responsibility_assignee_on(resp, elio, '2026-11-25') then
+    raise exception 'FALLITO: mercoledì è un giorno di Elio';
+  end if;
+  if public.is_responsibility_assignee_on(resp, ada, '2026-11-23') then
+    raise exception 'FALLITO: Ada non è assegnata';
+  end if;
+  -- Settimana seguente, senza giorni indicati: valgono i giorni dell'attività (lun–sab).
+  if not public.is_responsibility_assignee_on(resp, elio, '2026-12-01') then
+    raise exception 'FALLITO: senza giorni indicati valgono quelli dell''attività';
+  end if;
+  if public.is_responsibility_assignee_on(resp, elio, '2026-12-06') then
+    raise exception 'FALLITO: la domenica non è prevista dall''attività';
+  end if;
+
+  j := public.responsibility_week_teams('2026-11-23');
+  if (select e -> 'person_days' -> elio::text from jsonb_array_elements(j) e
+       where e ->> 'responsibility_id' = resp::text) <> '[1, 3]'::jsonb then
+    raise exception 'FALLITO: person_days non restituito: %', j;
+  end if;
+end;
+$$;
+
+-- La forma è controllata: person_days deve essere un oggetto.
+do $$
+begin
+  begin
+    update public.responsibility_week_assignments set person_days = '[1]'::jsonb
+     where responsibility_id = '00000000-0000-0000-0000-000000001f03';
+    raise exception 'FALLITO: person_days accetta un array';
+  exception when check_violation then null;
+  end;
+end;
+$$;
+
+-- Eliminando la persona spariscono anche i suoi giorni.
+delete from auth.users where id = '00000000-0000-0000-0000-0000000001e1';
+do $$
+begin
+  if exists (select 1 from public.responsibility_week_assignments
+              where person_days ? '00000000-0000-0000-0000-0000000001e1'
+                 or '00000000-0000-0000-0000-0000000001e1' = any (profile_ids)) then
+    raise exception 'FALLITO: la persona eliminata resta nelle assegnazioni';
+  end if;
+end;
+$$;
+
 rollback;

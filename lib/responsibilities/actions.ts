@@ -46,8 +46,9 @@ export async function toggleResponsibilityCheck(input: {
     const isAdmin = profile.role === "admin";
     if (onBehalfOf && !isAdmin) throw new ActionError("Operazione riservata ai responsabili.");
 
-    // Assegnato quel giorno: gruppo della settimana, se c'è, altrimenti responsabile e supporti.
-    const [{ data: r }, { data: assignee }] = await Promise.all([
+    // Assegnato quel giorno: assegnazione della settimana (con i giorni di ciascuno), se c'è,
+    // altrimenti responsabile e supporti della scheda.
+    const [{ data: r }, { data: assignee }, { data: weekPlan }] = await Promise.all([
       supabase
         .from("responsibilities")
         .select("id, all_staff, schedule_days, active")
@@ -58,13 +59,21 @@ export async function toggleResponsibilityCheck(input: {
         uid: profile.id,
         p_date: date,
       }),
+      supabase
+        .from("responsibility_week_assignments")
+        .select("week_start")
+        .eq("responsibility_id", responsibilityId)
+        .lte("week_start", date)
+        .limit(1),
     ]);
     if (!r) throw new ActionError("Attività non trovata.");
     const today = toISODate(nowInRome());
     if (done && date > today) throw new ActionError("Non si può spuntare un giorno futuro.");
     if (done && !isAdmin) {
       if (!r.active) throw new ActionError("Questa attività non è più attiva.");
-      if (!isScheduledOn(r.schedule_days, date))
+      // Con l'assegnazione settimanale i giorni sono quelli della persona (li verifica il DB).
+      const weekly = !r.all_staff && (weekPlan?.length ?? 0) > 0;
+      if (!weekly && !isScheduledOn(r.schedule_days, date))
         throw new ActionError("L'attività non è prevista in questo giorno.");
     }
     const allowed = canToggleCheck({
@@ -77,7 +86,7 @@ export async function toggleResponsibilityCheck(input: {
     if (!allowed) {
       throw new ActionError(
         !assignee && !r.all_staff
-          ? "Puoi spuntare solo le attività che ti sono assegnate."
+          ? "Puoi spuntare solo le attività che ti sono assegnate in quel giorno."
           : "Puoi spuntare solo le attività di oggi o di ieri.",
       );
     }

@@ -21,6 +21,7 @@ export function boardProps(board: Board, filterPersonId?: string | null) {
       owner: r.owner ? { id: r.owner.id, name: r.owner.name } : null,
       supports: r.supports.map((s) => ({ id: s.id, name: s.name })),
       weekly: r.weekly ?? false,
+      personDays: r.weekly ? r.personDays : undefined,
       todayLabel:
         duty?.kind === "uncovered" && !r.ownerId && r.supportIds.length === 0
           ? "nessuno assegnato"

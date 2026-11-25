@@ -1399,6 +1399,7 @@ export type Database = {
           profile_ids: string[];
           created_at: string;
           updated_at: string;
+          person_days: Json;
         };
         Insert: {
           responsibility_id: string;
@@ -1406,6 +1407,7 @@ export type Database = {
           profile_ids?: string[];
           created_at?: string;
           updated_at?: string;
+          person_days?: Json;
         };
         Update: {
           responsibility_id?: string;
@@ -1413,6 +1415,7 @@ export type Database = {
           profile_ids?: string[];
           created_at?: string;
           updated_at?: string;
+          person_days?: Json;
         };
         Relationships: [
           {

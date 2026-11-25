@@ -5,6 +5,7 @@ import { PersonDot } from "@/components/ui/table";
 import type { SignedAttachment } from "@/lib/announcements/storage";
 import type { Person } from "@/lib/data/announcements";
 import type { PersonRef, ResponsibilityItem } from "@/lib/data/responsibilities";
+import { daysOfPerson } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
 import { DayLetters } from "./day-letters";
 import { scheduleLabel } from "./format";
@@ -124,7 +125,16 @@ export function ResponsibilityOverview({
                   {owned.length ? (
                     <p>
                       <span className="mr-2 eyebrow">Responsabile</span>
-                      <span className="font-semibold">{owned.map((r) => r.title).join(" · ")}</span>
+                      <span className="font-semibold">
+                        {owned
+                          .map((r) => {
+                            const days = daysOfPerson(r, person.id);
+                            return r.weekly && days.length < 7
+                              ? `${r.title} (${scheduleLabel(days)})`
+                              : r.title;
+                          })
+                          .join(" · ")}
+                      </span>
                     </p>
                   ) : null}
                   {supported.length ? (
@@ -188,7 +198,14 @@ export function ResponsibilityOverview({
                     ) : r.weekly && r.supports.length ? (
                       <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
                         {r.supports.map((s) => (
-                          <Name key={s.id} person={s} {...nameProps} />
+                          <span key={s.id} className="inline-flex items-center gap-1.5">
+                            <Name person={s} {...nameProps} />
+                            {r.supports.length > 1 || daysOfPerson(r, s.id).length < 7 ? (
+                              <span className="text-xs text-muted">
+                                {scheduleLabel(daysOfPerson(r, s.id))}
+                              </span>
+                            ) : null}
+                          </span>
                         ))}
                       </span>
                     ) : r.owner ? (

@@ -6,6 +6,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import {
   canToggleCheck,
   cellState,
+  isoWeekdayOf,
   isScheduledOn,
   type CellState,
 } from "@/lib/responsibilities/assignment";
@@ -24,6 +25,8 @@ export type BoardRow = {
   /** Supporti, oppure (con `weekly`) le persone assegnate per la settimana. */
   supports: BoardPerson[];
   weekly?: boolean;
+  /** Con `weekly`: i giorni (1–7) di ciascun assegnato. */
+  personDays?: Record<string, number[]>;
   /** Chi la fa oggi, secondo i turni (solo se la settimana contiene oggi). */
   todayLabel: string | null;
   todayUncovered: boolean;
@@ -201,12 +204,16 @@ export function ResponsibilityBoard({
                     const scheduled = isScheduledOn(row.scheduleDays, date);
                     const state = cellState({ scheduled, checked: !!check, date, today });
                     // Giorno non previsto: non cliccabile (salvo togliere una spunta già messa).
+                    // Con i giorni per persona, tocca a chi guarda solo nei suoi giorni.
+                    const assignedThatDay = row.personDays
+                      ? (row.personDays[viewer.id]?.includes(isoWeekdayOf(date)) ?? false)
+                      : isAssignee;
                     const clickable =
                       (scheduled || !!check) &&
                       date <= today &&
                       canToggleCheck({
                         isAdmin: viewer.isAdmin,
-                        isAssignee,
+                        isAssignee: assignedThatDay,
                         allStaff: row.allStaff,
                         date,
                         today,

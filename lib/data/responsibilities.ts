@@ -3,9 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseAttachments, type Attachment } from "@/lib/announcements/model";
 import { getPeopleDirectory, type Person } from "@/lib/data/announcements";
 import {
-  assigneeIds,
+  daysOfPerson,
   dutiesForPerson,
-  effectiveWeekTeam,
+  effectiveWeekPlan,
   isScheduledOn,
   mondayOf,
   peopleOnShift,
@@ -13,7 +13,9 @@ import {
   shiftDate,
   uncoveredOn,
   withWeekTeam,
+  personDaysOf,
   type Duty,
+  type PersonDays,
   type ResponsibilityAssignment,
   type WeekTeam,
 } from "@/lib/responsibilities/assignment";
@@ -63,11 +65,16 @@ export async function getWeekTeams(db: Db, uptoWeek: string): Promise<Map<string
     responsibility_id: string;
     week_start: string;
     profile_ids: string[] | null;
+    person_days: Record<string, unknown> | null;
   }[];
   const out = new Map<string, WeekTeam[]>();
   for (const row of rows) {
+    const personDays: PersonDays = {};
+    for (const [id, days] of Object.entries(row.person_days ?? {})) {
+      if (Array.isArray(days)) personDays[id] = days.filter((d) => typeof d === "number");
+    }
     out.set(row.responsibility_id, [
-      { weekStart: row.week_start, profileIds: row.profile_ids ?? [] },
+      { weekStart: row.week_start, profileIds: row.profile_ids ?? [], personDays },
     ]);
   }
   return out;
@@ -97,12 +104,8 @@ export async function getResponsibilities(
     const mine = (assignees ?? []).filter((a) => a.responsibility_id === r.id);
     const owner = mine.find((a) => a.role === "owner");
     const supports = mine.filter((a) => a.role === "support");
-    const team =
-      teams && opts.week
-        ? (effectiveWeekTeam(teams.get(r.id) ?? [], opts.week)?.filter((id) => byId.has(id)) ??
-          null)
-        : null;
-    if (team && !r.all_staff) {
+    const plan = teams && opts.week ? effectiveWeekPlan(teams.get(r.id) ?? [], opts.week) : null;
+    if (plan && !r.all_staff) {
       const base = {
         id: r.id,
         title: r.title,
@@ -115,9 +118,14 @@ export async function getResponsibilities(
         ownerId: null,
         supportIds: [],
         owner: null,
-        supports: team.map((id) => ref(byId, id)),
+        supports: [],
       };
-      return withWeekTeam(base, team);
+      const weekly = withWeekTeam(
+        base,
+        plan.profileIds.filter((id) => byId.has(id)),
+        plan.personDays,
+      );
+      return { ...weekly, supports: weekly.supportIds.map((id) => ref(byId, id)) };
     }
     return {
       id: r.id,
@@ -429,7 +437,7 @@ export function loadsByPerson(
     .map((p) => {
       const owner = items
         .filter((r) => r.ownerId === p.id || (r.weekly && r.supportIds.includes(p.id)))
-        .map((r) => ({ id: r.id, title: r.title, days: r.scheduleDays }));
+        .map((r) => ({ id: r.id, title: r.title, days: daysOfPerson(r, p.id) }));
       return {
         person: { id: p.id, name: p.displayName, color: p.color },
         owner,
@@ -489,16 +497,19 @@ export async function getAssignmentHistory(
 
 export { isScheduledOn };
 
-/** Colonna della griglia "chi fa cosa questa settimana". */
-export type WeekPlannerColumn = {
+/** Una responsabilità nell'assegnazione della settimana. */
+export type WeekPlannerItem = {
   id: string;
   title: string;
+  /** Attività per tutti: non si assegna, si scelgono solo i giorni. */
+  allStaff: boolean;
+  /** Giorni previsti (per le attività «per tutti» sono i giorni in cui va fatta). */
   scheduleDays: number[];
-  /** Assegnati effettivi della settimana. */
-  profileIds: string[];
+  /** Per ogni persona attiva assegnata, i giorni (1–7) della settimana. */
+  personDays: PersonDays;
   /**
-   * Da dove vengono: `week` = scelti per questa settimana; `inherited` = ripresi dall'ultima
-   * settimana assegnata (`fromWeek`); `standing` = responsabile e supporti della scheda.
+   * Da dove viene l'assegnazione: `week` = scelta per questa settimana; `inherited` = ripresa
+   * dall'ultima settimana assegnata (`fromWeek`); `standing` = responsabile e supporti della scheda.
    */
   source: "week" | "inherited" | "standing";
   fromWeek: string | null;
@@ -506,41 +517,33 @@ export type WeekPlannerColumn = {
 
 export type WeekPlanner = {
   weekStart: string;
-  columns: WeekPlannerColumn[];
-  /** Attività per tutti: non si assegnano. */
-  allStaff: { id: string; title: string }[];
+  items: WeekPlannerItem[];
   people: PersonRef[];
 };
 
-/** Dati della griglia persone × attività per la settimana (lunedì) indicata. */
+/** Dati dell'assegnazione persone × giorni, attività per attività, per la settimana (lunedì). */
 export async function getWeekPlanner(db: Db, weekStart: string): Promise<WeekPlanner> {
   const { people, byId } = await directory(db);
   const [items, teams] = await Promise.all([
-    getResponsibilities(db, { people: byId }),
+    getResponsibilities(db, { people: byId, week: weekStart }),
     getWeekTeams(db, weekStart),
   ]);
-  const columns: WeekPlannerColumn[] = items
-    .filter((r) => !r.allStaff)
-    .map((r) => {
-      const plans = teams.get(r.id) ?? [];
-      const team = effectiveWeekTeam(plans, weekStart);
-      const fromWeek =
-        team === null
-          ? null
-          : plans.reduce((best, p) => (p.weekStart > best ? p.weekStart : best), "");
+  return {
+    weekStart,
+    items: items.map((r) => {
+      const plan = r.allStaff ? null : effectiveWeekPlan(teams.get(r.id) ?? [], weekStart);
       return {
         id: r.id,
         title: r.title,
+        allStaff: r.allStaff,
         scheduleDays: r.scheduleDays,
-        profileIds: (team ?? assigneeIds(r)).filter((id) => byId.get(id)?.active),
-        source: team === null ? "standing" : fromWeek === weekStart ? "week" : "inherited",
-        fromWeek,
+        personDays: Object.fromEntries(
+          Object.entries(personDaysOf(r)).filter(([id]) => byId.get(id)?.active),
+        ),
+        source: !plan ? "standing" : plan.weekStart === weekStart ? "week" : "inherited",
+        fromWeek: plan?.weekStart ?? null,
       };
-    });
-  return {
-    weekStart,
-    columns,
-    allStaff: items.filter((r) => r.allStaff).map((r) => ({ id: r.id, title: r.title })),
+    }),
     people: people
       .filter((p) => p.active)
       .map((p) => ({ id: p.id, name: p.displayName, color: p.color })),

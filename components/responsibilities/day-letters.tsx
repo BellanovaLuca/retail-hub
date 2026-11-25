@@ -27,3 +27,25 @@ export function DayLetters({ days, className }: { days: number[]; className?: st
     </span>
   );
 }
+
+/** Giorni previsti in piccolo: L M M G V S D, scuri quelli in cui l'attività va fatta. */
+export function DayLettersInline({ days, className }: { days: number[]; className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={scheduleLabel(days)}
+      title={scheduleLabel(days)}
+      className={cn("inline-flex gap-[3px] text-[0.625rem] font-semibold", className)}
+    >
+      {DAY_LETTERS.map((letter, i) => (
+        <span
+          key={i}
+          aria-hidden
+          className={days.includes(i + 1) ? "text-foreground" : "text-line-strong"}
+        >
+          {letter}
+        </span>
+      ))}
+    </span>
+  );
+}

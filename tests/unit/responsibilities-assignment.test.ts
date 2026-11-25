@@ -5,7 +5,14 @@ import {
   cellState,
   dutiesForPerson,
   dutyLabel,
+  daysOfPerson,
+  effectiveWeekPlan,
   effectiveWeekTeam,
+  isAssignedOn,
+  normalizeDays,
+  normalizePersonDays,
+  personDaysOf,
+  samePersonDays,
   isoWeekdayOf,
   mondayOf,
   withWeekTeam,
@@ -277,5 +284,78 @@ describe("assegnazione settimanale", () => {
   it("un'attività per tutti ignora il gruppo", () => {
     const r = withWeekTeam({ ...base, allStaff: true }, ["dario"]);
     expect(r.weekly).toBeUndefined();
+  });
+
+  describe("giorni per persona", () => {
+    // Settimana del 30/11/2026: lunedì 30, martedì 1/12, mercoledì 2/12.
+    const r = withWeekTeam(base, ["dario", "elena", "fabio"], {
+      dario: [1, 3],
+      elena: [3, 2, 2],
+      fabio: [],
+      ospite: [5],
+    });
+
+    it("ognuno ha i suoi giorni; l'attività è prevista dove c'è qualcuno", () => {
+      expect(r.personDays).toEqual({ dario: [1, 3], elena: [2, 3] });
+      // Chi non ha giorni non è assegnato; chi non è nel gruppo viene ignorato.
+      expect(assigneeIds(r)).toEqual(["dario", "elena"]);
+      expect(r.scheduleDays).toEqual([1, 2, 3]);
+      expect(daysOfPerson(r, "dario")).toEqual([1, 3]);
+      expect(daysOfPerson(r, "anna")).toEqual([]);
+      expect(isAssignedOn(r, "elena", "2026-12-01")).toBe(true);
+      expect(isAssignedOn(r, "elena", "2026-11-30")).toBe(false);
+      expect(personDaysOf(r)).toEqual({ dario: [1, 3], elena: [2, 3] });
+    });
+
+    it("la fa chi è assegnato quel giorno (se in turno)", () => {
+      expect(resolveDuty(r, "2026-11-30", null)).toEqual({ kind: "team", profileIds: ["dario"] });
+      expect(resolveDuty(r, "2026-12-02", null)).toEqual({
+        kind: "team",
+        profileIds: ["dario", "elena"],
+      });
+      // Martedì è di Elena: se non è in turno resta scoperta, anche se Dario c'è.
+      expect(resolveDuty(r, "2026-12-01", new Set(["dario"]))).toEqual({ kind: "uncovered" });
+      // Giovedì non è assegnato nessuno: non è prevista.
+      expect(resolveDuty(r, "2026-12-03", null)).toEqual({ kind: "not_scheduled" });
+      expect(dutiesForPerson([r], "dario", "2026-12-01", null)).toEqual([]);
+      expect(dutiesForPerson([r], "dario", "2026-12-02", null)).toEqual([
+        { responsibility: r, role: "owner", teammateIds: ["elena"] },
+      ]);
+    });
+
+    it("senza giorni indicati valgono i giorni dell'attività", () => {
+      const merc = withWeekTeam({ ...base, scheduleDays: [3] }, ["dario"]);
+      expect(merc.personDays).toEqual({ dario: [3] });
+      expect(merc.scheduleDays).toEqual([3]);
+      // Nessuno assegnato: restano i giorni della scheda, così risulta scoperta.
+      const vuota = withWeekTeam({ ...base, scheduleDays: [3] }, [], {});
+      expect(vuota.scheduleDays).toEqual([3]);
+      expect(resolveDuty(vuota, "2026-12-02", null)).toEqual({ kind: "uncovered" });
+    });
+
+    it("responsabile e supporti della scheda: i giorni previsti; per tutti: nessuno", () => {
+      expect(personDaysOf({ ...base, scheduleDays: [6, 7] })).toEqual({
+        anna: [6, 7],
+        bruno: [6, 7],
+      });
+      expect(personDaysOf({ ...base, allStaff: true })).toEqual({});
+      expect(daysOfPerson({ ...base, allStaff: true, scheduleDays: [1] }, "chiunque")).toEqual([1]);
+    });
+
+    it("effectiveWeekPlan porta con sé i giorni", () => {
+      const withDays = [
+        { weekStart: "2026-11-16", profileIds: ["carla"], personDays: { carla: [2] } },
+      ];
+      expect(effectiveWeekPlan(withDays, "2026-11-23")?.personDays).toEqual({ carla: [2] });
+      expect(effectiveWeekPlan(withDays, "2026-11-09")).toBeNull();
+    });
+
+    it("normalizza e confronta i giorni", () => {
+      expect(normalizeDays([7, 1, 1, 9, 0, 2.5])).toEqual([1, 7]);
+      expect(normalizePersonDays({ a: [3, 1], b: [] })).toEqual({ a: [1, 3] });
+      expect(samePersonDays({ a: [1, 3], b: [] }, { a: [3, 1] })).toBe(true);
+      expect(samePersonDays({ a: [1] }, { a: [1, 2] })).toBe(false);
+      expect(samePersonDays({ a: [1] }, { b: [1] })).toBe(false);
+    });
   });
 });
