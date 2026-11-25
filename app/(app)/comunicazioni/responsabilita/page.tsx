@@ -6,6 +6,7 @@ import { signAttachments } from "@/lib/announcements/storage";
 import { requireProfile } from "@/lib/auth/session";
 import { getPeopleDirectory } from "@/lib/data/announcements";
 import { getResponsibilities } from "@/lib/data/responsibilities";
+import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Responsabilità" };
@@ -20,8 +21,10 @@ export default async function ResponsabilitaPage({
   const sp = await searchParams;
   const supabase = await createClient();
   const people = await getPeopleDirectory(supabase, { includeInactive: true });
+  // Assegnazioni della settimana in corso.
   const items = await getResponsibilities(supabase, {
     people: new Map(people.map((p) => [p.id, p])),
+    week: toISODate(weekStart(nowInRome())),
   });
 
   const active = people.filter((p) => p.active);
@@ -33,8 +36,8 @@ export default async function ResponsabilitaPage({
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-xl text-sm text-muted">
-            Chi si occupa di cosa in negozio. Il tuo nome è evidenziato; scegli un collega per
-            evidenziare il suo.
+            Chi si occupa di cosa in negozio questa settimana. Il tuo nome è evidenziato; scegli un
+            collega per evidenziare il suo.
           </p>
           <Link
             href="/comunicazioni/responsabilita/spunte"

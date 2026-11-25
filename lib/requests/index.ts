@@ -221,3 +221,6 @@ export function attachmentError(file: { size: number; type: string }): string | 
   if (!ATTACHMENT_TYPES.includes(file.type)) return "Formati ammessi: PDF, JPG, PNG, HEIC, WebP.";
   return null;
 }
+
+/** Parola da scrivere per confermare «Azzera tutte le richieste». */
+export const RESET_CONFIRM_WORD = "AZZERA";

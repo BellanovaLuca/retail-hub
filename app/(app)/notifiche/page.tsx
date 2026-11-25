@@ -6,7 +6,7 @@ import { EmptyState, PageHeader } from "@/components/ui/feedback";
 import { requireProfile } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
-import { MarkAllRead, NotificationLink } from "./notification-actions";
+import { DeleteAll, MarkAllRead, NotificationLink } from "./notification-actions";
 
 export const metadata: Metadata = { title: "Notifiche" };
 
@@ -27,9 +27,10 @@ export default async function NotifichePage() {
       <PageHeader eyebrow="Avvisi" title="Notifiche">
         {unread ? `${unread} da leggere` : "Tutto letto"}
       </PageHeader>
-      {unread ? (
-        <div className="mb-6">
-          <MarkAllRead />
+      {list.length ? (
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          {unread ? <MarkAllRead /> : null}
+          <DeleteAll />
         </div>
       ) : null}
       {list.length === 0 ? (

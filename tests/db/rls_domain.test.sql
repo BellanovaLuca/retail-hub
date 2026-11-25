@@ -322,4 +322,53 @@ begin
 end;
 $$;
 
+-- ---- responsabilità assegnate per settimana ----------------------------------
+-- (sessione admin) e1 passa a «Magazzino» questa settimana, «Montaggi» va a e2.
+delete from public.responsibility_checks;
+insert into public.responsibility_week_assignments (responsibility_id, week_start, profile_ids) values
+  ('00000000-0000-0000-0000-000000000f02', date_trunc('week', public.today_rome())::date,
+   '{00000000-0000-0000-0000-0000000000e1}'),
+  ('00000000-0000-0000-0000-000000000f01', date_trunc('week', public.today_rome())::date,
+   '{00000000-0000-0000-0000-0000000000e2}');
+insert into public.notifications (profile_id, kind, title) values
+  ('00000000-0000-0000-0000-0000000000e1', 'announcement', 'Per e1'),
+  ('00000000-0000-0000-0000-0000000000e2', 'announcement', 'Per e2');
+
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+do $$
+begin
+  if public.responsibility_week_team('00000000-0000-0000-0000-000000000f02', public.today_rome() + 7)
+     <> '{00000000-0000-0000-0000-0000000000e1}'::uuid[] then
+    raise exception 'FALLITO: la settimana seguente non riprende l''ultima assegnazione';
+  end if;
+  insert into public.responsibility_checks (responsibility_id, date, done_by)
+  values ('00000000-0000-0000-0000-000000000f02', public.today_rome(), auth.uid());
+  begin
+    insert into public.responsibility_checks (responsibility_id, date, done_by)
+    values ('00000000-0000-0000-0000-000000000f01', public.today_rome(), auth.uid());
+    raise exception 'FALLITO: spunta su un''attività non più assegnata questa settimana';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.responsibility_week_assignments (responsibility_id, week_start, profile_ids)
+    values ('00000000-0000-0000-0000-000000000f01', date_trunc('week', public.today_rome())::date + 7, '{}');
+    raise exception 'FALLITO: un dipendente assegna le responsabilità';
+  exception when insufficient_privilege then null;
+  end;
+  -- Notifiche: «Elimina tutte» tocca solo le proprie.
+  delete from public.notifications;
+end;
+$$;
+reset role;
+do $$
+begin
+  if exists (select 1 from public.notifications where profile_id = '00000000-0000-0000-0000-0000000000e1') then
+    raise exception 'FALLITO: le notifiche di e1 non sono state eliminate';
+  end if;
+  if not exists (select 1 from public.notifications where profile_id = '00000000-0000-0000-0000-0000000000e2') then
+    raise exception 'FALLITO: e1 ha eliminato le notifiche di e2';
+  end if;
+end;
+$$;
+
 rollback;

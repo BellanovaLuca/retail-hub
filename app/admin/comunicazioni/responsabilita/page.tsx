@@ -7,6 +7,7 @@ import { ExtraTaskForm } from "@/components/responsibilities/extra-task-form";
 import { ExtraTaskList } from "@/components/responsibilities/extra-task-list";
 import { ResponsibilityOrder } from "@/components/responsibilities/responsibility-order";
 import { WeekNav } from "@/components/responsibilities/week-nav";
+import { WeekPlanner } from "@/components/responsibilities/week-planner";
 import { Button } from "@/components/ui/button";
 import { PersonDot, Table, Td, Th } from "@/components/ui/table";
 import { requireAdmin } from "@/lib/auth/session";
@@ -14,11 +15,12 @@ import {
   getBoard,
   getExtraTasks,
   getResponsibilities,
+  getWeekPlanner,
   loadsByPerson,
 } from "@/lib/data/responsibilities";
 import { normalizeWeekParam } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
-import { cellState, isScheduledOn } from "@/lib/responsibilities/assignment";
+import { cellState, isScheduledOn, shiftDate } from "@/lib/responsibilities/assignment";
 import { createClient } from "@/lib/supabase/server";
 import { getPickerData } from "../editor-data";
 
@@ -34,15 +36,18 @@ export default async function AdminResponsabilitaPage({
   const now = nowInRome();
   const today = toISODate(now);
   const currentWeek = toISODate(weekStart(now));
+  // Si può guardare avanti fino a 8 settimane per preparare le assegnazioni.
+  const maxWeek = shiftDate(currentWeek, 7 * 8);
   let week = normalizeWeekParam(sp.settimana, now);
-  if (week > currentWeek) week = currentWeek;
+  if (week > maxWeek) week = maxWeek;
 
   const supabase = await createClient();
-  const [board, all, tasks, picker] = await Promise.all([
+  const [board, all, tasks, picker, planner] = await Promise.all([
     getBoard(supabase, week, today),
-    getResponsibilities(supabase, { includeInactive: true }),
+    getResponsibilities(supabase, { includeInactive: true, week }),
     getExtraTasks(supabase, { includeCancelled: true, recentDays: 60 }),
     getPickerData(supabase),
+    getWeekPlanner(supabase, week),
   ]);
   const { rows, checks, days } = boardProps(board);
   const missing = board.items.reduce(
@@ -78,6 +83,33 @@ export default async function AdminResponsabilitaPage({
         </Button>
       </div>
 
+      <section aria-labelledby="chi-fa-cosa">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 id="chi-fa-cosa" className="eyebrow">
+              Chi fa cosa questa settimana
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted">
+              Spunta per ogni persona le responsabilità della settimana.
+            </p>
+          </div>
+          <WeekNav
+            weekStart={week}
+            currentWeekStart={currentWeek}
+            maxWeekStart={maxWeek}
+            basePath="/admin/comunicazioni/responsabilita"
+          />
+        </div>
+        <WeekPlanner
+          key={week}
+          weekStart={week}
+          editable={week >= currentWeek}
+          columns={planner.columns}
+          people={planner.people}
+          allStaff={planner.allStaff}
+        />
+      </section>
+
       <section aria-labelledby="tabellone">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -103,6 +135,7 @@ export default async function AdminResponsabilitaPage({
           <WeekNav
             weekStart={week}
             currentWeekStart={currentWeek}
+            maxWeekStart={maxWeek}
             basePath="/admin/comunicazioni/responsabilita"
           />
         </div>
@@ -121,7 +154,8 @@ export default async function AdminResponsabilitaPage({
         </h2>
         <p className="mb-4 max-w-2xl text-sm text-muted">
           L&apos;ordine è quello del tabellone: trascina o usa le frecce. Apri un&apos;attività per
-          cambiare responsabile, supporti, giorni e procedura.
+          cambiare giorni, procedura e responsabile «fisso» (vale finché un&apos;attività non viene
+          assegnata con la griglia qui sopra).
         </p>
         <ResponsibilityOrder
           rows={all.map((r) => ({
@@ -130,8 +164,10 @@ export default async function AdminResponsabilitaPage({
             active: r.active,
             allStaff: r.allStaff,
             scheduleDays: r.scheduleDays,
-            ownerName: r.owner?.name ?? null,
-            supportNames: r.supports.map((s) => s.name),
+            ownerName: r.weekly
+              ? r.supports.map((s) => s.name).join(", ") || null
+              : (r.owner?.name ?? null),
+            supportNames: r.weekly ? [] : r.supports.map((s) => s.name),
           }))}
         />
       </section>

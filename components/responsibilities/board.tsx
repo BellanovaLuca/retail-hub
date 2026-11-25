@@ -21,7 +21,9 @@ export type BoardRow = {
   allStaff: boolean;
   scheduleDays: number[];
   owner: BoardPerson | null;
+  /** Supporti, oppure (con `weekly`) le persone assegnate per la settimana. */
   supports: BoardPerson[];
+  weekly?: boolean;
   /** Chi la fa oggi, secondo i turni (solo se la settimana contiene oggi). */
   todayLabel: string | null;
   todayUncovered: boolean;
@@ -147,6 +149,14 @@ export function ResponsibilityBoard({
                     <span className="mt-0.5 block text-xs text-muted">
                       {row.allStaff ? (
                         <span className="font-semibold text-foreground">Tutti</span>
+                      ) : row.weekly ? (
+                        row.supports.length ? (
+                          <strong className="font-semibold text-foreground">
+                            {row.supports.map((s) => name(s)).join(", ")}
+                          </strong>
+                        ) : (
+                          <span className="text-warning">Nessuno assegnato</span>
+                        )
                       ) : (
                         <>
                           {row.owner ? (

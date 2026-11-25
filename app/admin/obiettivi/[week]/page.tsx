@@ -41,7 +41,7 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
 
   return (
     <AssignmentEditor
-      key={`${weekStart}-${data.store?.confirmedAt ?? "new"}`}
+      key={`${weekStart}-${data.store?.confirmedAt ?? "new"}-${data.comments.length}`}
       weekStart={weekStart}
       weekNumber={data.weekNumber}
       plannedTotal={data.plannedTotal}
@@ -52,6 +52,9 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
         .filter((d) => d.active)
         .map((d) => ({ kpiId: d.id, code: d.code, label: d.label, defaultTargetRule: d.rule }))}
       savedTargets={data.targets}
+      comments={data.comments
+        .filter((c) => c.kpiId === null)
+        .map((c) => ({ profileId: c.profileId, body: c.body, published: c.published }))}
       withoutHours={withoutHours}
     />
   );

@@ -56,8 +56,91 @@ const assignmentSchema = z.object({
       }),
     )
     .max(2000),
+  /** Persone presenti nella tabella: le loro celle svuotate perdono l'obiettivo salvato. */
+  profileIds: z.array(z.uuid()).max(500).optional(),
+  /** Commento generale della settimana per persona: si pubblica con la conferma. */
+  comments: z
+    .array(z.object({ profileId: z.uuid(), body: z.string().max(4000) }))
+    .max(500)
+    .optional(),
   notify: z.boolean().default(true),
 });
+
+/** Aggiunge al foglio delle persone le voci a cui è stato dato un obiettivo (se mancano). */
+async function addMissingProfileKpis(db: Db, cells: { profileId: string; kpiId: string }[]) {
+  if (cells.length === 0) return;
+  const profileIds = [...new Set(cells.map((c) => c.profileId))];
+  const { data: existing } = await db
+    .from("profile_kpis")
+    .select("profile_id, kpi_id, sort_order, active")
+    .in("profile_id", profileIds);
+  const has = new Set(
+    (existing ?? []).filter((e) => e.active).map((e) => `${e.profile_id}|${e.kpi_id}`),
+  );
+  const maxOrder = new Map<string, number>();
+  for (const e of existing ?? [])
+    maxOrder.set(e.profile_id, Math.max(maxOrder.get(e.profile_id) ?? 0, e.sort_order));
+  const rows = cells
+    .filter((c) => !has.has(`${c.profileId}|${c.kpiId}`))
+    .map((c) => {
+      const order = (maxOrder.get(c.profileId) ?? 0) + 1;
+      maxOrder.set(c.profileId, order);
+      return { profile_id: c.profileId, kpi_id: c.kpiId, sort_order: order, active: true };
+    });
+  if (rows.length === 0) return;
+  // Le voci disattivate tornano attive (in fondo al foglio).
+  const { error } = await db.from("profile_kpis").upsert(rows, { onConflict: "profile_id,kpi_id" });
+  if (error) throw new ActionError(dbErrorMessage(error, "Voci delle persone non salvate."));
+}
+
+/**
+ * Salva e pubblica i commenti generali della settimana; restituisce chi ha un commento nuovo o
+ * cambiato (da avvisare).
+ */
+async function saveGeneralComments(
+  db: Db,
+  authorId: string,
+  weekStart: string,
+  comments: { profileId: string; body: string }[],
+): Promise<string[]> {
+  if (comments.length === 0) return [];
+  const { data: existing } = await db
+    .from("weekly_comments")
+    .select("id, profile_id, body, published")
+    .eq("week_start", weekStart)
+    .is("kpi_id", null)
+    .in(
+      "profile_id",
+      comments.map((c) => c.profileId),
+    );
+  const byPerson = new Map((existing ?? []).map((e) => [e.profile_id, e]));
+  const changed: string[] = [];
+  for (const c of comments) {
+    const body = c.body.trim();
+    const old = byPerson.get(c.profileId);
+    if (old && old.body === body && (old.published || !body)) continue;
+    const { error } = old
+      ? body
+        ? await db
+            .from("weekly_comments")
+            .update({ body, author_id: authorId, published: true })
+            .eq("id", old.id)
+        : await db.from("weekly_comments").delete().eq("id", old.id)
+      : body
+        ? await db.from("weekly_comments").insert({
+            profile_id: c.profileId,
+            week_start: weekStart,
+            kpi_id: null,
+            body,
+            author_id: authorId,
+            published: true,
+          })
+        : { error: null };
+    if (error) throw new ActionError(dbErrorMessage(error, "Commenti non salvati."));
+    if (body) changed.push(c.profileId);
+  }
+  return changed;
+}
 
 /** Copia le voci del gruppo della sua area a chi non ha ancora voci proprie (§8.3). */
 async function ensureProfileKpis(db: Db, profileIds: string[]) {
@@ -98,10 +181,11 @@ export async function confirmAssignment(
   input: z.input<typeof assignmentSchema>,
 ): Promise<ActionResult<{ people: number }>> {
   return runAction(async () => {
-    const { supabase } = await adminAction();
+    const { supabase, profile } = await adminAction();
     const parsed = assignmentSchema.safeParse(input);
     if (!parsed.success) return { ok: false, message: "Controlla i numeri inseriti." };
     const { weekStart, store, cells } = parsed.data;
+    const comments = parsed.data.comments ?? [];
 
     const { error: storeError } = await supabase.from("store_weekly_targets").upsert(
       {
@@ -120,7 +204,10 @@ export async function confirmAssignment(
     if (storeError)
       throw new ActionError(dbErrorMessage(storeError, "Obiettivi del negozio non salvati."));
 
-    const profileIds = [...new Set(cells.map((c) => c.profileId))];
+    const profileIds = [
+      ...new Set([...cells.map((c) => c.profileId), ...(parsed.data.profileIds ?? [])]),
+    ];
+    const withTargets = new Set(cells.map((c) => c.profileId));
     const keep = new Set(cells.map((c) => `${c.profileId}|${c.kpiId}`));
     // Obiettivi già salvati: servono per avvisare solo chi riceve obiettivi nuovi o diversi.
     const { data: existing } = profileIds.length
@@ -169,10 +256,22 @@ export async function confirmAssignment(
       }
     }
 
-    await ensureProfileKpis(supabase, profileIds);
+    // Prima le voci del gruppo per chi non ne ha, poi quelle scritte fuori dal suo foglio.
+    await ensureProfileKpis(supabase, [...withTargets]);
+    await addMissingProfileKpis(supabase, cells);
+    const commented = await saveGeneralComments(supabase, profile.id, weekStart, comments);
 
     // Si avvisa solo chi ha obiettivi nuovi o cambiati (chi li aveva già uguali non riceve nulla).
     const toNotify = parsed.data.notify ? [...changed] : [];
+    const onlyComment = parsed.data.notify ? commented.filter((id) => !changed.has(id)) : [];
+    if (onlyComment.length) {
+      await notify(onlyComment, {
+        kind: "week_comments",
+        title: `Commento della ${weekLabel(weekStart)}`,
+        body: "Il tuo responsabile ha lasciato un commento sui tuoi obiettivi.",
+        link: `/obiettivi?settimana=${weekStart}`,
+      });
+    }
     if (toNotify.length) {
       const firstTime = toNotify.filter(
         (id) => ![...previous.keys()].some((k) => k.startsWith(`${id}|`)),
@@ -185,24 +284,28 @@ export async function confirmAssignment(
             title: firstTime.includes(id)
               ? `Obiettivi della ${weekLabel(weekStart)}`
               : `Obiettivi aggiornati · ${weekLabel(weekStart)}`,
-            body: firstTime.includes(id)
-              ? "Sono pronti i tuoi obiettivi della settimana: compila i numeri ogni giorno."
-              : "I tuoi obiettivi della settimana sono stati aggiornati.",
+            body: `${
+              firstTime.includes(id)
+                ? "Sono pronti i tuoi obiettivi della settimana: compila i numeri ogni giorno."
+                : "I tuoi obiettivi della settimana sono stati aggiornati."
+            }${commented.includes(id) ? " C'è anche un commento per te." : ""}`,
             link: `/obiettivi?settimana=${weekStart}`,
           },
         })),
       );
     }
     revalidateWeek(weekStart);
-    const people = `${profileIds.length} ${profileIds.length === 1 ? "persona" : "persone"}`;
+    const people = `${withTargets.size} ${withTargets.size === 1 ? "persona" : "persone"}`;
     return {
       ok: true,
       message: parsed.data.notify
         ? toNotify.length
-          ? `Obiettivi confermati per ${people}: ${toNotify.length === profileIds.length ? "tutte avvisate" : `avvisate ${toNotify.length}, per le altre niente di nuovo`}.`
-          : `Obiettivi confermati per ${people}: nessuna modifica da comunicare.`
+          ? `Obiettivi confermati per ${people}: ${toNotify.length === withTargets.size ? "tutte avvisate" : `avvisate ${toNotify.length}, per le altre niente di nuovo`}.`
+          : onlyComment.length
+            ? `Obiettivi confermati per ${people}: avvisati ${onlyComment.length} per il commento nuovo.`
+            : `Obiettivi confermati per ${people}: nessuna modifica da comunicare.`
         : `Obiettivi confermati per ${people}.`,
-      data: { people: profileIds.length },
+      data: { people: withTargets.size },
     };
   });
 }

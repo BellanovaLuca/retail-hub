@@ -1,5 +1,6 @@
 "use server";
 
+import { getISOWeek, parseISO } from "date-fns";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { nowInRome, toISODate } from "@/lib/dates";
@@ -13,7 +14,9 @@ import {
 } from "@/lib/auth/guards";
 import { attachmentSchema, parseAttachments } from "@/lib/announcements/model";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
-import { notify } from "@/lib/notifications";
+import { getResponsibilities } from "@/lib/data/responsibilities";
+import { notify, notifyEach } from "@/lib/notifications";
+import { assigneeIds, isoWeekdayOf, mondayOf } from "@/lib/responsibilities/assignment";
 import { scheduleLabel } from "@/lib/responsibilities/labels";
 
 function revalidateAll() {
@@ -35,12 +38,6 @@ const responsibilitySchema = z
     attachments: z.array(attachmentSchema).max(20),
   })
   .superRefine((v, ctx) => {
-    if (!v.allStaff && !v.ownerId)
-      ctx.addIssue({
-        code: "custom",
-        path: ["ownerId"],
-        message: "Scegli il responsabile, oppure indica che è un'attività per tutti.",
-      });
     if (v.ownerId && v.supportIds.includes(v.ownerId))
       ctx.addIssue({
         code: "custom",
@@ -182,6 +179,98 @@ export async function saveResponsibility(
 }
 
 const idSchema = z.uuid();
+
+// ---------------------------------------------------------------------------
+// Assegnazione settimanale (griglia persone × attività)
+// ---------------------------------------------------------------------------
+
+const weekAssignmentsSchema = z.object({
+  weekStart: z.iso.date().refine((d) => isoWeekdayOf(d) === 1, "Serve il lunedì della settimana."),
+  changes: z
+    .array(
+      z.object({
+        responsibilityId: z.uuid(),
+        profileIds: z.array(z.uuid()).max(100),
+      }),
+    )
+    .min(1, "Nessuna modifica da salvare.")
+    .max(200),
+});
+
+export type WeekAssignmentsInput = z.input<typeof weekAssignmentsSchema>;
+
+/**
+ * Salva chi fa cosa nella settimana: per ogni attività cambiata, l'elenco delle persone (una o
+ * più, alla pari). L'assegnazione vale anche per le settimane seguenti finché non si cambia.
+ * Chi riceve un'attività nuova viene avvisato con un'unica notifica.
+ */
+export async function saveWeekAssignments(
+  input: WeekAssignmentsInput,
+): Promise<ActionResult<{ saved: number }>> {
+  return runAction(async () => {
+    const parsed = weekAssignmentsSchema.safeParse(input);
+    if (!parsed.success) throw new ActionError(parsed.error.issues[0].message);
+    const { weekStart, changes } = parsed.data;
+    const currentWeek = mondayOf(toISODate(nowInRome()));
+    if (weekStart < currentWeek)
+      throw new ActionError("Le settimane passate non si possono più modificare.");
+    if (new Set(changes.map((c) => c.responsibilityId)).size !== changes.length)
+      throw new ActionError("Attività ripetute.");
+
+    const { supabase } = await adminAction();
+    // Prima del salvataggio: chi era già assegnato quella settimana (per avvisare solo i nuovi).
+    const before = await getResponsibilities(supabase, { includeInactive: true, week: weekStart });
+    const byId = new Map(before.map((r) => [r.id, r]));
+    for (const c of changes) {
+      const r = byId.get(c.responsibilityId);
+      if (!r) throw new ActionError("Attività non trovata: ricarica la pagina.");
+      if (r.allStaff) throw new ActionError(`«${r.title}» è un'attività per tutti.`);
+    }
+
+    const { error } = await supabase.from("responsibility_week_assignments").upsert(
+      changes.map((c) => ({
+        responsibility_id: c.responsibilityId,
+        week_start: weekStart,
+        profile_ids: [...new Set(c.profileIds)],
+      })),
+      { onConflict: "responsibility_id,week_start" },
+    );
+    if (error) return { ok: false, message: dbErrorMessage(error, "Assegnazioni non salvate.") };
+
+    // Una notifica per persona con le attività nuove della settimana.
+    const news = new Map<string, string[]>();
+    for (const c of changes) {
+      const r = byId.get(c.responsibilityId)!;
+      const old = new Set(assigneeIds(r));
+      for (const id of new Set(c.profileIds)) {
+        if (!old.has(id)) news.set(id, [...(news.get(id) ?? []), r.title]);
+      }
+    }
+    const week = `Week ${getISOWeek(parseISO(weekStart))}`;
+    await notifyEach(
+      [...news].map(([profileId, titles]) => ({
+        profileId,
+        notification: {
+          kind: "assignment_new" as const,
+          title:
+            titles.length === 1
+              ? `${week}: ti occupi di «${titles[0]}»`
+              : `${week}: ti occupi di ${titles.length} attività`,
+          body: titles.join(", "),
+          link: "/comunicazioni/responsabilita",
+        },
+      })),
+    );
+
+    revalidateAll();
+    const n = changes.length;
+    return {
+      ok: true,
+      message: `${n === 1 ? "Assegnazione salvata" : `${n} assegnazioni salvate`}${news.size ? ` · avvisate ${news.size} ${news.size === 1 ? "persona" : "persone"}` : ""}.`,
+      data: { saved: n },
+    };
+  });
+}
 
 /** Elimina un'attività con tutte le sue spunte (meglio disattivarla, per conservarle). */
 export async function deleteResponsibility(id: string): Promise<ActionResult> {

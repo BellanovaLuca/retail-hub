@@ -4,15 +4,17 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 
-/** Frecce per le settimane (non oltre la corrente). `hrefFor` riceve il lunedì. */
+/** Frecce per le settimane (non oltre `maxWeekStart`, di default la corrente). */
 export function WeekNav({
   weekStart,
   currentWeekStart,
+  maxWeekStart = currentWeekStart,
   basePath,
   query = {},
 }: {
   weekStart: string;
   currentWeekStart: string;
+  maxWeekStart?: string;
   basePath: string;
   query?: Record<string, string | undefined>;
 }) {
@@ -31,7 +33,7 @@ export function WeekNav({
     monday.getMonth() === sunday.getMonth()
       ? `${format(monday, "d")}–${format(sunday, "d MMMM", { locale: it })}`
       : `${format(monday, "d MMM", { locale: it })} – ${format(sunday, "d MMM", { locale: it })}`;
-  const canNext = weekStart < currentWeekStart;
+  const canNext = weekStart < maxWeekStart;
   const arrow =
     "grid size-11 place-items-center rounded-md border border-line-strong hover:border-foreground";
 

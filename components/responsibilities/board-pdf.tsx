@@ -85,10 +85,16 @@ export function BoardPdf({
               <Text>{r.title}</Text>
             </View>
             <View style={s.cOwner}>
-              <Text style={s.bold}>{r.allStaff ? "TUTTI" : (r.owner?.name ?? "—")}</Text>
+              <Text style={s.bold}>
+                {r.allStaff
+                  ? "TUTTI"
+                  : r.weekly
+                    ? r.supports.map((p) => p.name).join(", ") || "—"
+                    : (r.owner?.name ?? "—")}
+              </Text>
             </View>
             <View style={s.cSupport}>
-              <Text>{r.supports.map((p) => p.name).join(", ")}</Text>
+              <Text>{r.weekly ? "" : r.supports.map((p) => p.name).join(", ")}</Text>
             </View>
             {board.days.map((d) => {
               const check = board.checks[r.id]?.[d];

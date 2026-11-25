@@ -310,21 +310,6 @@ export function MyWeek({ days, today, kpis, targets, comments, initialValues }: 
           Scrivi direttamente nelle celle: si salva da solo. I giorni in grigio non si possono
           modificare (futuri o più vecchi di 7 giorni).
         </p>
-        {rows.some((r) => r.comment) ? (
-          <div className="mt-8">
-            <h2 className="mb-3 eyebrow">Commenti sulle voci</h2>
-            <dl className="divide-y divide-line border-y border-line">
-              {rows
-                .filter((r) => r.comment)
-                .map((r) => (
-                  <div key={r.kpiId} className="grid grid-cols-[12rem_1fr] gap-4 py-3 text-sm">
-                    <dt className="text-muted">{r.label}</dt>
-                    <dd className="whitespace-pre-line">{r.comment}</dd>
-                  </div>
-                ))}
-            </dl>
-          </div>
-        ) : null}
       </section>
     </>
   );
