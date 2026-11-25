@@ -11,7 +11,11 @@ export default function ComunicazioniLayout({ children }: { children: React.Reac
   return (
     <>
       <PageHeader eyebrow="Negozio" title="Responsabilità e Comunicazioni" />
-      <SubNav items={tabs} exact={["/comunicazioni", "/comunicazioni/responsabilita"]} fallbackHref="/comunicazioni" />
+      <SubNav
+        items={tabs}
+        exact={["/comunicazioni", "/comunicazioni/responsabilita"]}
+        fallbackHref="/comunicazioni"
+      />
       {children}
     </>
   );
