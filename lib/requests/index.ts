@@ -359,3 +359,22 @@ export function createsLeaves(type: string) {
 
 /** Nota di decisione di una richiesta revocata dal foglio turni. */
 export const REVOKED_FROM_SCHEDULE_NOTE = "Tolta dal foglio turni";
+
+/** Nota di decisione di una richiesta rimasta senza giorni dopo una modifica nel foglio ferie. */
+export const REVOKED_FROM_LEAVES_NOTE = "Tolta dal planning ferie";
+
+/**
+ * Motivo per cui il database ha rifiutato l'approvazione di uno scambio (eccezioni del trigger
+ * `apply_approved_request`, già in italiano): va mostrato all'admin, che altrimenti non sa cosa
+ * sistemare nel foglio turni. null = non è un errore dello scambio.
+ */
+export function swapErrorMessage(error: { code?: string; message?: string }): string | null {
+  const message = error.message ?? "";
+  if (message.includes("Turni dello scambio"))
+    return "I turni dello scambio non esistono più: controlla il foglio turni.";
+  if (error.code !== "P0001") return null;
+  if (/ha già un turno il /.test(message))
+    return `${message}: lo scambio creerebbe due turni nello stesso giorno. Sistema il foglio turni e riprova, oppure rifiuta.`;
+  if (message.includes("accettato dal collega")) return `${message}.`;
+  return null;
+}

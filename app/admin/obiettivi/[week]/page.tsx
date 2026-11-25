@@ -34,7 +34,8 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
 
   return (
     <AssignmentEditor
-      key={`${weekStart}-${data.store?.confirmedAt ?? "new"}-${data.comments.length}`}
+      // Solo la settimana: rimontando a ogni conferma si perdeva il messaggio con l'esito.
+      key={weekStart}
       weekStart={weekStart}
       weekNumber={data.weekNumber}
       plannedTotal={data.plannedTotal}

@@ -198,7 +198,12 @@ export async function createRequest(input: RequestInput): Promise<ActionResult<{
     const v = parsed.data;
     if (v.targetProfileId === profile.id)
       return { ok: false, message: "Scegli un collega diverso da te." };
-    if (v.attachmentPath && !v.attachmentPath.startsWith(`${profile.id}/`)) {
+    // Solo file della propria cartella, senza risalite («..») né segmenti vuoti.
+    if (
+      v.attachmentPath &&
+      (!v.attachmentPath.startsWith(`${profile.id}/`) ||
+        v.attachmentPath.split("/").some((part) => part === "" || part === "." || part === ".."))
+    ) {
       return { ok: false, message: "Allegato non valido." };
     }
 
@@ -418,6 +423,9 @@ export async function addRequestComment(requestId: string, body: string): Promis
   });
 }
 
+/** Allegati che una persona può caricare in 24 ore. */
+const MAX_UPLOADS_PER_DAY = 20;
+
 /** Carica un allegato in attachments/<uid>/… (se lo Storage è disponibile). */
 export async function uploadRequestAttachment(
   formData: FormData,
@@ -430,10 +438,23 @@ export async function uploadRequestAttachment(
     if (invalid) return { ok: false, message: invalid };
     const safe = file.name.replace(/[^\w.-]+/g, "_").slice(-80);
     const path = `${profile.id}/${crypto.randomUUID()}-${safe}`;
+    const storage = createAdminClient().storage.from("attachments");
+    // Tetto ai caricamenti: al massimo MAX_UPLOADS_PER_DAY file al giorno per persona, così un
+    // ciclo di invii non riempie lo spazio degli allegati di tutti.
+    const { data: recent } = await storage.list(profile.id, {
+      limit: 200,
+      sortBy: { column: "created_at", order: "desc" },
+    });
+    const dayAgo = Date.now() - 86_400_000;
+    const today = (recent ?? []).filter((f) => f.created_at && Date.parse(f.created_at) > dayAgo);
+    if (today.length >= MAX_UPLOADS_PER_DAY) {
+      return {
+        ok: false,
+        message: "Hai caricato troppi allegati oggi: riprova domani o consegna il documento a mano.",
+      };
+    }
     // Upload con la service role nella cartella dell'utente: lo Storage resta privato.
-    const { error } = await createAdminClient()
-      .storage.from("attachments")
-      .upload(path, file, { contentType: file.type });
+    const { error } = await storage.upload(path, file, { contentType: file.type });
     if (error) return { ok: false, message: "Allegati non disponibili in questo momento." };
     return { ok: true, data: { path, name: file.name } };
   });

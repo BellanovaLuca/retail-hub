@@ -2,7 +2,14 @@ import "server-only";
 import { sendDueAnnouncementNotifications } from "@/lib/announcements/notify";
 import { getChecks, getOnShift, getResponsibilities } from "@/lib/data/responsibilities";
 import { adminIds, notify, notifyEach } from "@/lib/notifications";
-import { dutiesForPerson, mondayOf, resolveDuty } from "@/lib/responsibilities/assignment";
+import {
+  dutiesForPerson,
+  hasAssignees,
+  isScheduledOn,
+  mondayOf,
+  uncheckedOn,
+  uncoveredByReason,
+} from "@/lib/responsibilities/assignment";
 import type { CronJob } from "./jobs";
 
 /** Job delle responsabilità (§8.4, §10) e delle comunicazioni programmate (§6.2). */
@@ -48,21 +55,32 @@ export const communicationJobs: CronJob[] = [
           },
         })),
       );
-      const uncovered = responsibilities.filter(
-        (r) => resolveDuty(r, today, onShift).kind === "uncovered",
-      );
-      if (uncovered.length) {
-        await notify(await adminIds(), {
+      // Due avvisi distinti: chi è assegnato oggi non è in turno / non è assegnato nessuno.
+      const { away, unassigned } = uncoveredByReason(responsibilities, today, onShift);
+      const admins = away.length || unassigned.length ? await adminIds() : [];
+      if (away.length) {
+        await notify(admins, {
           kind: "responsibility_uncovered",
           title:
-            uncovered.length === 1
-              ? `Oggi nessuno in turno per «${uncovered[0].title}»`
-              : `Oggi ${uncovered.length} responsabilità senza nessuno in turno`,
-          body: uncovered.map((u) => u.title).join(", "),
+            away.length === 1
+              ? `Oggi nessuno in turno per «${away[0].title}»`
+              : `Oggi ${away.length} responsabilità senza nessuno in turno`,
+          body: `Chi è assegnato oggi non è in turno: ${away.map((u) => u.title).join(", ")}`,
           link: "/admin/comunicazioni/responsabilita",
         });
       }
-      return { notified: items.length, uncovered: uncovered.length };
+      if (unassigned.length) {
+        await notify(admins, {
+          kind: "responsibility_uncovered",
+          title:
+            unassigned.length === 1
+              ? `«${unassigned[0].title}» non è assegnata a nessuno`
+              : `${unassigned.length} responsabilità senza nessuno assegnato`,
+          body: `Da assegnare nella griglia «Chi fa cosa»: ${unassigned.map((u) => u.title).join(", ")}`,
+          link: "/admin/comunicazioni/responsabilita",
+        });
+      }
+      return { notified: items.length, uncovered: away.length, unassigned: unassigned.length };
     },
   },
   {
@@ -70,24 +88,32 @@ export const communicationJobs: CronJob[] = [
     description: "A fine giornata: riepilogo agli admin delle attività previste e non spuntate.",
     after: "19:30",
     async run({ db, today }) {
-      const [onShift, responsibilities, checks] = await Promise.all([
-        getOnShift(db, today),
+      const [responsibilities, checks] = await Promise.all([
         getResponsibilities(db, { week: mondayOf(today) }),
         getChecks(db, today, today, new Map()),
       ]);
-      const missing = responsibilities.filter((r) => {
-        const kind = resolveDuty(r, today, onShift).kind;
-        return kind !== "not_scheduled" && !checks[r.id]?.[today];
-      });
+      // Stessa regola del controllo delle spunte: «non spuntata» è un'attività prevista oggi con
+      // qualcuno assegnato; quelle senza nessuno assegnato si elencano a parte.
+      const missing = uncheckedOn(responsibilities, today, (r) => !!checks[r.id]?.[today]);
+      const unassigned = responsibilities.filter(
+        (r) => !hasAssignees(r) && isScheduledOn(r.scheduleDays, today) && !checks[r.id]?.[today],
+      );
       if (missing.length) {
         await notify(await adminIds(), {
           kind: "responsibility_missed",
-          title: `${missing.length} responsabilità non spuntate oggi`,
-          body: missing.map((r) => r.title).join(", "),
+          title:
+            missing.length === 1
+              ? "1 responsabilità non spuntata oggi"
+              : `${missing.length} responsabilità non spuntate oggi`,
+          body: `${missing.map((r) => r.title).join(", ")}${
+            unassigned.length
+              ? `\nSenza nessuno assegnato: ${unassigned.map((r) => r.title).join(", ")}`
+              : ""
+          }`,
           link: "/admin/comunicazioni/responsabilita",
         });
       }
-      return { missing: missing.length };
+      return { missing: missing.length, unassigned: unassigned.length };
     },
   },
   {

@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/attempts";
 import { ActionError, authedAction } from "@/lib/auth/guards";
 import { lockoutMessage } from "@/lib/auth/lockout";
+import { forgetLoginSessions } from "@/lib/auth/login-sessions";
 import { syntheticEmail, validateNewPin } from "@/lib/auth/pin";
 import { authPassword } from "@/lib/auth/secret";
 import { getCurrentProfile, isOnboarded } from "@/lib/auth/session";
@@ -125,7 +126,11 @@ export async function changePin(input: z.infer<typeof changePinSchema>): Promise
     })
     .eq("id", profile.id);
 
-  // Chi era collegato altrove con il vecchio PIN deve rientrare.
+  // Chi era collegato altrove con il vecchio PIN deve rientrare: le altre sessioni smettono
+  // subito di valere per il database (registro) e vengono revocate su Supabase Auth.
+  const { data: claims } = await supabase.auth.getClaims();
+  const sessionId = (claims?.claims as { session_id?: string } | undefined)?.session_id ?? null;
+  if (sessionId) await forgetLoginSessions(createAdminClient(), profile.id, { except: sessionId });
   const { error: othersError } = await supabase.auth.signOut({ scope: "others" });
   if (othersError) console.error("cambio PIN: altre sessioni non chiuse", othersError);
 
@@ -145,6 +150,12 @@ export async function signOut(pushEndpoint?: unknown) {
     // RLS: si eliminano solo le proprie sottoscrizioni.
     await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint.data);
   }
+  // La sessione smette subito di valere anche per il database (il token durerebbe fino a un'ora).
+  const { data: claims } = await supabase.auth.getClaims();
+  const current = claims?.claims as { sub?: string; session_id?: string } | undefined;
+  if (current?.sub && current.session_id) {
+    await forgetLoginSessions(createAdminClient(), current.sub, { only: current.session_id });
+  }
   await supabase.auth.signOut({ scope: "local" });
   redirect("/accesso");
 }
@@ -154,7 +165,11 @@ export async function signOutEverywhere() {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
-  if (userId) await supabase.from("push_subscriptions").delete().eq("profile_id", userId);
+  if (userId) {
+    await supabase.from("push_subscriptions").delete().eq("profile_id", userId);
+    // Tutti i dispositivi fuori da subito: i token già emessi non valgono più per il database.
+    await forgetLoginSessions(createAdminClient(), userId);
+  }
   await supabase.auth.signOut({ scope: "global" });
   redirect("/accesso");
 }

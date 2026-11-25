@@ -14,6 +14,9 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-0000000002a0', 'Aldo', 'Admin', 'Aldo', 'ADM-201', 'admin'),
   ('00000000-0000-0000-0000-0000000002e1', 'Elsa', 'Uno', 'Elsa', 'CRD-201', 'employee'),
   ('00000000-0000-0000-0000-0000000002e2', 'Enzo', 'Due', 'Enzo', 'CRD-202', 'employee');
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 
 insert into public.shift_templates (id, code, label, is_absence) values
   ('00000000-0000-0000-0000-000000002701', 'ZR', 'Riposo di prova', true);

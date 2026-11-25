@@ -12,6 +12,9 @@ insert into public.profiles (id, first_name, last_name, display_name, employee_c
   ('00000000-0000-0000-0000-00000000000a', 'Anna', 'Admin', 'Anna', 'ADM-001', 'admin', 40),
   ('00000000-0000-0000-0000-0000000000e1', 'Francesca', 'Uno', 'Francesca', 'CRD-001', 'employee', 40),
   ('00000000-0000-0000-0000-0000000000e2', 'Francesca', 'Due', 'Francy', 'CRD-002', 'employee', 24);
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
 -- Le note riservate degli admin stanno in una tabella a parte (solo admin).
 insert into public.profile_admin_notes (profile_id, notes) values
   ('00000000-0000-0000-0000-0000000000e1', 'riservato 1'),
@@ -24,6 +27,9 @@ begin
     insert into auth.users (id) values ('00000000-0000-0000-0000-0000000000e3');
     insert into public.profiles (id, first_name, last_name, display_name, employee_code)
     values ('00000000-0000-0000-0000-0000000000e3', 'Francesca', 'Tre', 'FRANCY', 'CRD-003');
+-- Utenti di prova con il primo accesso completato (lo richiede is_staff()).
+update public.profiles set must_change_pin = false, privacy_accepted_at = coalesce(privacy_accepted_at, now())
+ where must_change_pin or privacy_accepted_at is null;
     raise exception 'FALLITO: due persone con lo stesso nome visualizzato';
   exception when unique_violation then null;
   end;

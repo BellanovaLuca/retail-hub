@@ -27,7 +27,7 @@ export default async function ComunicazionePage({ params }: { params: Promise<{ 
 
   return (
     <article className="max-w-3xl">
-      <MarkRead announcementId={entry.id} />
+      {entry.own ? null : <MarkRead announcementId={entry.id} />}
       <Link
         href="/comunicazioni"
         className="mb-8 inline-flex min-h-11 items-center gap-2 text-sm text-muted hover:text-foreground"
@@ -56,7 +56,13 @@ export default async function ComunicazionePage({ params }: { params: Promise<{ 
       <AttachmentList items={attachments} />
       {entry.requires_ack ? (
         <div className="mt-10 border-t border-line pt-8">
-          <AckButton announcementId={entry.id} acknowledgedAt={entry.acknowledgedAt} />
+          {entry.own ? (
+            <p className="text-sm text-muted">
+              L&apos;hai scritta tu: la conferma di lettura è chiesta ai destinatari.
+            </p>
+          ) : (
+            <AckButton announcementId={entry.id} acknowledgedAt={entry.acknowledgedAt} />
+          )}
         </div>
       ) : null}
     </article>

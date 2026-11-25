@@ -18,7 +18,8 @@ export type NotificationKind =
   | "assignment_new"
   | "shift_reminder"
   | "week_unpublished_warning"
-  | "responsibility_uncovered";
+  | "responsibility_uncovered"
+  | "login_locked";
 
 export type NotificationInput = {
   kind: NotificationKind;
@@ -47,6 +48,7 @@ const CHANNELS: Record<NotificationKind, Channel[]> = {
   shift_reminder: ["push"],
   week_unpublished_warning: ["in_app"],
   responsibility_uncovered: ["in_app", "push"],
+  login_locked: ["in_app", "push"],
 };
 
 /**

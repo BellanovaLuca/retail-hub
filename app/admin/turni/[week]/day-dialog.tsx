@@ -18,7 +18,7 @@ import type {
   ShiftRecord,
   TemplateRecord,
 } from "@/lib/schedule/types";
-import { isFullDayLeave, leaveLabelAdmin } from "@/lib/schedule/view";
+import { dayBreakMinutes, isFullDayLeave, leaveLabelAdmin } from "@/lib/schedule/view";
 import { clearShiftConflict, removeLeaveDays, revokeLeaveRequest, saveShiftDay } from "../actions";
 
 type Segment = { start: string; end: string; isBackOffice: boolean };
@@ -67,7 +67,8 @@ export function DayDialog({
       .filter((s) => s.start && s.end)
       .map((s) => ({ start: s.start!, end: s.end!, isBackOffice: resolveBackOffice(s, person) })),
   );
-  const [breakMinutes, setBreakMinutes] = useState(first?.breakMinutes ?? 0);
+  // La pausa vale per la giornata e sta sul pezzo più lungo non in back office, non sul primo.
+  const [breakMinutes, setBreakMinutes] = useState(dayBreakMinutes(sorted));
   const [departmentId, setDepartmentId] = useState(
     first?.departmentId ?? person.primaryDepartmentId ?? "",
   );

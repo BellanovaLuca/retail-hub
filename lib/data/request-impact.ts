@@ -7,6 +7,7 @@ import type { Violation } from "@/lib/rules/types";
 import type { createClient } from "@/lib/supabase/server";
 import { weekStart } from "@/lib/dates";
 import { buildRuleContext, getWeekRules } from "./rules";
+import { getPublishedDays } from "./schedule";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -69,6 +70,40 @@ export async function swapContext(
     })),
   ];
   const name = (id: string) => names.get(id) ?? "—";
+
+  // Lo scambio è stato chiesto (e accettato dal collega) sui turni PUBBLICATI, ma l'approvazione
+  // sposta quelli del foglio di lavoro: se nel frattempo sono cambiati, l'admin deve saperlo.
+  const drift: string[] = [];
+  if (!r.status || r.status === "pending" || r.status === "peer_accepted") {
+    const published = await getPublishedDays(db, people, dates);
+    const times = (list: { start: string | null; end: string | null }[]) =>
+      list
+        .filter((x) => x.start && x.end)
+        .map((x) => `${x.start!.slice(0, 5)}–${x.end!.slice(0, 5)}`)
+        .sort()
+        .join(" · ");
+    const check = (profileId: string, date: string | null) => {
+      if (!date) return;
+      const working = times(
+        (shifts ?? [])
+          .filter((x) => x.profile_id === profileId && x.date === date)
+          .map((x) => ({ start: x.start_time, end: x.end_time })),
+      );
+      const shown = times(
+        published
+          .filter((x) => x.profile_id === profileId && x.date === date && !x.is_absence)
+          .map((x) => ({ start: x.start_time, end: x.end_time })),
+      );
+      if (working === shown) return;
+      const day = format(parseISO(date), "EEE d MMM", { locale: it });
+      drift.push(
+        `Attenzione: il turno di ${name(profileId)} di ${day} nel foglio turni (${working || "nessun turno"}) è diverso da quello pubblicato (${shown || "nessun turno"}) su cui è stato chiesto lo scambio. Approvando si scambia quello del foglio turni.`,
+      );
+    };
+    check(r.profile_id, r.start_date);
+    check(r.target_profile_id, r.target_date);
+  }
+
   const byDayAndPerson = dates.flatMap((date) =>
     people.map((profileId) => ({
       date,
@@ -86,14 +121,17 @@ export async function swapContext(
     warnings:
       r.status === "approved"
         ? []
-        : swapConflicts({
-            requester: { id: r.profile_id, name: name(r.profile_id) },
-            target: { id: r.target_profile_id, name: name(r.target_profile_id) },
-            shiftDate: r.start_date,
-            targetDate: r.target_date,
-            occupations,
-            formatDay: (d) => format(parseISO(d), "EEE d MMM", { locale: it }),
-          }),
+        : [
+            ...drift,
+            ...swapConflicts({
+              requester: { id: r.profile_id, name: name(r.profile_id) },
+              target: { id: r.target_profile_id, name: name(r.target_profile_id) },
+              shiftDate: r.start_date,
+              targetDate: r.target_date,
+              occupations,
+              formatDay: (d) => format(parseISO(d), "EEE d MMM", { locale: it }),
+            }),
+          ],
   };
 }
 

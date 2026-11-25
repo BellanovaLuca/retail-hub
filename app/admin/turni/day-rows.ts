@@ -77,8 +77,8 @@ export function breakSegmentIndex(
 
 /**
  * Righe che sostituiscono i turni di una persona in un giorno. Reparto, area, back office e nota
- * non indicati si ereditano dalla giornata precedente; nessuna fascia e nessun turno rapido =
- * giornata vuota.
+ * non indicati si ereditano dalla giornata precedente (il back office solo se era uguale su tutti
+ * i pezzi); nessuna fascia e nessun turno rapido = giornata vuota.
  */
 export function buildDayRows(
   profileId: string,
@@ -150,12 +150,20 @@ export function buildDayRows(
     }));
   }
 
+  // Back office ereditato: quello della giornata di prima solo se tutti i suoi pezzi erano uguali.
+  // Da una giornata mista («8:30–10 BO · 10–17:30») non si eredita il primo pezzo: senza
+  // marcatore decide il predefinito della persona (null).
+  const inheritedBackOffice = work.length
+    ? work.every((s) => s.is_back_office === work[0].is_back_office)
+      ? work[0].is_back_office
+      : null
+    : (prev?.is_back_office ?? null);
   const backOffice = sorted.map((seg) =>
     seg.isBackOffice !== undefined
       ? seg.isBackOffice
       : opts.isBackOffice !== undefined
         ? opts.isBackOffice
-        : (prev?.is_back_office ?? null),
+        : inheritedBackOffice,
   );
   const breakAt = breakSegmentIndex(
     sorted.map((seg, i) => ({ start: seg.start, end: seg.end, backOffice: backOffice[i] })),

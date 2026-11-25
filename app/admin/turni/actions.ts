@@ -18,7 +18,7 @@ import {
   requestTypeLabel,
   REVOKED_FROM_SCHEDULE_NOTE,
 } from "@/lib/requests";
-import { removedLeaveNotices, type RemovedLeave } from "@/lib/schedule/leave-cells";
+import { removeLeaveRows, revokeApprovedRequest } from "@/lib/leaves/removal";
 import { publishSnapshot } from "@/lib/schedule/publish";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import type { createClient } from "@/lib/supabase/server";
@@ -353,12 +353,38 @@ async function copyShifts(
   return { ok: true, message: `Copiate ${filled} giornate.` };
 }
 
-export async function saveWeekAsTemplate(weekId: string, name: string): Promise<ActionResult> {
+/**
+ * Salva i turni della settimana come modello. Un nome già usato sostituisce il modello esistente
+ * solo con `overwrite` (l'interfaccia chiede conferma): mai in silenzio.
+ */
+export async function saveWeekAsTemplate(
+  weekId: string,
+  name: string,
+  overwrite = false,
+): Promise<ActionResult> {
   return runAction(async () => {
     const { supabase, profile } = await adminAction();
     const week = await loadWeek(supabase, z.uuid().parse(weekId));
     const cleanName = z.string().trim().min(2, "Dai un nome al modello.").max(60).parse(name);
-    const { data: shifts } = await supabase.from("shifts").select("*").eq("week_id", week.id);
+    const { data: shifts, error: readError } = await supabase
+      .from("shifts")
+      .select("*")
+      .eq("week_id", week.id);
+    // Senza i turni non si salva nulla: un modello vuoto sostituirebbe quello buono.
+    if (readError) return { ok: false, message: dbErrorMessage(readError, "Modello non salvato.") };
+    const { data: existing, error: existingError } = await supabase
+      .from("schedule_templates")
+      .select("id")
+      .eq("name", cleanName)
+      .maybeSingle();
+    if (existingError)
+      return { ok: false, message: dbErrorMessage(existingError, "Modello non salvato.") };
+    if (existing && !overwrite) {
+      return {
+        ok: false,
+        message: `Esiste già un modello "${cleanName}": conferma per sostituirlo, oppure scegli un altro nome.`,
+      };
+    }
     const payload = (shifts ?? []).map((s) => ({
       profile_id: s.profile_id,
       weekday: ((parseISO(s.date).getDay() + 6) % 7) + 1,
@@ -376,7 +402,10 @@ export async function saveWeekAsTemplate(weekId: string, name: string): Promise<
       .upsert({ name: cleanName, shifts: payload, created_by: profile.id }, { onConflict: "name" });
     if (error) return { ok: false, message: dbErrorMessage(error, "Modello non salvato.") };
     revalidateWeek(week.week_start);
-    return { ok: true, message: `Modello "${cleanName}" salvato.` };
+    return {
+      ok: true,
+      message: existing ? `Modello "${cleanName}" sostituito.` : `Modello "${cleanName}" salvato.`,
+    };
   });
 }
 
@@ -465,6 +494,50 @@ export async function setWeekRuleSet(
   });
 }
 
+const ignoreSchema = z.object({
+  weekId: z.uuid(),
+  ruleId: z.uuid(),
+  date: isoDate.nullable(),
+  /** Persona a cui si riferisce l'avviso; null per gli avvisi di negozio (coperture). */
+  profileId: z.uuid().nullable(),
+  note: z.string().trim().min(2, "Scrivi una nota (es. inventario).").max(200),
+});
+
+/**
+ * «Ignora per questa settimana» dal pannello degli avvisi. Un avviso che riguarda una persona
+ * (ore di contratto, riposi, pausa…) si ignora solo per lei: gli avvisi della stessa regola sui
+ * colleghi restano visibili. Gli avvisi di negozio si ignorano per regola e giorno, come prima.
+ */
+export async function ignoreWeekViolation(
+  input: z.input<typeof ignoreSchema>,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    const { supabase, profile } = await adminAction();
+    const v = ignoreSchema.safeParse(input);
+    if (!v.success) return { ok: false, message: v.error.issues[0].message };
+    const { error } = await supabase.from("rule_overrides").insert({
+      week_id: v.data.weekId,
+      rule_id: v.data.ruleId,
+      date: v.data.date,
+      profile_id: v.data.profileId,
+      note: v.data.note,
+      created_by: profile.id,
+    });
+    if (error) {
+      return {
+        ok: false,
+        message:
+          error.code === "23505"
+            ? "Questo avviso è già tra quelli ignorati."
+            : dbErrorMessage(error, "Avviso non ignorato."),
+      };
+    }
+    revalidatePath("/admin/turni", "layout");
+    revalidatePath("/admin");
+    return { ok: true, message: "Avviso ignorato per questa settimana." };
+  });
+}
+
 /** Segna come risolto il conflitto con un'assenza approvata (il turno resta). */
 export async function clearShiftConflict(shiftId: string): Promise<ActionResult> {
   return runAction(async () => {
@@ -491,27 +564,6 @@ function revalidateAbsences() {
   revalidatePath("/ferie");
   revalidatePath("/orari", "layout");
   revalidatePath("/");
-}
-
-/**
- * Revoca l'approvazione di una richiesta: torna "rifiutata" con la nota «Tolta dal foglio turni».
- * La guardia sullo stato sta nell'UPDATE (se nel frattempo è cambiata non si tocca nulla); il
- * trigger `revoke_request_leaves` elimina le sue assenze e i segnali di conflitto dei turni.
- */
-async function revokeApprovedRequest(db: Db, actorId: string, requestId: string) {
-  const { data, error } = await db
-    .from("requests")
-    .update({
-      status: "rejected",
-      decided_by: actorId,
-      decided_at: new Date().toISOString(),
-      decision_note: REVOKED_FROM_SCHEDULE_NOTE,
-    })
-    .eq("id", requestId)
-    .eq("status", "approved")
-    .select("id, profile_id, type, start_date, end_date");
-  if (error) throw new ActionError(dbErrorMessage(error, "Richiesta non aggiornata."));
-  return data?.[0] ?? null;
 }
 
 const leaveDaysSchema = z
@@ -557,56 +609,24 @@ export async function removeLeaveDays(
       };
     }
 
-    const { data: count, error } = await supabase.rpc("remove_leave_days", {
-      p_days: targets.map((l) => ({ profile_id: l.profile_id, date: l.date })),
-    });
-    if (error) throw new ActionError(dbErrorMessage(error, "Assenza non tolta."));
-    const removed = count ?? targets.length;
-
-    // Una richiesta approvata rimasta senza nessun giorno di assenza non ha più senso come
-    // "approvata": torna rifiutata (il dipendente la vede così, con la nota).
-    const emptied = new Set<string>();
-    const requestIds = [...new Set(targets.flatMap((l) => (l.request_id ? [l.request_id] : [])))];
-    for (const id of requestIds) {
-      const { count: left, error: countError } = await supabase
-        .from("leaves")
-        .select("id", { count: "exact", head: true })
-        .eq("request_id", id);
-      if (countError || (left ?? 0) > 0) continue;
-      if (await revokeApprovedRequest(supabase, profile.id, id)) emptied.add(id);
-    }
-
-    const removedLeaves: RemovedLeave[] = targets.map((l) => ({
-      profileId: l.profile_id,
-      date: l.date,
-      type: l.type,
-      hours: l.hours,
-      status: l.status,
-      source: l.source,
-      requestId: l.request_id,
-    }));
-    const notices = removedLeaveNotices(removedLeaves, emptied);
-    for (const n of notices) {
-      await notify([n.profileId], {
-        kind: "request_decided",
-        title: "Assenza tolta dal foglio turni",
-        body: n.body,
-        link: n.link,
-      });
-    }
+    const { removed, revokedRequests, notices } = await removeLeaveRows(
+      supabase,
+      profile.id,
+      targets,
+      { note: REVOKED_FROM_SCHEDULE_NOTE, title: "Assenza tolta dal foglio turni" },
+    );
 
     revalidateAbsences();
     const parts = [removed === 1 ? "Assenza tolta." : `Tolte ${removed} assenze.`];
-    if (emptied.size === 1)
+    if (revokedRequests === 1)
       parts.push("La richiesta non aveva altri giorni: ora risulta rifiutata.");
-    else if (emptied.size > 1)
-      parts.push(`${emptied.size} richieste non avevano altri giorni: ora risultano rifiutate.`);
-    if (notices.length)
-      parts.push(notices.length === 1 ? "Dipendente avvisato." : "Dipendenti avvisati.");
+    else if (revokedRequests > 1)
+      parts.push(`${revokedRequests} richieste non avevano altri giorni: ora risultano rifiutate.`);
+    if (notices) parts.push(notices === 1 ? "Dipendente avvisato." : "Dipendenti avvisati.");
     return {
       ok: true,
       message: parts.join(" "),
-      data: { removed, revokedRequests: emptied.size },
+      data: { removed, revokedRequests },
     };
   });
 }
@@ -632,7 +652,9 @@ export async function revokeLeaveRequest(requestId: string): Promise<ActionResul
     if (!createsLeaves(r.type))
       return { ok: false, message: "Questo tipo di richiesta non si toglie dal foglio turni." };
     const revoked =
-      r.status === "approved" ? await revokeApprovedRequest(supabase, profile.id, r.id) : null;
+      r.status === "approved"
+        ? await revokeApprovedRequest(supabase, profile.id, r.id, REVOKED_FROM_SCHEDULE_NOTE)
+        : null;
     if (!revoked) {
       revalidateAbsences();
       return { ok: false, message: "La richiesta non è più approvata: ricarica la pagina." };

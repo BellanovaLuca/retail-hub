@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentProfile } from "@/lib/auth/session";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -18,8 +19,25 @@ export async function GET(request: NextRequest) {
   if (active) return NextResponse.redirect(new URL("/", request.url));
 
   const supabase = await createClient();
+  // Profilo non leggibile: account disattivato, oppure sessione che non vale più (scaduta,
+  // chiusa da «Esci da tutti i dispositivi» o da un nuovo PIN). Il messaggio lo distingue.
+  let deactivated = true;
+  try {
+    const { data: claims } = await supabase.auth.getClaims();
+    const userId = claims?.claims?.sub;
+    if (userId) {
+      const { data } = await createAdminClient()
+        .from("profiles")
+        .select("active")
+        .eq("id", userId)
+        .maybeSingle();
+      deactivated = !data?.active;
+    }
+  } catch {
+    // Si resta sul messaggio generico.
+  }
   await supabase.auth.signOut({ scope: "local" });
   const url = new URL("/accesso", request.url);
-  url.searchParams.set("disattivato", "1");
+  url.searchParams.set(deactivated ? "disattivato" : "scaduta", "1");
   return NextResponse.redirect(url);
 }

@@ -7,9 +7,9 @@ export const metadata: Metadata = { title: "Accesso" };
 export default async function AccessoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ da?: string; disattivato?: string }>;
+  searchParams: Promise<{ da?: string; disattivato?: string; scaduta?: string }>;
 }) {
-  const { da, disattivato } = await searchParams;
+  const { da, disattivato, scaduta } = await searchParams;
   // Solo percorsi interni (lib/auth/return-path): niente "//host", "/\\host" né tab o a-capo.
   const next = safeReturnPath(typeof da === "string" ? da : undefined);
 
@@ -20,6 +20,11 @@ export default async function AccessoPage({
       {disattivato ? (
         <p role="alert" className="mb-6 border-l-2 border-danger pl-3 text-sm text-danger">
           Questo account è disattivato. Rivolgiti a un responsabile.
+        </p>
+      ) : null}
+      {scaduta && !disattivato ? (
+        <p role="status" className="mb-6 border-l-2 border-line-strong pl-3 text-sm text-muted">
+          Sessione scaduta o chiusa: rientra con codice e PIN.
         </p>
       ) : null}
       <LoginForm next={next} />

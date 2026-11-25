@@ -4,7 +4,8 @@ import Link from "next/link";
 import { PersonDot } from "@/components/ui/table";
 import { requireAdmin } from "@/lib/auth/session";
 import { normalizeWeekParam } from "@/lib/data/schedule";
-import { getAdminTargetsWeek, targetsByPerson } from "@/lib/data/targets";
+import { activeSheetKpis, getAdminTargetsWeek, targetsByPerson } from "@/lib/data/targets";
+import { withExtraSheetKpis } from "@/lib/kpi/sheet";
 import { nowInRome, weekNumber } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -53,16 +54,15 @@ export default async function PersonePage({
   }
 
   const comments = data.comments.filter((c) => c.profileId === selected.profileId);
-  const kpis = selected.kpis.map((k) => ({ kpiId: k.kpiId, code: k.code, label: k.label }));
-  // Voci con obiettivo o numeri ma tolte dal foglio: restano visibili per non perdere nulla.
-  for (const kpiId of new Set([
-    ...Object.keys(targets[selected.profileId] ?? {}),
-    ...data.entries.filter((e) => e.profileId === selected.profileId).map((e) => e.kpiId),
-  ])) {
-    if (kpis.some((k) => k.kpiId === kpiId)) continue;
-    const d = data.definitions.find((x) => x.id === kpiId && x.active);
-    if (d) kpis.push({ kpiId: d.id, code: d.code, label: d.label });
-  }
+  // Voci con obiettivo o numeri ma fuori dal foglio: restano visibili per non perdere nulla.
+  const kpis = withExtraSheetKpis(
+    selected.kpis.map((k) => ({ kpiId: k.kpiId, code: k.code, label: k.label })),
+    [
+      ...Object.keys(targets[selected.profileId] ?? {}),
+      ...data.entries.filter((e) => e.profileId === selected.profileId).map((e) => e.kpiId),
+    ],
+    activeSheetKpis(data.definitions),
+  );
 
   return (
     <div className="grid gap-8 lg:grid-cols-[13rem_minmax(0,1fr)]">

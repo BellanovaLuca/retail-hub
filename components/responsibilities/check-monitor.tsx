@@ -8,7 +8,7 @@ import * as React from "react";
 import { PersonDot } from "@/components/ui/table";
 import { formatInRome } from "@/lib/dates";
 import { toggleResponsibilityCheck } from "@/lib/responsibilities/actions";
-import { isoWeekdayOf, isScheduledOn } from "@/lib/responsibilities/assignment";
+import { hasAnyAssignee, isoWeekdayOf, isScheduledOn } from "@/lib/responsibilities/assignment";
 import { cn } from "@/lib/utils";
 import { DayLettersInline } from "./day-letters";
 
@@ -60,8 +60,7 @@ export function CheckMonitor({
   /** La persona ha l'attività in quel giorno? */
   const isAssigned = (c: MonitorColumn, personId: string, d: string) =>
     c.allStaff || (c.personDays[personId]?.includes(isoWeekdayOf(d)) ?? false);
-  const hasAssignees = (c: MonitorColumn) =>
-    c.allStaff || Object.values(c.personDays).some((x) => x.length > 0);
+  const hasAssignees = (c: MonitorColumn) => hasAnyAssignee(c);
   /** Attività assegnate, previste in un giorno e non spuntate. */
   const missingOn = (d: string) =>
     columns.filter((c) => hasAssignees(c) && scheduled(c, d) && !checks[c.id]?.[d]);
@@ -163,9 +162,7 @@ export function CheckMonitor({
             : missingToday.length === 0
               ? "tutte le attività previste sono spuntate"
               : `${missingToday.length} ${missingToday.length === 1 ? "attività non ancora spuntata" : "attività non ancora spuntate"}`}
-          {unassigned
-            ? ` · ${unassigned} senza nessuno assegnato (assegnale qui sopra)`
-            : ""}
+          {unassigned ? ` · ${unassigned} senza nessuno assegnato (assegnale qui sopra)` : ""}
           {shift === null && !isFuture ? " · turni del giorno non pubblicati" : ""}
         </span>
       </p>
@@ -353,7 +350,8 @@ export function CheckMonitor({
         Ogni casella è una responsabilità assegnata alla persona in questo giorno: nera con
         l&apos;ora = l&apos;ha spuntata lei; con il nome di un collega = l&apos;ha fatta
         l&apos;altro assegnato; rossa = non svolta a giornata finita. Le caselle vuote non sono
-        assegnate in questo giorno. Con un clic segni tu l&apos;attività come fatta dalla persona, o togli la spunta.
+        assegnate in questo giorno. Con un clic segni tu l&apos;attività come fatta dalla persona, o
+        togli la spunta.
       </p>
     </div>
   );

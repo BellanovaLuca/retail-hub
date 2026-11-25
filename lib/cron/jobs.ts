@@ -76,7 +76,16 @@ const coreJobs: CronJob[] = [
     async run({ db, today }) {
       const tomorrow = format(addDays(parseISO(today), 1), "yyyy-MM-dd");
       const shifts = await publishedShiftsOn(db, tomorrow);
-      const people = working(shifts);
+      // Chi domani è assente per l'intera giornata (ferie approvate dopo la pubblicazione…) non
+      // riceve il promemoria del turno rimasto nell'orario pubblicato.
+      const { data: leaves, error: leavesError } = await db
+        .from("leaves")
+        .select("profile_id")
+        .eq("date", tomorrow)
+        .is("hours", null);
+      if (leavesError) throw leavesError;
+      const away = new Set((leaves ?? []).map((l) => l.profile_id));
+      const people = working(shifts).filter((id) => !away.has(id));
       if (!people.length) return { sent: 0 };
       const { data: profiles } = await db
         .from("profiles")

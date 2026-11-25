@@ -1,9 +1,10 @@
 import { getCurrentProfile } from "@/lib/auth/session";
 import { normalizeWeekParam } from "@/lib/data/schedule";
-import { getAdminTargetsWeek, targetsByPerson } from "@/lib/data/targets";
+import { activeSheetKpis, getAdminTargetsWeek, targetsByPerson } from "@/lib/data/targets";
 import { nowInRome } from "@/lib/dates";
 import { errorResponse, fileResponse, XLSX_TYPE } from "@/lib/export/http";
 import { buildTargetsExportModel } from "@/lib/export/targets-model";
+import { withExtraSheetKpis } from "@/lib/kpi/sheet";
 import { buildTargetsXlsx } from "@/lib/export/targets-xlsx";
 import { createClient } from "@/lib/supabase/server";
 
@@ -32,6 +33,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ wee
     involved.size ? involved.has(p.profileId) : p.kpis.length > 0,
   );
 
+  const available = activeSheetKpis(data.definitions);
+
   const comments: Record<string, Record<string, string>> = {};
   for (const c of data.comments) {
     if (!c.body) continue;
@@ -45,7 +48,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ wee
       profileId: p.profileId,
       name: p.name,
       zone: p.zone,
-      kpis: p.kpis.map((k) => ({ kpiId: k.kpiId, code: k.code, label: k.label })),
+      // Foglio della persona più gli obiettivi «misti» e le voci con numeri in settimana.
+      kpis: withExtraSheetKpis(
+        p.kpis.map((k) => ({ kpiId: k.kpiId, code: k.code, label: k.label })),
+        [
+          ...data.targets.filter((t) => t.profileId === p.profileId).map((t) => t.kpiId),
+          ...data.entries.filter((e) => e.profileId === p.profileId).map((e) => e.kpiId),
+        ],
+        available,
+      ),
     })),
     entries: data.entries,
     targets: targetsByPerson(data.targets),

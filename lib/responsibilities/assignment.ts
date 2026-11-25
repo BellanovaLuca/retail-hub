@@ -152,6 +152,20 @@ export function assigneeIds(r: ResponsibilityAssignment): string[] {
   return [...new Set([...(r.ownerId ? [r.ownerId] : []), ...r.supportIds])];
 }
 
+/**
+ * C'è qualcuno a cui tocca l'attività? Le attività «per tutti» sì; le altre solo se almeno una
+ * persona ha almeno un giorno. È la regola unica di tabellone, controllo delle spunte e avvisi:
+ * un'attività senza nessuno assegnato non è «mancante» né «senza nessuno in turno», va prima
+ * assegnata.
+ */
+export function hasAnyAssignee(x: { allStaff: boolean; personDays: PersonDays }): boolean {
+  return x.allStaff || Object.values(x.personDays).some((days) => days.length > 0);
+}
+
+export function hasAssignees(r: ResponsibilityAssignment): boolean {
+  return hasAnyAssignee({ allStaff: r.allStaff, personDays: personDaysOf(r) });
+}
+
 /** Turno pubblicato ridotto a quello che serve qui. */
 export type ShiftLike = { profile_id: string; date: ISODate; is_absence: boolean };
 
@@ -289,6 +303,40 @@ export function uncoveredOn(
   return responsibilities.filter((r) => resolveDuty(r, date, onShift).kind === "uncovered");
 }
 
+/**
+ * Le attività «scoperte» di una data, distinte per motivo: `unassigned` = nessuno assegnato (va
+ * assegnata dalla griglia), `away` = chi è assegnato quel giorno non è in turno. Senza turni
+ * pubblicati non si sa chi c'è: nessuna delle due.
+ */
+export function uncoveredByReason<T extends ResponsibilityAssignment>(
+  responsibilities: T[],
+  date: ISODate,
+  onShift: Set<string> | null,
+): { unassigned: T[]; away: T[] } {
+  const out: { unassigned: T[]; away: T[] } = { unassigned: [], away: [] };
+  if (onShift === null) return out;
+  for (const r of responsibilities) {
+    if (resolveDuty(r, date, onShift).kind !== "uncovered") continue;
+    (hasAssignees(r) ? out.away : out.unassigned).push(r);
+  }
+  return out;
+}
+
+/**
+ * Attività ancora da spuntare in una data: previste quel giorno, con qualcuno assegnato e senza
+ * spunta. (Se è «mancante» o solo «da fare» dipende dalla data: vedi `cellState`.)
+ */
+export function uncheckedOn<T extends ResponsibilityAssignment>(
+  responsibilities: T[],
+  date: ISODate,
+  isChecked: (r: T) => boolean,
+): T[] {
+  return responsibilities.filter(
+    (r) =>
+      r.active !== false && hasAssignees(r) && isScheduledOn(r.scheduleDays, date) && !isChecked(r),
+  );
+}
+
 export type CellState =
   /** Spuntata: nero pieno. */
   | "done"
@@ -343,4 +391,25 @@ export function dutyLabel(duty: Duty, name: (id: string) => string): string | nu
     case "not_scheduled":
       return null;
   }
+}
+
+/**
+ * Stato delle assegnazioni settimanali di un'attività rispetto alla settimana corrente:
+ * `any` = ha righe; `inForce` = ne vale una (di questa settimana o ripresa da una precedente);
+ * `hasPast` = ne ha di settimane passate; `pastTeam` = quella che varrebbe, tolte le righe da
+ * questa settimana in poi, ha delle persone.
+ */
+export function gridState(
+  rows: { week_start: string; profile_ids: string[] }[],
+  currentWeek: string,
+) {
+  const past = rows
+    .filter((w) => w.week_start < currentWeek)
+    .sort((a, b) => (a.week_start < b.week_start ? 1 : -1))[0];
+  return {
+    any: rows.length > 0,
+    inForce: rows.some((w) => w.week_start <= currentWeek),
+    hasPast: !!past,
+    pastTeam: !!past && past.profile_ids.length > 0,
+  };
 }

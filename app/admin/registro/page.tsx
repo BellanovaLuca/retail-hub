@@ -82,7 +82,9 @@ export default async function RegistroPage({
                 <div className="text-xs text-muted nums">
                   {formatInRome(r.at, "d MMM yyyy · HH:mm")}
                   <p className="text-sm text-foreground">
-                    {r.actor_id ? (names.get(r.actor_id) ?? "—") : "Sistema"}
+                    {r.actor_id
+                      ? (names.get(r.actor_id) ?? r.actor_label ?? "—")
+                      : (r.actor_label ?? "Sistema")}
                   </p>
                 </div>
                 <div>
