@@ -257,7 +257,7 @@ export function AssignmentEditor(props: {
       // (alla conferma entra nel suo foglio).
       if (!personKpi.has(key)) return { title: "Scrivi un obiettivo anche per questa voce." };
       const cell = preview.cells.get(key);
-      if (cell?.overridden && cell.computed !== null)
+      if (cell?.overridden && cell.computed !== null && cell.computed !== cell.value)
         return {
           className: "font-semibold underline decoration-1 underline-offset-4 bg-foreground/[0.06]",
           title: `Corretto a mano · proposta: ${cell.computed === null ? "nessuna" : formatCount(cell.computed)}. Svuota la cella per tornare alla proposta.`,

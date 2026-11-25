@@ -13,7 +13,7 @@ import {
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { computeCoverage } from "@/lib/coverage";
-import { evaluateWeek, installStandardRuleSet } from "@/lib/data/rules";
+import { evaluateWeek } from "@/lib/data/rules";
 import { openingFor } from "@/lib/schedule/opening";
 import { EditorWithRules, type DayCoverage } from "./editor-with-rules";
 
@@ -33,7 +33,6 @@ export default async function WeekEditorPage({ params }: { params: Promise<{ wee
   if (weekStart !== param) redirect(`/admin/turni/${weekStart}`);
 
   const supabase = await createClient();
-  await installStandardRuleSet(supabase);
   const sunday = format(addDays(parseISO(weekStart), 6), "yyyy-MM-dd");
   const [
     data,

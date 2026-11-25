@@ -15,7 +15,7 @@ import {
   weekDates,
 } from "@/lib/data/schedule";
 import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
-import { shiftNetHours } from "@/lib/hours";
+import { dayNetHours } from "@/lib/hours";
 import { publishedDayText } from "@/lib/schedule/cells";
 import type { PublishedShift } from "@/lib/schedule/types";
 import { formatHoursIt, leaveLabelAdmin } from "@/lib/schedule/view";
@@ -28,14 +28,15 @@ import { MonthCalendar } from "./month-calendar";
 export const metadata: Metadata = { title: "I miei orari" };
 
 function dayHours(list: PublishedShift[]) {
-  return list
-    .filter((s) => s.start_time && s.end_time)
-    .reduce(
-      (sum, s) =>
-        sum +
-        shiftNetHours({ start: s.start_time!, end: s.end_time!, breakMinutes: s.break_minutes }),
-      0,
-    );
+  const byDay = new Map<string, { start: string; end: string; breakMinutes: number }[]>();
+  for (const s of list) {
+    if (!s.start_time || !s.end_time) continue;
+    const pieces = byDay.get(s.date) ?? [];
+    pieces.push({ start: s.start_time, end: s.end_time, breakMinutes: s.break_minutes });
+    byDay.set(s.date, pieces);
+  }
+  // La pausa vale per la giornata (anche con il turno spezzato).
+  return [...byDay.values()].reduce((sum, pieces) => sum + dayNetHours(pieces), 0);
 }
 
 export default async function OrariPage({

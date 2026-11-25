@@ -923,3 +923,21 @@ Nessuna domanda aperta bloccante. In caso di dubbio durante lo sviluppo, sceglie
 - Timbrature, buste paga.
 - Generazione automatica dei turni (possibile evoluzione futura, partendo dalle regole di copertura).
 
+------------------------------------------------------------------------
+
+## 19. Precisazioni dopo l'audit del 25–26 novembre 2026
+
+Regole emerse correggendo i problemi trovati dall'audit; dove toccano le sezioni precedenti, valgono queste.
+
+- **Accesso (§4).** Il controllo dei tentativi e la loro registrazione sono un'unica operazione nel database (`login_attempt_begin`): richieste parallele non aggirano il blocco. Per l'IP, un accesso riuscito con un altro codice non azzera i tentativi falliti sui colleghi. Il cambio PIN dal profilo chiede il PIN attuale e chiude le altre sessioni. Chi diventa admin deve scegliere un PIN da admin al prossimo accesso. Con il PIN provvisorio (o senza informativa accettata) funzionano solo cambio PIN, uscita e tema: anche le azioni e gli export lo verificano, non solo le pagine. Il ritorno dopo l'accesso (`?da=`) accetta solo percorsi interni.
+- **Dati e RLS (§5).** Serve un profilo **attivo** per leggere o scrivere qualunque tabella (policy restrittiva «solo profili attivi» + `is_staff()` nelle letture comuni): un account senza profilo o disattivato non vede nulla. Le note riservate degli admin sono in `profile_admin_notes`. Una richiesta nasce senza esito e il suo allegato sta nella cartella di chi la fa; i dipendenti leggono i propri allegati ma non li sostituiscono né li cancellano. Le letture che possono superare le 1000 righe sono paginate (`lib/data/paginate.ts`).
+- **Dipendenti (§6.2).** Disattivando un account si tolgono i suoi turni da oggi in poi, anche dagli orari pubblicati. Eliminandolo si rimuovono anche i suoi file (allegati e foto).
+- **Richieste (§6).** Approvazione e rifiuto valgono solo se la richiesta è ancora in attesa nel momento in cui si salva. Negli scambi il turno si identifica con persona + giorno, ricavati dal server dagli orari pubblicati.
+- **Orario di apertura (§7).** Precedenza unica: eccezione del giorno > festivo a negozio chiuso > orario standard (`lib/schedule/opening.ts`).
+- **Ore e copertura (§7.1–7.2).** La pausa vale per la giornata (non per il singolo pezzo) e si toglie dal tempo in vendita; al salvataggio va sul pezzo più lungo non in back office. Una persona è presente in una fascia se l'unione dei suoi pezzi la copre; conta nella forza vendita solo se la coprono i pezzi di vendita. Le ore si mostrano con due decimali, senza arrotondare alla mezz'ora.
+- **Regola «ore di contratto ±%» (§7.3).** Valgono come ore coperte solo ferie, permessi e malattia, nei giorni senza turni e al massimo fino ai giorni lavorativi rimasti; i festivi a negozio chiuso sono giornata coperta. Giorni liberi e indisponibilità sono riposi.
+- **Foglio turni (§8.1).** Il testo di una cella ha una forma canonica (riscrivere lo stesso orario non è una modifica) e il marcatore `BO` per i pezzi in back office. Salvando gli stessi orari restano pausa, back office, area, reparto e nota. Il salvataggio di un lotto è atomico. «Duplica la settimana precedente» copia tra le assenze solo i riposi. Nel foglio orario, ridipingere conserva gli estremi non toccati. Limite noto: Canc seguito da Annulla riporta orari e back office, non pausa e nota.
+- **Pubblicazione (§10).** Conta come «turno modificato» anche un cambio di area, pausa o back office; con «notifica tutti» si avvisa anche chi è stato tolto dalla settimana.
+- **Obiettivi (§8.3).** WO e pezzi sole si propongono solo con ore, valore e prezzo medio dell'area maggiori di zero. Una cella è «corretta a mano» se differisce da ciò che il calcolo mostrerebbe senza di lei. I numeri con le migliaia («12.345») sono accettati. Il dipendente può scrivere numeri solo per le voci del proprio foglio. I numeri giornalieri non salvati per un errore di rete restano a schermo, con avviso, e vengono riprovati.
+- **Notifiche e promemoria (§10).** La sottoscrizione push segue chi usa il dispositivo (si riassegna all'accesso e si toglie all'uscita); sono ammessi solo gli indirizzi dei servizi push noti. Un promemoria automatico fallito o interrotto viene ritentato (fino a 3 volte). La chiamata ogni 15 minuti al dispatcher è obbligatoria. Il link del calendario personale si può rigenerare.
+

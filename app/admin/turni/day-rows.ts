@@ -144,7 +144,8 @@ export function buildDayRows(
       break_minutes: work[i].break_minutes,
       working_as_department_id: work[i].working_as_department_id,
       zone: work[i].zone,
-      is_back_office: work[i].is_back_office,
+      // Il marcatore «BO» scritto nella cella vince; senza marcatore resta com'era.
+      is_back_office: seg.isBackOffice !== undefined ? seg.isBackOffice : work[i].is_back_office,
       note: work[i].note,
     }));
   }
