@@ -1,14 +1,24 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Inter_Tight } from "next/font/google";
+import localFont from "next/font/local";
 import { cookies } from "next/headers";
 import { THEME_COOKIE, themeAttribute } from "@/lib/theme";
 import "./globals.css";
 
-const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
-const interTight = Inter_Tight({
+// I font stanno nel progetto (app/fonts, licenza OFL): la build non scarica nulla da Google
+// Fonts e non può fallire perché quel download non riesce. File variabili, sottoinsieme latino.
+const inter = localFont({
+  src: "./fonts/inter-latin-wght-normal.woff2",
+  variable: "--font-inter",
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
+});
+const interTight = localFont({
+  src: "./fonts/inter-tight-latin-wght-normal.woff2",
   variable: "--font-inter-tight",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
+  weight: "100 900",
+  style: "normal",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
