@@ -12,9 +12,9 @@ describe("esecuzione già presente per la chiave", () => {
   });
 
   it("un job in corso da poco non si esegue due volte", () => {
-    expect(existingRunDecision({ status: "running", attempts: 1, ran_at: minutesAgo(1) }, now)).toBe(
-      "busy",
-    );
+    expect(
+      existingRunDecision({ status: "running", attempts: 1, ran_at: minutesAgo(1) }, now),
+    ).toBe("busy");
   });
 
   it("un job rimasto «in corso» (timeout) si riprova", () => {

@@ -108,8 +108,7 @@ export function buildSnapshot(
       is_absence: tpl?.isAbsence ?? false,
       zone: s.zone ?? kept?.zone ?? resolveZone(s, person),
       is_back_office: s.isBackOffice ?? kept?.is_back_office ?? resolveBackOffice(s, person),
-      department_id:
-        s.departmentId ?? kept?.department_id ?? person?.primaryDepartmentId ?? null,
+      department_id: s.departmentId ?? kept?.department_id ?? person?.primaryDepartmentId ?? null,
       note: s.note,
       changed: false,
     };
@@ -144,7 +143,8 @@ function daySignature(list: PublishedShift[]) {
   const sorted = sortShifts(list);
   const text = publishedDayText(sorted, true);
   const timed = sorted.filter((s) => s.start_time && s.end_time);
-  if (timed.length === 0 || sorted.some((s) => s.is_absence)) return { text, key: text, details: "" };
+  if (timed.length === 0 || sorted.some((s) => s.is_absence))
+    return { text, key: text, details: "" };
   const pause = timed.reduce((sum, s) => sum + (s.break_minutes ?? 0), 0);
   const zones = [...new Set(timed.map((s) => s.zone).filter((z) => z !== null))];
   const inBackOffice = timed.filter((s) => s.is_back_office).length;

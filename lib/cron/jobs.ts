@@ -148,7 +148,7 @@ type Claim = { claimed: true } | { claimed: false; outcome: string; failed: bool
  * concorrenti non lo eseguono due volte: vince chi inserisce la riga o chi la riprende con
  * l'aggiornamento condizionato sullo stato letto.
  */
-async function claimRun(db: Db, job: string, runKey: string): Promise<Claim> {
+export async function claimRun(db: Db, job: string, runKey: string): Promise<Claim> {
   const { error } = await db
     .from("cron_runs")
     .insert({ job, run_key: runKey, status: "running", attempts: 1 });

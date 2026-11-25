@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   hourCellValue,
   markedSlotsToSegments,
+  repaintedSegments,
   segmentsToMarkedSlots,
   segmentsToSlots,
   SLOT_COUNT,
   slotIndex,
   slotsToSegments,
   slotTime,
+  type MarkedSegment,
   type SlotMark,
 } from "@/lib/shifts/slots";
 
@@ -72,5 +74,75 @@ describe("mezze celle del foglio orario", () => {
     expect(segmentsToMarkedSlots(segments)).toEqual(marks);
     expect(hourCellValue(marks, 8)).toBe(0.5);
     expect(hourCellValue(marks, 9)).toBe(1);
+  });
+});
+
+describe("giornata ridipinta: si applicano solo le mezze celle cambiate", () => {
+  const sale = (start: string, end: string): MarkedSegment => ({ start, end, backOffice: false });
+  const bo = (start: string, end: string): MarkedSegment => ({ start, end, backOffice: true });
+  /** Mezze celle dipinte dai turni, con le modifiche dell'admin (orario della cella → segno). */
+  const repaint = (original: MarkedSegment[], changes: Record<string, SlotMark>) => {
+    const marks = segmentsToMarkedSlots(original);
+    for (const [time, mark] of Object.entries(changes)) marks[slotIndex(time)] = mark;
+    return repaintedSegments(original, marks);
+  };
+
+  it("senza modifiche restituisce i turni com'erano", () => {
+    const day = [sale("10:15", "18:45")];
+    expect(repaint(day, {})).toEqual(day);
+    expect(repaint([sale("06:00", "14:00"), sale("21:00", "23:00")], {})).toEqual([
+      sale("06:00", "14:00"),
+      sale("21:00", "23:00"),
+    ]);
+  });
+
+  it("i quarti d'ora non toccati restano: 10:15–18:45 non diventa 10:00–19:00", () => {
+    // Una cella in più lontano dal turno: il turno resta identico.
+    expect(repaint([sale("10:15", "18:45")], { "20:00": "sale" })).toEqual([
+      sale("10:15", "18:45"),
+      sale("20:00", "20:30"),
+    ]);
+    // Una pausa scavata in mezzo: gli estremi restano 10:15 e 18:45.
+    expect(repaint([sale("10:15", "18:45")], { "13:00": null, "13:30": null })).toEqual([
+      sale("10:15", "13:00"),
+      sale("14:00", "18:45"),
+    ]);
+    // Allungare il turno dalla cella accanto: arriva al bordo, senza un vuoto di un quarto d'ora.
+    expect(repaint([sale("10:15", "18:45")], { "19:00": "sale" })).toEqual([
+      sale("10:15", "19:30"),
+    ]);
+    expect(repaint([sale("10:15", "18:45")], { "09:30": "sale" })).toEqual([
+      sale("09:30", "18:45"),
+    ]);
+    // Svuotare la mezza cella toccata in parte toglie quel pezzo.
+    expect(repaint([sale("10:15", "18:45")], { "18:30": null })).toEqual([sale("10:15", "18:30")]);
+  });
+
+  it("le ore fuori dalla griglia 07–22 non vengono tagliate", () => {
+    expect(repaint([sale("06:00", "14:00"), sale("21:00", "23:00")], { "17:00": "sale" })).toEqual([
+      sale("06:00", "14:00"),
+      sale("17:00", "17:30"),
+      sale("21:00", "23:00"),
+    ]);
+  });
+
+  it("vendita ↔ back office: cambia il tipo, non gli orari", () => {
+    const marks = segmentsToMarkedSlots([sale("08:30", "17:45")]);
+    marks[slotIndex("08:30")] = "bo";
+    marks[slotIndex("09:00")] = "bo";
+    marks[slotIndex("09:30")] = "bo";
+    expect(repaintedSegments([sale("08:30", "17:45")], marks)).toEqual([
+      bo("08:30", "10:00"),
+      sale("10:00", "17:45"),
+    ]);
+    // Tutto il turno in back office: gli estremi restano 10:15 e 18:45.
+    const all = segmentsToMarkedSlots([sale("10:15", "18:45")]).map((m) => (m ? "bo" : null));
+    expect(repaintedSegments([sale("10:15", "18:45")], all)).toEqual([bo("10:15", "18:45")]);
+  });
+
+  it("giornata vuota dipinta da zero: come le mezze celle", () => {
+    const marks = segmentsToMarkedSlots([]);
+    for (const t of ["10:00", "10:30", "11:00", "14:00"]) marks[slotIndex(t)] = "sale";
+    expect(repaintedSegments([], marks)).toEqual(markedSlotsToSegments(marks));
   });
 });

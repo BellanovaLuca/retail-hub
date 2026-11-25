@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ShiftInput } from "@/lib/domain/types";
 import {
+  dayNetHours,
   formatHours,
   hoursByPersonDay,
   intervalHours,
@@ -50,6 +51,23 @@ describe("ore", () => {
     expect(shiftNetHours(shift("a", days[0], "10:00", "20:00", 60))).toBe(9);
     expect(shiftNetHours(shift("a", days[0], "10:00", "20:00", 30))).toBe(9.5);
     expect(shiftNetHours(shift("a", days[0], "10:00", "10:30", 60))).toBe(0);
+  });
+
+  it("la pausa vale per la giornata, anche se è registrata su un pezzo più corto di lei", () => {
+    // 10:00–10:30 (con 60' di pausa) + 11:00–19:00: 8,5 ore in negozio, 7,5 nette.
+    const shifts = [
+      shift("a", days[0], "10:00", "10:30", 60),
+      shift("a", days[0], "11:00", "19:00"),
+      shift("a", days[1], "10:00", "18:00", 30),
+    ];
+    expect(dayNetHours(shifts.slice(0, 2))).toBe(7.5);
+    expect(personDayHours(shifts, "a", days[0])).toBe(7.5);
+    expect(personWeekHours(shifts, "a")).toBe(15);
+    expect(hoursByPersonDay(shifts)).toEqual({ a: { [days[0]]: 7.5, [days[1]]: 7.5 } });
+    expect(residualHoursByDay(40, shifts, days.slice(0, 3)).map((d) => d.before)).toEqual([
+      40, 32.5, 25,
+    ]);
+    expect(dayNetHours([shift("a", days[0], "10:00", "10:30", 60)])).toBe(0);
   });
 
   it("ore per persona, per giorno e per settimana (turni spezzati sommati)", () => {

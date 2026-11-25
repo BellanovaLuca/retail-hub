@@ -124,9 +124,17 @@ export async function buildRuleContext(db: Db, weekStart: string): Promise<RuleC
   ]);
   const peopleMap = new Map(people.map((p) => [p.id, p]));
   const prevShifts = prevWeek
-    ? ((await db.from("shifts").select("*").eq("week_id", prevWeek.id)).data ?? []).map(
-        toShiftRecord,
-      )
+    ? (
+        (
+          await db
+            .from("shifts")
+            .select("*")
+            .eq("week_id", prevWeek.id)
+            .order("date")
+            .order("start_time")
+            .order("id")
+        ).data ?? []
+      ).map(toShiftRecord)
     : [];
 
   return {

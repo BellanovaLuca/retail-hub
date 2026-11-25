@@ -71,6 +71,26 @@ describe("zoneTable (META per persona, Vista / Sole)", () => {
     expect(table.groups[1]).toMatchObject({ total: 1, target: 1 });
     expect(table).toMatchObject({ total: 4, target: 3 });
   });
+
+  it("totali con i decimali arrotondati a 2 cifre", () => {
+    const entries = [0.7, 0.1].map((value, i) => ({
+      profileId: "v1",
+      kpiId: "k-meta",
+      date: days[i],
+      value,
+    }));
+    const t = zoneTable({
+      people: [{ profileId: "v1", name: "Luca", zone: "vista" }],
+      kpiId: "k-meta",
+      days,
+      entries,
+      targets: {},
+      holders: new Set(["v1"]),
+    });
+    expect(t.total).toBe(0.8);
+    expect(t.groups[0].rows[0].total).toBe(0.8);
+    expect(totalsByPerson(entries)).toEqual({ v1: { "k-meta": 0.8 } });
+  });
 });
 
 describe("best performer", () => {

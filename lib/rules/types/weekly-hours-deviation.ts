@@ -99,9 +99,7 @@ export const weeklyHoursDeviation: RuleTypeDefinition<WeeklyHoursDeviationParams
       const contract = person.weeklyHours;
       if (contract == null || contract <= 0) continue;
       const planned = personWeekHours(ctx.shifts, person.id, ctx.days);
-      const leaveHours = p.countLeaves
-        ? coveredHours(ctx, person.id, contract, planned, p)
-        : 0;
+      const leaveHours = p.countLeaves ? coveredHours(ctx, person.id, contract, planned, p) : 0;
       const actual = Math.round((planned + leaveHours) * 100) / 100;
       const low = contract * (1 - pct / 100);
       const high = contract * (1 + pct / 100);

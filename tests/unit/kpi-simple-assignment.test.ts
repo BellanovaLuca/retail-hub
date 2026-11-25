@@ -58,6 +58,14 @@ describe("assegnazione semplice", () => {
       overrides: {},
     });
     expect(blank.cells.get(cellKey("anna", "k-wo"))?.value).toBeNull();
+    // Senza un valore sui WO anche "Doppi vista" resta vuoto: uno 0 verrebbe salvato come
+    // obiettivo e il dipendente vedrebbe "Obiettivo raggiunto ✓".
+    expect(blank.cells.get(cellKey("anna", "k-doppi"))).toEqual({
+      computed: null,
+      value: null,
+      overridden: false,
+    });
+    expect(blank.assignedByKpi).toEqual({});
 
     const typed = buildAssignmentPreview({
       store: empty,

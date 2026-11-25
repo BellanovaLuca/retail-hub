@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildSnapshot, diffSnapshots } from "@/lib/schedule/cells";
+import {
+  buildSnapshot,
+  cellText,
+  diffSnapshots,
+  publishRecipients,
+  resolveBackOffice,
+} from "@/lib/schedule/cells";
+import { parseShiftCell } from "@/lib/shifts/parse";
 import type {
   PublishedShift,
   SchedulePerson,
@@ -176,5 +183,135 @@ describe("diffSnapshots", () => {
     expect(diffSnapshots(before.snapshot, after.snapshot)).toEqual([
       { profileId: "p-a", date: MON, before: "10:00–14:00", after: "Libero" },
     ]);
+  });
+});
+
+describe("diffSnapshots: dettagli e ordine", () => {
+  const snap = (shifts: ShiftRecord[], previous: PublishedShift[] = []) =>
+    buildSnapshot(shifts, templates, people, previous).snapshot;
+
+  it("l'ordine dei pezzi non conta", () => {
+    const a = shift("p-j", MON, "10:00", "14:00", { zone: "vista" });
+    const b = shift("p-j", MON, "16:00", "20:00", { zone: "sole" });
+    expect(diffSnapshots(snap([a, b]), snap([b, a]))).toEqual([]);
+  });
+
+  it("pausa e back office cambiati sono modifiche, con il dettaglio nel prima e dopo", () => {
+    const base = shift("p-a", MON, "10:00", "20:00", { breakMinutes: 60 });
+    expect(diffSnapshots(snap([base]), snap([{ ...base, breakMinutes: 0 }]))).toEqual([
+      {
+        profileId: "p-a",
+        date: MON,
+        before: "10:00–20:00 (Vista, pausa 60′)",
+        after: "10:00–20:00 (Vista)",
+      },
+    ]);
+    expect(diffSnapshots(snap([base]), snap([{ ...base, isBackOffice: true }]))).toEqual([
+      {
+        profileId: "p-a",
+        date: MON,
+        before: "10:00–20:00 (Vista, pausa 60′)",
+        after: "10:00–20:00 (Vista, pausa 60′, back office)",
+      },
+    ]);
+    // Area di un jolly: stesso orario, si legge quale area è cambiata.
+    const j = shift("p-j", TUE, "10:00", "14:00", { zone: "vista" });
+    expect(diffSnapshots(snap([j]), snap([{ ...j, zone: "sole" }]))).toEqual([
+      { profileId: "p-j", date: TUE, before: "10:00–14:00 (Vista)", after: "10:00–14:00 (Sole)" },
+    ]);
+  });
+
+  it("la pausa conta per giornata: spostarla da un pezzo all'altro non è una modifica", () => {
+    const a = shift("p-a", MON, "10:00", "13:00", { breakMinutes: 30 });
+    const b = shift("p-a", MON, "14:00", "19:00");
+    expect(
+      diffSnapshots(
+        snap([a, b]),
+        snap([
+          { ...a, breakMinutes: 0 },
+          { ...b, breakMinutes: 30 },
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("persona disattivata (non più in elenco): nessuna modifica fantasma alla ripubblicazione", () => {
+    const paola: SchedulePerson = {
+      id: "p-x",
+      displayName: "Paola",
+      shortLabel: "PAO",
+      color: null,
+      homeZone: "sole",
+      weeklyHours: 40,
+      countsForCoverage: false,
+      primaryDepartmentId: "d-2",
+      departmentIds: ["d-2"],
+    };
+    const s = shift("p-x", MON, "10:00", "20:00");
+    const first = buildSnapshot([s], templates, new Map([...people, ["p-x", paola]]), []);
+    expect(first.snapshot[0]).toMatchObject({
+      zone: "sole",
+      is_back_office: true,
+      department_id: "d-2",
+    });
+    const second = buildSnapshot([s], templates, people, first.snapshot);
+    expect(second.changes).toEqual([]);
+    expect(second.snapshot[0]).toMatchObject({
+      zone: "sole",
+      is_back_office: true,
+      department_id: "d-2",
+    });
+  });
+});
+
+describe("publishRecipients (ripubblicazione con «notifica tutti»)", () => {
+  it("comprende chi è stato tolto dalla settimana", () => {
+    const before = buildSnapshot(
+      [shift("p-a", MON, "10:00", "14:00"), shift("p-j", MON, "10:00", "14:00", { zone: "sole" })],
+      templates,
+      people,
+      [],
+    );
+    // Marco non ha più turni: non è nell'istantanea, ma è tra le giornate cambiate.
+    const after = buildSnapshot(
+      [shift("p-a", MON, "10:00", "14:00")],
+      templates,
+      people,
+      before.snapshot,
+    );
+    expect(after.snapshot.map((s) => s.profile_id)).toEqual(["p-a"]);
+    expect(after.changes).toMatchObject([{ profileId: "p-j", after: "Libero" }]);
+    expect(publishRecipients(after.snapshot, after.changes).sort()).toEqual(["p-a", "p-j"]);
+  });
+});
+
+describe("cellText: giornata «back office + vendita»", () => {
+  const anna = people.get("p-a");
+  const backOfficeOf = (s: ShiftRecord) => resolveBackOffice(s, anna);
+  it("porta il marcatore BO e, riparsata, dà gli stessi pezzi (copia/incolla, annulla)", () => {
+    const day = [
+      shift("p-a", MON, "10:00", "17:30"),
+      shift("p-a", MON, "08:30", "10:00", { isBackOffice: true }),
+    ];
+    const text = cellText(day, templates, backOfficeOf);
+    expect(text).toBe("8:30–10 BO · 10–17:30");
+    expect(parseShiftCell(text, [])).toEqual({
+      kind: "times",
+      segments: [
+        { start: "08:30", end: "10:00", isBackOffice: true },
+        { start: "10:00", end: "17:30", isBackOffice: false },
+      ],
+    });
+  });
+  it("giornate tutte in vendita o tutte in back office restano senza marcatore", () => {
+    expect(cellText([shift("p-a", MON, "10:00", "19:00")], templates, backOfficeOf)).toBe("10–19");
+    expect(
+      cellText(
+        [shift("p-a", MON, "10:00", "19:00", { isBackOffice: true })],
+        templates,
+        backOfficeOf,
+      ),
+    ).toBe("10–19");
+    expect(cellText([shift("p-a", MON, "10:00", "19:00")], templates)).toBe("10–19");
   });
 });

@@ -2,7 +2,12 @@
  * Monitoraggio della settimana (§8.3): totali del negozio vs obiettivo, tabelle per persona
  * (META divisa Vista / Sole, NUANCE), best performer e chi non ha compilato la giornata.
  */
-import { round2, type StoreWeeklyTargets, type TargetZone, type PerformerInput } from "@/lib/targets";
+import {
+  round2,
+  type StoreWeeklyTargets,
+  type TargetZone,
+  type PerformerInput,
+} from "@/lib/targets";
 import type { EntryValue } from "./sheet";
 
 export type MonitoringKpi = { kpiId: string; code: string; label: string };

@@ -15,6 +15,8 @@ describe("nome file degli export", () => {
 
   it("il risultato è sempre accettato come intestazione HTTP", () => {
     const name = `ferie-2026-${fileSlug("Ottici — Sole")}.pdf`;
-    expect(() => new Headers({ "Content-Disposition": `attachment; filename="${name}"` })).not.toThrow();
+    expect(
+      () => new Headers({ "Content-Disposition": `attachment; filename="${name}"` }),
+    ).not.toThrow();
   });
 });

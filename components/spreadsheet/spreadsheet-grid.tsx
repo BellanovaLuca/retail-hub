@@ -1102,11 +1102,7 @@ export function SpreadsheetGrid({
               commit: commitSheet,
             })
           ) : (
-            <DefaultMobileEditor
-              value={sheetValue}
-              close={closeSheet}
-              commit={commitSheet}
-            />
+            <DefaultMobileEditor value={sheetValue} close={closeSheet} commit={commitSheet} />
           )}
         </MobileSheet>
       ) : null}

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  entriesOutsideSheet,
-  mondayOfDate,
-  weeksOfDates,
-} from "@/app/(app)/obiettivi/entry-rules";
+import { entriesOutsideSheet, mondayOfDate, weeksOfDates } from "@/app/(app)/obiettivi/entry-rules";
 
 describe("lunedì della settimana (lun → dom)", () => {
   it("lunedì, metà settimana e domenica", () => {

@@ -29,6 +29,7 @@ export async function swapContext(
     target_profile_id: string | null;
     start_date: string;
     target_date: string | null;
+    status?: string;
   },
   names: Map<string, string>,
 ): Promise<SwapContext | null> {
@@ -80,14 +81,19 @@ export async function swapContext(
   return {
     dates,
     byDayAndPerson,
-    warnings: swapConflicts({
-      requester: { id: r.profile_id, name: name(r.profile_id) },
-      target: { id: r.target_profile_id, name: name(r.target_profile_id) },
-      shiftDate: r.start_date,
-      targetDate: r.target_date,
-      occupations,
-      formatDay: (d) => format(parseISO(d), "EEE d MMM", { locale: it }),
-    }),
+    // Dopo l'approvazione i turni sono già passati di mano: "ha già un turno" sarebbe proprio
+    // il turno ricevuto con lo scambio, non un conflitto.
+    warnings:
+      r.status === "approved"
+        ? []
+        : swapConflicts({
+            requester: { id: r.profile_id, name: name(r.profile_id) },
+            target: { id: r.target_profile_id, name: name(r.target_profile_id) },
+            shiftDate: r.start_date,
+            targetDate: r.target_date,
+            occupations,
+            formatDay: (d) => format(parseISO(d), "EEE d MMM", { locale: it }),
+          }),
   };
 }
 

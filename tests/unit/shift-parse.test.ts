@@ -107,3 +107,36 @@ describe("formattazione dei turni", () => {
     expect(times(formatShiftCompact(split))).toEqual(split);
   });
 });
+
+describe("back office nel testo della cella", () => {
+  it("«BO» dopo una fascia la segna; le altre sono in vendita e non si uniscono", () => {
+    expect(times("8:30-10 BO 10-17:30")).toEqual([
+      { start: "08:30", end: "10:00", isBackOffice: true },
+      { start: "10:00", end: "17:30", isBackOffice: false },
+    ]);
+    expect(times("8:30-10bo · 10–17:30")).toEqual(times("8:30-10 BO 10-17:30"));
+    // Due fasce contigue dello stesso tipo si uniscono come sempre.
+    expect(times("8-9 bo 9-10 bo 10-14")).toEqual([
+      { start: "08:00", end: "10:00", isBackOffice: true },
+      { start: "10:00", end: "14:00", isBackOffice: false },
+    ]);
+    // Senza marcatori nessun flag: decide il predefinito della persona.
+    expect(times("8:30-10 10-17:30")).toEqual([{ start: "08:30", end: "17:30" }]);
+  });
+
+  it("«BO» fuori posto è un errore", () => {
+    expect(errorOf("BO 10-14")).toContain("dopo una fascia");
+    expect(errorOf("10-14 BO BO")).toContain("dopo una fascia");
+    expect(errorOf("10-14 BO 12-16")).toContain("si sovrappongono");
+  });
+
+  it("la forma compatta è canonica: riparsata dà le stesse fasce", () => {
+    for (const text of ["10-19", "10–19", "1000-1900", "10:00 - 19:00", "10.00-19,00"]) {
+      expect(formatShiftCompact(times(text))).toBe("10–19");
+    }
+    const mixed = times("8:30-10 bo 10-17:30");
+    expect(formatShiftCompact(mixed)).toBe("8:30–10 BO · 10–17:30");
+    expect(times(formatShiftCompact(mixed))).toEqual(mixed);
+    expect(formatShiftCompact(times("9-13 14-18"))).toBe("9–13 · 14–18");
+  });
+});

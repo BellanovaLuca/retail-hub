@@ -139,7 +139,42 @@ describe("assignWeeklyTargets", () => {
         { code: "B", defaultTargetRule: { type: "pct_of", kpi: "A", pct: 0.5 } },
       ],
     );
-    expect(r.people[0].targets).toEqual({ A: 0, B: 0 });
+    // Un ciclo non ha una voce base con un valore: nessuna proposta (e nessuno 0).
+    expect(r.people[0].targets).toEqual({});
+  });
+
+  it("«% di …» senza valore sulla voce base: nessuna proposta, non un obiettivo 0", () => {
+    const manualKpis = kpis.map((k) =>
+      k.defaultTargetRule?.type === "assignment" ? { ...k, defaultTargetRule: null } : k,
+    );
+    const people = [{ profileId: "v", zone: "vista" as const, plannedHours: 40, kpiCodes: VISTA }];
+    // Calcolo spento (assegnazione semplice): WO non ha un valore → niente Doppi/Transition/Prog.
+    const blank = assignWeeklyTargets(store, people, manualKpis);
+    expect(blank.people[0].targets).toEqual({ ETE_CONTACT: 1 });
+    // Con i WO scritti a mano le percentuali seguono quel valore; uno 0 scritto resta 0.
+    const typed = assignWeeklyTargets(store, people, manualKpis, { v: { WO: 10 } });
+    expect(typed.people[0].targets).toMatchObject({ WO: 10, DOPPI_VISTA: 2, PROG: 1 });
+    const zero = assignWeeklyTargets(store, people, manualKpis, { v: { WO: 0 } });
+    expect(zero.people[0].targets).toMatchObject({ WO: 0, DOPPI_VISTA: 0 });
+  });
+
+  it("WO e pezzi sole si propongono solo con generato e prezzo medio dell'area", () => {
+    const people = [
+      { profileId: "v", zone: "vista" as const, plannedHours: 40, kpiCodes: VISTA },
+      { profileId: "s", zone: "sole" as const, plannedHours: 40, kpiCodes: SOLE },
+    ];
+    // Solo il Sole ha i suoi numeri: ai Vista non si propone "WO = 0".
+    const onlySole = assignWeeklyTargets({ ...store, vistaValueEur: 0 }, people, kpis);
+    expect(onlySole.people[0].targets).toEqual({ PZ_SOLE: 1, ETE_CONTACT: 1 });
+    expect(onlySole.people[1].targets).toEqual({ PZ_SOLE: 37, DOPPI_SOLE: 7, ETE_CONTACT: 1 });
+    // PM mancante: stessa cosa, per area.
+    const noPm = assignWeeklyTargets({ ...store, vistaAvgPrice: 0, soleAvgPrice: 0 }, people, kpis);
+    expect(noPm.people[0].targets).toEqual({ PZ_SOLE: 1, ETE_CONTACT: 1 });
+    expect(noPm.people[1].targets).toEqual({ ETE_CONTACT: 1 });
+    // Ore totali 0: il €/ora non si può calcolare.
+    const noHours = assignWeeklyTargets({ ...store, totalHours: 0 }, people, kpis);
+    expect(noHours.people[0].targets.WO).toBeUndefined();
+    expect(noHours.people[1].targets.PZ_SOLE).toBeUndefined();
   });
 });
 
@@ -152,6 +187,12 @@ describe("weekProgress", () => {
       reached: true,
     });
     expect(weekProgress([], 0)).toEqual({ done: 0, remaining: 0, reached: true });
+  });
+
+  it("somme arrotondate a 2 decimali: niente 0,7999… che manca l'obiettivo", () => {
+    expect(weekProgress([0.7, 0.1], 0.8)).toEqual({ done: 0.8, remaining: 0, reached: true });
+    expect(weekProgress(Array(10).fill(0.1), 1)).toEqual({ done: 1, remaining: 0, reached: true });
+    expect(weekProgress([0.1, 0.2], 1)).toEqual({ done: 0.3, remaining: 0.7, reached: false });
   });
 });
 

@@ -27,6 +27,7 @@ const person = (id: string, over: Partial<SchedulePerson> = {}): SchedulePerson 
 
 const shift = (profileId: string, start: string | null, end: string | null, extra = {}) => ({
   profileId,
+  date: "2026-11-23",
   start,
   end,
   breakMinutes: 0,
@@ -49,6 +50,21 @@ describe("countedHoursByPerson", () => {
     );
     expect(hours.get("a")).toBe(9);
     expect(hours.get("bo")).toBe(4);
+  });
+
+  it("la pausa della giornata si toglie dal tempo in vendita, anche se è sul pezzo in back office", () => {
+    // Chi apre: 08:30–10:00 in back office, poi 10:00–18:30 in vendita, 1 ora di pausa pranzo.
+    const hours = countedHoursByPerson(
+      [
+        shift("a", "08:30", "10:00", { isBackOffice: true, breakMinutes: 60 }),
+        shift("a", "10:00", "18:30"),
+        // Un altro giorno la pausa è sul pezzo in vendita: stesso risultato.
+        shift("a", "08:30", "10:00", { isBackOffice: true, date: "2026-11-24" }),
+        shift("a", "10:00", "18:30", { breakMinutes: 60, date: "2026-11-24" }),
+      ],
+      [person("a")],
+    );
+    expect(hours.get("a")).toBe(15);
   });
 });
 
@@ -152,6 +168,50 @@ describe("buildAssignmentPreview", () => {
     expect(out).toEqual({ [cellKey("v", "k-dv")]: 9, [cellKey("v", "k-meta")]: 2 });
   });
 
+  it("un valore scritto a mano uguale alla proposta di partenza resta dopo il ricaricamento", () => {
+    // WO corretto da 18 a 30 → Doppi vista (20%) passa da 4 a 6; l'admin scrive Doppi = 4.
+    const overrides = { [cellKey("v", "k-wo")]: 30, [cellKey("v", "k-dv")]: 4 };
+    const p = buildAssignmentPreview({ store, people, kpis, overrides });
+    expect(p.cells.get(cellKey("v", "k-dv"))).toEqual({ computed: 4, value: 4, overridden: true });
+    // Conferma → ricaricamento (stesso giro dell'editor): la cella resta 4, non torna a 6.
+    const saved = [...p.cells]
+      .filter(([, c]) => c.value !== null)
+      .map(([key, c]) => ({
+        profileId: key.split("|")[0],
+        kpiId: key.split("|")[1],
+        target: c.value!,
+        overridden: c.overridden,
+      }));
+    const base = buildAssignmentPreview({ store, people, kpis, overrides: {} });
+    const restored = overridesFromSaved(saved, base.cells);
+    expect(restored).toEqual(overrides);
+    const again = buildAssignmentPreview({ store, people, kpis, overrides: restored });
+    expect(again.cells.get(cellKey("v", "k-dv"))?.value).toBe(4);
+    expect(again.cells.get(cellKey("v", "k-wo"))?.value).toBe(30);
+  });
+
+  it("«Copia dalla settimana precedente»: i valori restano com'erano, corretti o no", () => {
+    // Si copiano tutte le celle come correzioni: WO 30, Doppi 4, Pz sole 1 (= proposta).
+    const copied = {
+      [cellKey("v", "k-wo")]: 30,
+      [cellKey("v", "k-dv")]: 4,
+      [cellKey("v", "k-ps")]: 1,
+    };
+    const p = buildAssignmentPreview({ store, people, kpis, overrides: copied });
+    expect(p.cells.get(cellKey("v", "k-wo"))?.overridden).toBe(true);
+    expect(p.cells.get(cellKey("v", "k-dv"))).toMatchObject({ value: 4, overridden: true });
+    // Uguale a ciò che il calcolo darebbe comunque: non è una correzione.
+    expect(p.cells.get(cellKey("v", "k-ps"))).toMatchObject({ value: 1, overridden: false });
+    // Un valore che segue la correzione della voce base (Doppi = 6 con WO = 30) non è "a mano".
+    const follows = buildAssignmentPreview({
+      store,
+      people,
+      kpis,
+      overrides: { [cellKey("v", "k-wo")]: 30, [cellKey("v", "k-dv")]: 6 },
+    });
+    expect(follows.cells.get(cellKey("v", "k-dv"))).toMatchObject({ value: 6, overridden: false });
+  });
+
   it("formatta €/ora", () => {
     expect(formatEurPerHour(180)).toBe("180,00 €/h");
   });
@@ -167,6 +227,16 @@ describe("parseAmount / formatAmount", () => {
     expect(parseAmount("")).toBe(0);
     expect(parseAmount("-3")).toBeNull();
     expect(parseAmount("abc")).toBeNull();
+  });
+  it("il punto è migliaia solo dopo 1–3 cifre non nulle: «0.125» è un decimale", () => {
+    expect(parseAmount("0.125")).toBe(0.125);
+    expect(parseAmount("0,125")).toBe(0.125);
+    expect(parseAmount("2.500")).toBe(2500);
+    expect(parseAmount("1.234,5")).toBe(1234.5);
+    // Quello che `formatAmount` scrive si rilegge uguale.
+    for (const n of [0.5, 410.5, 1234.5, 45000, 1234567.89]) {
+      expect(parseAmount(formatAmount(n))).toBe(n);
+    }
   });
   it("formatta con i separatori", () => {
     expect(formatAmount(48500)).toBe("48.500");

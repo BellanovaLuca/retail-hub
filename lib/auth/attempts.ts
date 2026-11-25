@@ -21,7 +21,11 @@ export function clientIp(headers: Headers): string {
  * superare la soglia. Il tentativo nasce «fallito»: chi verifica il PIN lo segna riuscito con
  * `markAttemptSucceeded`. Se il database non risponde lancia: senza contatore non si prova il PIN.
  */
-export async function beginLoginAttempt(admin: Admin, code: string, ip: string): Promise<AttemptGate> {
+export async function beginLoginAttempt(
+  admin: Admin,
+  code: string,
+  ip: string,
+): Promise<AttemptGate> {
   const { data, error } = await admin.rpc("login_attempt_begin", {
     p_code: code,
     p_ip: ip,
@@ -38,7 +42,10 @@ export async function beginLoginAttempt(admin: Admin, code: string, ip: string):
 
 /** PIN corretto: il tentativo non conta più tra gli errori e azzera il conteggio del codice. */
 export async function markAttemptSucceeded(admin: Admin, attemptId: string): Promise<void> {
-  const { error } = await admin.from("login_attempts").update({ success: true }).eq("id", attemptId);
+  const { error } = await admin
+    .from("login_attempts")
+    .update({ success: true })
+    .eq("id", attemptId);
   if (error) console.error("tentativi di accesso", error);
 }
 

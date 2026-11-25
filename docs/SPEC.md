@@ -113,7 +113,8 @@ profiles (
   email text null, phone text null, avatar_url text null,
   must_change_pin boolean default true,
   active boolean default true,
-  admin_notes text                       -- visibile solo agli admin
+  -- le note riservate degli admin stanno in profile_admin_notes(profile_id, notes), RLS solo admin:
+  -- una colonna qui sarebbe leggibile dal dipendente interessato (la RLS è per riga)
 )
 
 profile_departments (

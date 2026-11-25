@@ -78,7 +78,11 @@ export function ChangePinForm({ pinHint }: { pinHint: string }) {
       ) : (
         <FieldError>{message?.text}</FieldError>
       )}
-      <Button type="submit" variant="secondary" disabled={pending || !currentPin || !pin || !confirm}>
+      <Button
+        type="submit"
+        variant="secondary"
+        disabled={pending || !currentPin || !pin || !confirm}
+      >
         {pending ? "Salvataggio…" : "Aggiorna PIN"}
       </Button>
     </form>

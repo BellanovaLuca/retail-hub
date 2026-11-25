@@ -150,9 +150,10 @@ describe("turni da mostrare nel dettaglio (persona + giorno)", () => {
 
   it("scambio senza turno in cambio, o con il collega eliminato", () => {
     expect(requestShiftDays({ ...swap, target_date: null }).targetShift).toBeNull();
-    expect(
-      requestShiftDays({ ...swap, status: "approved", target_profile_id: null }),
-    ).toEqual({ shift: { profileId: ME, date: "2026-12-05" }, targetShift: null });
+    expect(requestShiftDays({ ...swap, status: "approved", target_profile_id: null })).toEqual({
+      shift: { profileId: ME, date: "2026-12-05" },
+      targetShift: null,
+    });
   });
 
   it("cambio turno: il giorno di chi chiede; gli altri tipi non hanno turni", () => {

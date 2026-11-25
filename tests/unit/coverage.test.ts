@@ -124,6 +124,32 @@ describe("computeCoverage", () => {
     expect(at(both, "11:00")).toMatchObject({ teste: 1, delta: 0, backOffice: 1 });
   });
 
+  it("due pezzi contigui che si danno il cambio a metà fascia: la persona è presente", () => {
+    // Back office fino alle 10:15, vendita dalle 10:15.
+    const split = computeCoverage({
+      date: D,
+      shifts: [s("bo", "08:30", "10:15", { backOffice: true }), s("bo", "10:15", "17:30")],
+      people,
+      departments,
+    });
+    // 10:00–10:30: c'è per tutta la fascia, ma in vendita solo per metà → TESTE sì, DELTA no.
+    expect(at(split, "10:00")).toMatchObject({ teste: 1, delta: 0, backOffice: 1 });
+    expect(at(split, "09:30")).toMatchObject({ teste: 1, delta: 0 });
+    expect(at(split, "10:30")).toMatchObject({ teste: 1, delta: 1, vista: 1 });
+    // Due pezzi di vendita contigui (aree diverse per un jolly): conta l'area del pezzo in corso.
+    const jolly = computeCoverage({
+      date: D,
+      shifts: [
+        s("jolly", "10:00", "12:15", { zone: "vista" }),
+        s("jolly", "12:15", "16:00", { zone: "sole" }),
+      ],
+      people,
+      departments,
+    });
+    expect(at(jolly, "12:00")).toMatchObject({ teste: 1, delta: 1, vista: 1, sole: 0 });
+    expect(at(jolly, "12:30")).toMatchObject({ teste: 1, delta: 1, vista: 0, sole: 1 });
+  });
+
   it("una fascia coperta solo in parte non conta (turno 10:15)", () => {
     const partial = computeCoverage({
       date: D,
