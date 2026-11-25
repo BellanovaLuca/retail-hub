@@ -29,7 +29,7 @@ export default async function NotifichePage() {
       </PageHeader>
       {list.length ? (
         <div className="mb-6 flex flex-wrap items-center gap-2">
-          {unread ? <MarkAllRead /> : null}
+          <MarkAllRead disabled={unread === 0} />
           <DeleteAll />
         </div>
       ) : null}

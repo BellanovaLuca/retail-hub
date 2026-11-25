@@ -2,13 +2,15 @@
 
 import { format, parseISO } from "date-fns";
 import { it } from "date-fns/locale";
-import { Plus, Trash2 } from "lucide-react";
+import { CalendarX, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, FormMessage, Select, Switch, Textarea } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { publishedDayText, resolveBackOffice, sortShifts } from "@/lib/schedule/cells";
+import type { LeaveRequestInfo } from "@/lib/schedule/leave-cells";
 import type {
   LeaveRecord,
   PublishedShift,
@@ -16,12 +18,16 @@ import type {
   ShiftRecord,
   TemplateRecord,
 } from "@/lib/schedule/types";
-import { leaveLabelAdmin } from "@/lib/schedule/view";
-import { clearShiftConflict, saveShiftDay } from "../actions";
+import { isFullDayLeave, leaveLabelAdmin } from "@/lib/schedule/view";
+import { clearShiftConflict, removeLeaveDays, revokeLeaveRequest, saveShiftDay } from "../actions";
 
 type Segment = { start: string; end: string; isBackOffice: boolean };
 
-/** Dettaglio della giornata: turno rapido, fasce (spezzati), pausa, reparto, area, back office, nota. */
+/**
+ * Dettaglio della giornata: turno rapido, fasce (spezzati), pausa, reparto, area, back office,
+ * nota. Se nel giorno c'è un'assenza la si può togliere da qui (solo quel giorno, oppure tutta la
+ * richiesta approvata da cui nasce); il turno si scrive comunque.
+ */
 export function DayDialog({
   open,
   onClose,
@@ -30,6 +36,7 @@ export function DayDialog({
   date,
   shifts,
   leave,
+  leaveRequest,
   templates,
   departments,
   published,
@@ -42,6 +49,8 @@ export function DayDialog({
   date: string;
   shifts: ShiftRecord[];
   leave?: LeaveRecord;
+  /** Richiesta approvata da cui nasce l'assenza (se c'è ancora). */
+  leaveRequest?: LeaveRequestInfo;
   templates: TemplateRecord[];
   departments: { id: string; name: string }[];
   published: PublishedShift[];
@@ -67,6 +76,11 @@ export function DayDialog({
   );
   const [note, setNote] = useState(first?.note ?? "");
   const [result, setResult] = useState<{ ok: boolean; message?: string } | null>(null);
+  /** Esito di «Togli l'assenza» / «Togli tutta la richiesta»: la finestra resta aperta. */
+  const [absenceResult, setAbsenceResult] = useState<{ ok: boolean; message?: string } | null>(
+    null,
+  );
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const tpl = templates.find((t) => t.id === templateId);
@@ -112,18 +126,116 @@ export function DayDialog({
     });
   }
 
+  /** Toglie l'assenza (solo questo giorno, o tutta la richiesta) e lascia aperta la finestra. */
+  function removeAbsence(whole: boolean) {
+    setAbsenceResult(null);
+    startTransition(async () => {
+      const res =
+        whole && leaveRequest
+          ? await revokeLeaveRequest(leaveRequest.id)
+          : await removeLeaveDays(weekId, [{ profileId: person.id, date }]);
+      setConfirmRevoke(false);
+      setAbsenceResult(res);
+      // Anche se non è andata a buon fine i dati potrebbero essere cambiati: si ricaricano.
+      onSaved(res.ok ? res.message : undefined);
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent title={title} wide>
+        {absenceResult ? (
+          <div className="mb-4">
+            <FormMessage result={absenceResult} />
+          </div>
+        ) : null}
         {leave ? (
-          <p className="mb-4 border-l-2 border-line-strong pl-3 text-sm text-muted">
-            Assenza registrata: {leaveLabelAdmin(leave)}
-            {leave.source === "request" ? " (richiesta approvata)" : ""}.
-          </p>
+          <section
+            aria-label="Assenza della giornata"
+            className="mb-4 flex flex-col gap-3 border-l-2 border-line-strong pl-3 text-sm"
+          >
+            <p className="text-muted">
+              Assenza registrata: <span className="text-foreground">{leaveLabelAdmin(leave)}</span>
+              {leave.source === "request" ? " (richiesta approvata)" : ""}.
+              {isFullDayLeave(leave)
+                ? " Il turno si può scrivere lo stesso: resta segnalato in conflitto finché c'è l'assenza."
+                : ""}
+            </p>
+            {leaveRequest ? (
+              <p>
+                Dalla richiesta:{" "}
+                <Link href={`/admin/richieste/${leaveRequest.id}`} className="link-underline nums">
+                  {leaveRequest.title} · {leaveRequest.detail}
+                </Link>
+              </p>
+            ) : null}
+            {confirmRevoke && leaveRequest ? (
+              <div
+                role="alert"
+                className="flex flex-col gap-3 rounded-md border border-danger/40 p-3"
+              >
+                <p>
+                  Togliere tutta la richiesta ({leaveRequest.title} · {leaveRequest.detail})? Torna
+                  «rifiutata» con la nota «Tolta dal foglio turni», spariscono tutte le sue assenze
+                  e {person.displayName} viene avvisato.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => setConfirmRevoke(false)}
+                  >
+                    Annulla
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={pending}
+                    onClick={() => removeAbsence(true)}
+                  >
+                    {pending ? "Un momento…" : "Sì, togli la richiesta"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={pending}
+                  onClick={() => removeAbsence(false)}
+                >
+                  <CalendarX aria-hidden /> Togli l&apos;assenza di questo giorno
+                </Button>
+                {leaveRequest?.revocable ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-danger"
+                    disabled={pending}
+                    onClick={() => setConfirmRevoke(true)}
+                  >
+                    Togli tutta la richiesta
+                  </Button>
+                ) : null}
+              </div>
+            )}
+            {leave.source === "request" ? (
+              <p className="text-xs text-muted">
+                Togliendo l&apos;assenza {person.displayName} riceve un avviso.
+                {leaveRequest
+                  ? " Gli altri giorni della richiesta restano approvati; se non ne restano, la richiesta torna «rifiutata»."
+                  : ""}
+              </p>
+            ) : null}
+          </section>
         ) : null}
         {shifts.some((s) => s.conflict) ? (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-l-2 border-danger pl-3 text-sm text-danger">
-            Questo turno è in conflitto con un&apos;assenza approvata.
+            {leave
+              ? "Questo turno è in conflitto con l'assenza: tienilo così, oppure togli l'assenza qui sopra."
+              : "Questo turno è segnalato in conflitto con un'assenza."}
             <Button
               size="sm"
               variant="secondary"

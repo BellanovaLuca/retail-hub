@@ -11,6 +11,7 @@ import { requireProfile } from "@/lib/auth/session";
 import { getUnreadAnnouncements } from "@/lib/data/announcements";
 import { getTodayDuties } from "@/lib/data/responsibilities";
 import { getPublicPeople, getPublishedShifts, weekDates } from "@/lib/data/schedule";
+import { dailyQuote } from "@/lib/daily-quote";
 import { formatLong, nowInRome, toISODate, weekNumber, weekStart } from "@/lib/dates";
 import { dayNetHours } from "@/lib/hours";
 import { groupLeavePeriods } from "@/lib/leaves/plan";
@@ -106,7 +107,12 @@ export default async function HomePage() {
       <PageHeader
         eyebrow={formatLong(now)}
         title={`${greeting(now.getHours())}, ${profile.display_name}`}
-      />
+      >
+        {/* Frase del giorno: cambia ogni giorno. */}
+        <p className="max-w-2xl font-display text-lg leading-snug font-light text-foreground italic sm:text-xl">
+          «{dailyQuote(today)}»
+        </p>
+      </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

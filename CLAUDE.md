@@ -11,7 +11,8 @@
 - I dipendenti non leggono la tabella `shifts` (solo admin): leggono la vista `published_shifts` (istantanea dell'ultima pubblicazione). Assenze altrui: vista `leaves_public` ("ferie"/"assente", mai il motivo). Performance propria: vista `my_performance_goals`.
 - Responsabilità: assegnazione per settimana in `responsibility_week_assignments` (vale anche per le settimane seguenti finché non si cambia); `getResponsibilities(db, { week })` la applica (gruppo in `supports`, `weekly: true`), senza `week` restano responsabile/supporti della scheda. Il gruppo in vigore lo calcola il DB (`responsibility_week_teams(p_week)`). Area admin: griglia `WeekPlanner` (assegna, aggiunge/toglie colonne) e `CheckMonitor` (controllo spunte persone × attività per giorno).
 - Serve un profilo attivo per qualunque riga: policy restrittiva «solo profili attivi» su ogni tabella (una tabella nuova deve averla) e `is_staff()` nelle letture comuni. Note riservate degli admin: tabella `profile_admin_notes` (mai colonne riservate su `profiles`: la RLS è per riga).
-- Operazioni admin atomiche via RPC: `replace_shift_days`, `remove_future_shifts`, `set_default_rule_set`. Accesso: `login_attempt_begin` (solo service role).
+- Operazioni admin atomiche via RPC: `replace_shift_days`, `remove_future_shifts`, `remove_leave_days`, `set_default_rule_set`. Accesso: `login_attempt_begin` (solo service role).
+- Obiettivi: il foglio di ciascuno segue il gruppo di voci della sua area (`kpi_sets` «Vista»/«Sole», jolly con il Vista) più gli obiettivi misti assegnati nella settimana; `profile_kpis` solo per personalizzazioni fatte a mano. Assegnazione: due tabelle per area con soli valori scritti (`TargetsTable`), proposte su richiesta (`fillProposals`).
 - Transizioni dei dipendenti su dati condivisi: funzioni RPC security definer (`cancel_request`, `respond_to_swap`, `set_performance_note`, `set_extra_task_done`).
 
 ## Codice
@@ -21,7 +22,7 @@
 - `authedAction()`/`adminAction()` richiedono il primo accesso completato (PIN personale + informativa). Letture che possono superare 1000 righe: `fetchAllRows` di `lib/data/paginate.ts`.
 - Service role (`lib/supabase/admin.ts`) solo lato server e solo quando RLS non basta (creazione utenti, notifiche, cron).
 - Notifiche: `notify(profileIds, { kind, title, body, link })` / `notifyEach` / `adminIds()` da `lib/notifications.ts`.
-- Logica pura (testata): `lib/shifts/*`, `lib/hours.ts`, `lib/coverage.ts`, `lib/rules/*`, `lib/leaves/parse.ts`, `lib/targets.ts`, `lib/schedule/*`. Caricamento dati: `lib/data/*`.
+- Logica pura (testata): `lib/shifts/*`, `lib/hours.ts`, `lib/coverage.ts`, `lib/rules/*`, `lib/leaves/parse.ts`, `lib/targets.ts`, `lib/schedule/*`, `lib/kpi/*` (obiettivi per area: `area-tables.ts`), `lib/requests/calendar.ts`, `lib/daily-quote.ts`. Caricamento dati: `lib/data/*`.
 - UI (§9 bianco e nero, nessun colore d'accento): `components/ui/` (Button, Input/Label, Field/Select/Checkbox/Switch/Textarea/FormMessage, Card/CardTitle, Badge, Dialog, Table/Th/Td/PersonDot, PageHeader/EmptyState/Skeleton), `components/layout/` (SubNav, ComingSoon), griglia Excel `components/spreadsheet/` (`SpreadsheetGrid`). Token colore in `app/globals.css` (`text-muted`, `border-line`, `bg-surface`, `text-danger/success/warning`, `bg-vista/bg-sole`, utility `eyebrow`, `nums`, `hatch`).
 - Export: exceljs (SheetJS non è raggiungibile dal proxy) e `@react-pdf/renderer`.
 

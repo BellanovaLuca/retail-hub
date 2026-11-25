@@ -11,6 +11,14 @@ import {
   type ActionResult,
 } from "@/lib/auth/guards";
 import { getSchedulePeople, getTemplates } from "@/lib/data/schedule";
+import { notify } from "@/lib/notifications";
+import {
+  createsLeaves,
+  formatRange,
+  requestTypeLabel,
+  REVOKED_FROM_SCHEDULE_NOTE,
+} from "@/lib/requests";
+import { removedLeaveNotices, type RemovedLeave } from "@/lib/schedule/leave-cells";
 import { publishSnapshot } from "@/lib/schedule/publish";
 import { parseShiftCell } from "@/lib/shifts/parse";
 import type { createClient } from "@/lib/supabase/server";
@@ -99,19 +107,14 @@ export async function saveShiftCells(
     const list = cellChangesSchema.parse(changes);
     const dayList = weekDaysOf(week.week_start);
     const days = new Set(dayList);
-    // Letture una volta per lotto: turni rapidi, persone, turni e assenze della settimana.
-    const [templates, people, existingRows, { data: leaveRows, error: leavesError }] =
-      await Promise.all([
-        getTemplates(supabase),
-        getSchedulePeople(supabase),
-        loadShiftsBetween(supabase, dayList[0], dayList[6]),
-        supabase
-          .from("leaves")
-          .select("profile_id, date, hours")
-          .gte("date", dayList[0])
-          .lte("date", dayList[6]),
-      ]);
-    if (leavesError) throw new ActionError(dbErrorMessage(leavesError, "Assenze non disponibili."));
+    // Letture una volta per lotto: turni rapidi, persone e turni della settimana. Le assenze non
+    // servono: nei giorni di assenza la cella si scrive come le altre, e il segnale di conflitto
+    // con un'assenza a giornata intera lo calcola il database (replace_shift_days).
+    const [templates, people, existingRows] = await Promise.all([
+      getTemplates(supabase),
+      getSchedulePeople(supabase),
+      loadShiftsBetween(supabase, dayList[0], dayList[6]),
+    ]);
     const tplInput = templates.map((t) => ({
       code: t.code,
       startTime: t.startTime,
@@ -127,9 +130,6 @@ export async function saveShiftCells(
       existingByDay.set(k, [...(existingByDay.get(k) ?? []), s]);
     }
     const errors: { profileId: string; date: string; message: string }[] = [];
-    const absentDays = new Set(
-      (leaveRows ?? []).filter((l) => !l.hours).map((l) => dayKey(l.profile_id, l.date)),
-    );
 
     // A parità di cella vale l'ultima modifica del lotto.
     const writes = new Map<string, { profile_id: string; date: string; rows: DayRow[] }>();
@@ -137,14 +137,6 @@ export async function saveShiftCells(
       const k = dayKey(change.profileId, change.date);
       if (!days.has(change.date)) {
         errors.push({ ...change, message: "Giorno fuori dalla settimana." });
-        continue;
-      }
-      // Giorno di assenza: dal foglio si può solo svuotare; il resto passa dal dettaglio.
-      if (absentDays.has(k) && change.value.trim() !== "") {
-        errors.push({
-          ...change,
-          message: "Giornata di assenza: modifica il turno dal dettaglio del giorno.",
-        });
         continue;
       }
       const parsed = parseShiftCell(change.value, tplInput);
@@ -486,5 +478,177 @@ export async function clearShiftConflict(shiftId: string): Promise<ActionResult>
     if (error) return { ok: false, message: dbErrorMessage(error, "Operazione non riuscita.") };
     revalidatePath("/admin/turni", "layout");
     return { ok: true, message: data ? "Conflitto risolto." : undefined };
+  });
+}
+
+/** Dopo aver tolto assenze o richieste dal foglio: turni, ferie, richieste e orari cambiano. */
+function revalidateAbsences() {
+  revalidatePath("/admin/turni", "layout");
+  revalidatePath("/admin/ferie", "layout");
+  revalidatePath("/admin/richieste", "layout");
+  revalidatePath("/admin");
+  revalidatePath("/richieste", "layout");
+  revalidatePath("/ferie");
+  revalidatePath("/orari", "layout");
+  revalidatePath("/");
+}
+
+/**
+ * Revoca l'approvazione di una richiesta: torna "rifiutata" con la nota «Tolta dal foglio turni».
+ * La guardia sullo stato sta nell'UPDATE (se nel frattempo è cambiata non si tocca nulla); il
+ * trigger `revoke_request_leaves` elimina le sue assenze e i segnali di conflitto dei turni.
+ */
+async function revokeApprovedRequest(db: Db, actorId: string, requestId: string) {
+  const { data, error } = await db
+    .from("requests")
+    .update({
+      status: "rejected",
+      decided_by: actorId,
+      decided_at: new Date().toISOString(),
+      decision_note: REVOKED_FROM_SCHEDULE_NOTE,
+    })
+    .eq("id", requestId)
+    .eq("status", "approved")
+    .select("id, profile_id, type, start_date, end_date");
+  if (error) throw new ActionError(dbErrorMessage(error, "Richiesta non aggiornata."));
+  return data?.[0] ?? null;
+}
+
+const leaveDaysSchema = z
+  .array(z.object({ profileId: z.uuid(), date: isoDate }))
+  .min(1)
+  .max(200);
+
+/**
+ * «Togli l'assenza di questo giorno» dal foglio turni (anche per più celle selezionate): elimina
+ * le righe di `leaves` di quelle giornate e azzera il segnale di conflitto dei turni (RPC
+ * `remove_leave_days`, un'unica transazione). Se l'assenza veniva da una richiesta approvata il
+ * dipendente viene avvisato; una richiesta rimasta senza nessun giorno torna "rifiutata".
+ */
+export async function removeLeaveDays(
+  weekId: string,
+  days: { profileId: string; date: string }[],
+): Promise<ActionResult<{ removed: number; revokedRequests: number }>> {
+  return runAction(async () => {
+    const { supabase, profile } = await adminAction();
+    const week = await loadWeek(supabase, z.uuid().parse(weekId));
+    const parsed = leaveDaysSchema.safeParse(days);
+    if (!parsed.success) return { ok: false, message: "Dati non validi." };
+    const dayList = weekDaysOf(week.week_start);
+    if (parsed.data.some((d) => !dayList.includes(d.date)))
+      return { ok: false, message: "Giorno fuori dalla settimana." };
+
+    // Cosa c'è davvero in quelle giornate: serve per avvisare chi aveva una richiesta approvata.
+    const wanted = new Set(parsed.data.map((d) => dayKey(d.profileId, d.date)));
+    const { data: leaveRows, error: readError } = await supabase
+      .from("leaves")
+      .select("profile_id, date, type, hours, status, source, request_id")
+      .gte("date", dayList[0])
+      .lte("date", dayList[6])
+      .in("profile_id", [...new Set(parsed.data.map((d) => d.profileId))]);
+    if (readError) throw new ActionError(dbErrorMessage(readError, "Assenze non disponibili."));
+    const targets = (leaveRows ?? []).filter((l) => wanted.has(dayKey(l.profile_id, l.date)));
+    if (targets.length === 0) {
+      revalidateAbsences();
+      return {
+        ok: true,
+        message: "In quelle giornate non c'è nessuna assenza da togliere.",
+        data: { removed: 0, revokedRequests: 0 },
+      };
+    }
+
+    const { data: count, error } = await supabase.rpc("remove_leave_days", {
+      p_days: targets.map((l) => ({ profile_id: l.profile_id, date: l.date })),
+    });
+    if (error) throw new ActionError(dbErrorMessage(error, "Assenza non tolta."));
+    const removed = count ?? targets.length;
+
+    // Una richiesta approvata rimasta senza nessun giorno di assenza non ha più senso come
+    // "approvata": torna rifiutata (il dipendente la vede così, con la nota).
+    const emptied = new Set<string>();
+    const requestIds = [...new Set(targets.flatMap((l) => (l.request_id ? [l.request_id] : [])))];
+    for (const id of requestIds) {
+      const { count: left, error: countError } = await supabase
+        .from("leaves")
+        .select("id", { count: "exact", head: true })
+        .eq("request_id", id);
+      if (countError || (left ?? 0) > 0) continue;
+      if (await revokeApprovedRequest(supabase, profile.id, id)) emptied.add(id);
+    }
+
+    const removedLeaves: RemovedLeave[] = targets.map((l) => ({
+      profileId: l.profile_id,
+      date: l.date,
+      type: l.type,
+      hours: l.hours,
+      status: l.status,
+      source: l.source,
+      requestId: l.request_id,
+    }));
+    const notices = removedLeaveNotices(removedLeaves, emptied);
+    for (const n of notices) {
+      await notify([n.profileId], {
+        kind: "request_decided",
+        title: "Assenza tolta dal foglio turni",
+        body: n.body,
+        link: n.link,
+      });
+    }
+
+    revalidateAbsences();
+    const parts = [removed === 1 ? "Assenza tolta." : `Tolte ${removed} assenze.`];
+    if (emptied.size === 1)
+      parts.push("La richiesta non aveva altri giorni: ora risulta rifiutata.");
+    else if (emptied.size > 1)
+      parts.push(`${emptied.size} richieste non avevano altri giorni: ora risultano rifiutate.`);
+    if (notices.length)
+      parts.push(notices.length === 1 ? "Dipendente avvisato." : "Dipendenti avvisati.");
+    return {
+      ok: true,
+      message: parts.join(" "),
+      data: { removed, revokedRequests: emptied.size },
+    };
+  });
+}
+
+/**
+ * «Togli tutta la richiesta» dal foglio turni: revoca l'approvazione di una richiesta di assenza
+ * (ferie, permesso, malattia, giorno libero, indisponibilità). Spariscono tutte le sue assenze e
+ * i conflitti dei turni; il dipendente viene avvisato. Non vale per gli scambi di turno: uno
+ * scambio approvato ha già spostato i turni e non si annulla da qui.
+ */
+export async function revokeLeaveRequest(requestId: string): Promise<ActionResult> {
+  return runAction(async () => {
+    const { supabase, profile } = await adminAction();
+    const id = z.uuid().safeParse(requestId);
+    if (!id.success) return { ok: false, message: "Dati non validi." };
+    const { data: r, error } = await supabase
+      .from("requests")
+      .select("id, type, status")
+      .eq("id", id.data)
+      .maybeSingle();
+    if (error) throw new ActionError(dbErrorMessage(error, "Richiesta non disponibile."));
+    if (!r) return { ok: false, message: "Richiesta non trovata." };
+    if (!createsLeaves(r.type))
+      return { ok: false, message: "Questo tipo di richiesta non si toglie dal foglio turni." };
+    const revoked =
+      r.status === "approved" ? await revokeApprovedRequest(supabase, profile.id, r.id) : null;
+    if (!revoked) {
+      revalidateAbsences();
+      return { ok: false, message: "La richiesta non è più approvata: ricarica la pagina." };
+    }
+
+    const what = `${requestTypeLabel(revoked.type)} · ${formatRange(revoked.start_date, revoked.end_date)}`;
+    await notify([revoked.profile_id], {
+      kind: "request_decided",
+      title: "Approvazione revocata",
+      body: `${what}\n${REVOKED_FROM_SCHEDULE_NOTE}`,
+      link: `/richieste/${revoked.id}`,
+    });
+    revalidateAbsences();
+    return {
+      ok: true,
+      message: `Richiesta tolta (${what}): le sue assenze sono state eliminate e il dipendente è stato avvisato.`,
+    };
   });
 }

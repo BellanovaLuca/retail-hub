@@ -9,7 +9,8 @@ import { FormMessage, Textarea } from "@/components/ui/form";
 import { decideRequests } from "../actions";
 
 const EFFECTS: Record<string, string> = {
-  ferie: "Approvando, i giorni finiscono nel planning ferie e nel foglio turni (bloccati).",
+  ferie:
+    "Approvando, i giorni finiscono nel planning ferie e nel foglio turni (segnati come assenza: la cella resta scrivibile).",
   permesso:
     "Approvando, il permesso finisce nel planning e i turni di quei giorni vengono segnalati.",
   giorno_libero: "Approvando, il giorno compare come assenza nel foglio turni.",

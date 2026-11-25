@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { requireProfile } from "@/lib/auth/session";
 import { normalizeWeekParam } from "@/lib/data/schedule";
-import { getMyWeek } from "@/lib/data/targets";
-import { nowInRome, toISODate } from "@/lib/dates";
+import { getMyWeek, getWeekComments } from "@/lib/data/targets";
+import { nowInRome, toISODate, weekNumber } from "@/lib/dates";
 import { storeTotalsRows } from "@/lib/kpi/monitoring";
 import { createClient } from "@/lib/supabase/server";
 import { MyNote } from "./my-note";
@@ -45,6 +45,21 @@ export default async function ObiettiviPage({
       if (v !== null) initialValues[`${row.kpiId}|${date}`] = v;
 
   const voiceComments = week.rows.filter((r) => r.comment);
+
+  // Commenti pubblicati sulla settimana precedente a quella mostrata.
+  const labelOf = (kpiId: string) =>
+    week.rows.find((r) => r.kpiId === kpiId)?.label ??
+    week.kpis.find((k) => k.kpiId === kpiId)?.label ??
+    "Voce";
+  const previousComments = (await getWeekComments(supabase, prev, profile.id)).filter(
+    (c) => c.published && c.body.trim(),
+  );
+  const previous = {
+    general: previousComments.find((c) => c.kpiId === null)?.body ?? null,
+    voices: previousComments
+      .filter((c) => c.kpiId !== null)
+      .map((c) => ({ kpiId: c.kpiId!, label: labelOf(c.kpiId!), body: c.body })),
+  };
 
   const storeRows = storeTotalsRows({
     kpis: week.kpis,
@@ -85,40 +100,28 @@ export default async function ObiettiviPage({
         </p>
       </header>
 
+      {/* Per prima cosa il commento sulla settimana appena trascorsa, poi quello di questa. */}
+      {previous.general || previous.voices.length ? (
+        <CommentBox
+          id="commento-settimana-trascorsa"
+          title={`Commento della settimana trascorsa · Week ${weekNumber(parseISO(prev))}`}
+          general={previous.general}
+          voices={previous.voices}
+          more={{
+            href: `/obiettivi?settimana=${prev}`,
+            label: "Vedi i numeri di quella settimana",
+          }}
+        />
+      ) : null}
       {week.generalComment || voiceComments.length ? (
-        <section
-          aria-labelledby="commento-settimana"
-          className="mb-10 rounded-lg border-2 border-foreground p-5 sm:p-6"
-        >
-          <h2 id="commento-settimana" className="mb-3 flex items-center gap-2 eyebrow">
-            <MessageSquareText className="size-4 stroke-[1.5]" aria-hidden />
-            Il commento del tuo responsabile
-          </h2>
-          {week.generalComment ? (
-            <p className="font-display text-xl leading-snug font-light whitespace-pre-line sm:text-2xl">
-              {week.generalComment}
-            </p>
-          ) : null}
-          {voiceComments.length ? (
-            <dl
-              className={
-                week.generalComment
-                  ? "mt-5 divide-y divide-line border-t border-line"
-                  : "divide-y divide-line"
-              }
-            >
-              {voiceComments.map((r) => (
-                <div
-                  key={r.kpiId}
-                  className="grid gap-1 py-3 text-sm sm:grid-cols-[12rem_1fr] sm:gap-4"
-                >
-                  <dt className="font-medium">{r.label}</dt>
-                  <dd className="whitespace-pre-line">{r.comment}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : null}
-        </section>
+        <CommentBox
+          id="commento-settimana"
+          title={
+            isCurrent ? "Commento di questa settimana" : `Commento della Week ${week.weekNumber}`
+          }
+          general={week.generalComment}
+          voices={voiceComments.map((r) => ({ kpiId: r.kpiId, label: r.label, body: r.comment }))}
+        />
       ) : null}
 
       {week.rows.length === 0 ? (
@@ -149,5 +152,58 @@ export default async function ObiettiviPage({
         <StoreCard rows={storeRows} bestPerformerName={week.store.bestPerformerName} />
       </div>
     </>
+  );
+}
+
+/** Riquadro in evidenza con il commento del responsabile (generale e sulle singole voci). */
+function CommentBox({
+  id,
+  title,
+  general,
+  voices,
+  more,
+}: {
+  id: string;
+  title: string;
+  general: string | null;
+  voices: { kpiId: string; label: string; body: string }[];
+  more?: { href: string; label: string };
+}) {
+  return (
+    <section aria-labelledby={id} className="mb-8 rounded-lg border-2 border-foreground p-5 sm:p-6">
+      <h2 id={id} className="mb-3 flex items-center gap-2 eyebrow">
+        <MessageSquareText className="size-4 stroke-[1.5]" aria-hidden />
+        {title}
+      </h2>
+      {general ? (
+        <p className="font-display text-xl leading-snug font-light whitespace-pre-line sm:text-2xl">
+          {general}
+        </p>
+      ) : null}
+      {voices.length ? (
+        <dl
+          className={
+            general ? "mt-5 divide-y divide-line border-t border-line" : "divide-y divide-line"
+          }
+        >
+          {voices.map((v) => (
+            <div
+              key={v.kpiId}
+              className="grid gap-1 py-3 text-sm sm:grid-cols-[12rem_1fr] sm:gap-4"
+            >
+              <dt className="font-medium">{v.label}</dt>
+              <dd className="whitespace-pre-line">{v.body}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {more ? (
+        <p className="mt-4 text-sm">
+          <Link href={more.href} className="link-underline text-muted">
+            {more.label}
+          </Link>
+        </p>
+      ) : null}
+    </section>
   );
 }

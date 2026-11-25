@@ -207,7 +207,7 @@ async function readWeekShiftsAndLeaves(
       : Promise.resolve({ data: [] as Parameters<typeof toShiftRecord>[0][] }),
     db
       .from("leaves")
-      .select("profile_id, date, type, hours, status, source")
+      .select("profile_id, date, type, hours, status, source, request_id")
       .gte("date", days[0])
       .lte("date", days[6]),
   ]);
@@ -220,6 +220,7 @@ async function readWeekShiftsAndLeaves(
       hours: l.hours,
       status: l.status,
       source: l.source,
+      requestId: l.request_id,
     })),
   };
 }

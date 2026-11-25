@@ -2,16 +2,26 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { adminAction, dbErrorMessage, runAction, type ActionResult } from "@/lib/auth/guards";
+import {
+  ActionError,
+  adminAction,
+  dbErrorMessage,
+  runAction,
+  type ActionResult,
+} from "@/lib/auth/guards";
 import { format, parseISO } from "date-fns";
 import { weekStart } from "@/lib/dates";
 import { notify } from "@/lib/notifications";
 import { publishSnapshot } from "@/lib/schedule/publish";
 import { removeAttachmentFiles } from "@/lib/announcements/storage";
 import { ownAttachmentPaths } from "./attachments";
+import { chunk, fetchAllRows } from "@/lib/data/paginate";
 import {
   awaitsAdmin,
+  DELETABLE_STATUSES,
+  deleteGroupStatuses,
   formatRange,
+  REQUEST_TYPES,
   RESET_CONFIRM_WORD,
   requestTypeLabel,
   type RequestStatus,
@@ -216,5 +226,117 @@ export async function resetAllRequests(
       message: `${n === 1 ? "Eliminata 1 richiesta" : `Eliminate ${n} richieste`}.`,
       data: { deleted: n },
     };
+  });
+}
+
+type Db = Awaited<ReturnType<typeof adminAction>>["supabase"];
+
+/**
+ * Elimina le richieste indicate, ma solo se nel momento dell'eliminazione sono in uno degli stati
+ * ammessi (la guardia sta nel DELETE stesso). Commenti: a cascata. Assenze nate da una richiesta
+ * approvata: restano nel calendario (`leaves.request_id` va a null). Poi toglie dallo storage gli
+ * allegati delle sole richieste eliminate davvero.
+ */
+async function deleteRequestRows(db: Db, ids: string[], statuses: readonly RequestStatus[]) {
+  const deleted: { id: string; profile_id: string; attachment_path: string | null }[] = [];
+  // A blocchi: gli id viaggiano nell'indirizzo della richiesta.
+  for (const part of chunk(ids, 100)) {
+    const { data, error } = await db
+      .from("requests")
+      .delete()
+      .in("id", part)
+      .in("status", [...statuses])
+      .select("id, profile_id, attachment_path");
+    if (error) {
+      // Gli allegati dei blocchi già eliminati vanno tolti comunque, e l'elenco va aggiornato.
+      await removeAttachmentFiles(ownAttachmentPaths(deleted));
+      revalidateAfterDelete();
+      throw new ActionError(dbErrorMessage(error, "Richieste non eliminate."));
+    }
+    deleted.push(...(data ?? []));
+  }
+  // Con il service role: solo i file nella cartella di chi ha fatto la richiesta (vedi sopra).
+  await removeAttachmentFiles(ownAttachmentPaths(deleted));
+  return deleted.length;
+}
+
+function revalidateAfterDelete() {
+  revalidatePath("/admin/richieste", "layout");
+  revalidatePath("/admin");
+  revalidatePath("/richieste", "layout");
+  revalidatePath("/");
+}
+
+const deletedMessage = (n: number) =>
+  `${n === 1 ? "Eliminata 1 richiesta" : `Eliminate ${n} richieste`}.`;
+
+/**
+ * Elimina una o più richieste già decise (approvate, rifiutate, rifiutate dal collega, annullate).
+ * Le richieste in attesa non si eliminano da qui. Le assenze create da una richiesta approvata
+ * restano nel calendario e gli scambi già fatti restano come sono.
+ */
+export async function deleteRequests(ids: string[]): Promise<ActionResult<{ deleted: number }>> {
+  return runAction(async () => {
+    const { supabase } = await adminAction();
+    const parsed = z.array(z.uuid()).min(1).max(100).safeParse(ids);
+    if (!parsed.success) return { ok: false, message: "Dati non validi." };
+    const deleted = await deleteRequestRows(supabase, parsed.data, DELETABLE_STATUSES);
+    revalidateAfterDelete();
+    if (deleted === 0)
+      return {
+        ok: false,
+        message:
+          "Nessuna richiesta eliminata: si eliminano solo quelle già approvate, rifiutate o annullate.",
+      };
+    return { ok: true, message: deletedMessage(deleted), data: { deleted } };
+  });
+}
+
+const deleteGroupSchema = z.object({
+  group: z.enum(["approved", "rejected"]),
+  /** Con le rifiutate: anche le richieste annullate dai dipendenti. */
+  includeCancelled: z.boolean().default(false),
+  /** Filtri attivi nell'elenco: si eliminano solo le richieste che l'admin sta guardando. */
+  type: z.enum(REQUEST_TYPES.map((t) => t.value)).optional(),
+  profileId: z.uuid().optional(),
+});
+
+/**
+ * «Elimina tutte le approvate» / «Elimina tutte le rifiutate» (con i filtri dell'elenco, se
+ * attivi). Come per l'eliminazione singola: le assenze nate dalle richieste approvate restano
+ * nel calendario, gli scambi già fatti restano come sono.
+ */
+export async function deleteDecidedRequests(
+  input: z.input<typeof deleteGroupSchema>,
+): Promise<ActionResult<{ deleted: number }>> {
+  return runAction(async () => {
+    const { supabase } = await adminAction();
+    const parsed = deleteGroupSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, message: "Dati non validi." };
+    const v = parsed.data;
+    const statuses = deleteGroupStatuses(v.group, v.group === "rejected" && v.includeCancelled);
+
+    // A pagine: PostgREST restituisce al massimo 1000 righe per richiesta.
+    let ids: string[];
+    try {
+      const rows = await fetchAllRows<{ id: string }>((from, to) => {
+        let query = supabase
+          .from("requests")
+          .select("id", { count: "exact" })
+          .in("status", statuses);
+        if (v.type) query = query.eq("type", v.type);
+        if (v.profileId) query = query.eq("profile_id", v.profileId);
+        return query.order("id").range(from, to);
+      });
+      ids = rows.map((r) => r.id);
+    } catch {
+      return { ok: false, message: "Richieste non lette." };
+    }
+    if (ids.length === 0)
+      return { ok: true, message: "Non ci sono richieste da eliminare.", data: { deleted: 0 } };
+
+    const deleted = await deleteRequestRows(supabase, ids, statuses);
+    revalidateAfterDelete();
+    return { ok: true, message: deletedMessage(deleted), data: { deleted } };
   });
 }

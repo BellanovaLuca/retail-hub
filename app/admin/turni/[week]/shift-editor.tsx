@@ -2,6 +2,7 @@
 
 import { addDays, format, parseISO } from "date-fns";
 import {
+  CalendarX,
   ChevronLeft,
   ChevronRight,
   FileDown,
@@ -36,6 +37,13 @@ import {
   resolveZone,
   sortShifts,
 } from "@/lib/schedule/cells";
+import {
+  leaveCellState,
+  leaveKeys,
+  leavesInSelection,
+  leaveTitle,
+  type LeaveRequestInfo,
+} from "@/lib/schedule/leave-cells";
 import { isHolidayClosure } from "@/lib/schedule/opening";
 import type {
   LeaveRecord,
@@ -62,6 +70,7 @@ import { saveShiftCells, saveShiftDay } from "../actions";
 import { createCellSaveQueue, type CellSaveHandlers } from "./cell-save-queue";
 import { DayDialog } from "./day-dialog";
 import { PublishDialog } from "./publish-dialog";
+import { RemoveLeavesDialog } from "./remove-leaves-dialog";
 import { WeekMenu } from "./week-menu";
 import { useWeekRealtime } from "./use-week-realtime";
 
@@ -81,6 +90,8 @@ export type EditorProps = {
   today: string;
   shifts: ShiftRecord[];
   leaves: LeaveRecord[];
+  /** Richieste approvate da cui nascono le assenze della settimana (per id). */
+  leaveRequests?: Record<string, LeaveRequestInfo>;
   people: SchedulePerson[];
   templates: TemplateRecord[];
   departments: { id: string; name: string }[];
@@ -108,6 +119,9 @@ export function ShiftEditor(props: EditorProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Map<string, string>>(new Map());
   const [dialog, setDialog] = useState<{ profileId: string; date: string } | null>(null);
+  // Assenze nelle celle selezionate (firma "persona|giorno,…"): accendono «Togli l'assenza».
+  const [selectedLeaveKeys, setSelectedLeaveKeys] = useState("");
+  const [removing, setRemoving] = useState<LeaveRecord[] | null>(null);
   const [, startTransition] = useTransition();
   const presence = useWeekRealtime(week.id, props.me);
 
@@ -148,6 +162,7 @@ export function ShiftEditor(props: EditorProps) {
 
   const tplById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
   const peopleById = useMemo(() => new Map(people.map((p) => [p.id, p])), [people]);
+  const personNames = useMemo(() => new Map(people.map((p) => [p.id, p.displayName])), [people]);
   const byDay = useMemo(() => groupShiftsByDay(shifts), [shifts]);
   const leaveByDay = useMemo(
     () => new Map(leaves.map((l) => [key(l.profileId, l.date), l])),
@@ -233,15 +248,12 @@ export function ShiftEditor(props: EditorProps) {
     (profileId: string, date: string) => {
       const k = key(profileId, date);
       if (pending.has(k)) return pending.get(k)!;
-      const leave = leaveByDay.get(k);
       const person = peopleById.get(profileId);
-      const text = cellText(byDay.get(k) ?? [], tplById, (s) => resolveBackOffice(s, person));
-      if (leave && isFullDayLeave(leave)) {
-        return text ? `${leaveLabelAdmin(leave)} · ${text}` : leaveLabelAdmin(leave);
-      }
-      return text;
+      // Solo il turno: è il testo che si edita e si copia. L'assenza del giorno la disegna
+      // `renderCell` (etichetta) insieme al tratteggio di `getCellState`.
+      return cellText(byDay.get(k) ?? [], tplById, (s) => resolveBackOffice(s, person));
     },
-    [pending, leaveByDay, byDay, tplById, peopleById],
+    [pending, byDay, tplById, peopleById],
   );
 
   const getCellState = useCallback(
@@ -250,23 +262,13 @@ export function ShiftEditor(props: EditorProps) {
       const leave = leaveByDay.get(k);
       const dayShifts = byDay.get(k) ?? [];
       const warning = props.cellWarning?.(profileId, date);
-      // Nei giorni di assenza la cella non si scrive: turni e conflitti si gestiscono dal dettaglio.
-      const locked = Boolean(leave && isFullDayLeave(leave));
-      if (dayShifts.some((s) => s.conflict)) {
-        return {
-          readOnly: locked,
-          tone: "danger",
-          title:
-            "In conflitto con un'assenza approvata: doppio clic per aprire il dettaglio e risolvere.",
-        };
-      }
-      if (leave && locked) {
-        return {
-          readOnly: true,
-          tone: leave.status === "tentative" ? "dashed" : "hatched",
-          title: `${leaveLabelAdmin(leave)}${leave.source === "request" ? " · richiesta approvata" : ""}`,
-        };
-      }
+      // Nei giorni di assenza la cella si scrive come le altre: tratteggio (o rosso se il turno
+      // è in conflitto) ed etichetta dicono solo che lì c'è un'assenza.
+      const absence = leaveCellState(
+        leave,
+        dayShifts.some((s) => s.conflict),
+      );
+      if (absence) return absence;
       if (warning) return { tone: "warning", title: warning };
       if (holidays.get(date)?.storeClosed) return { tone: "muted", title: "Negozio chiuso" };
       return undefined;
@@ -294,6 +296,15 @@ export function ShiftEditor(props: EditorProps) {
                 zone === "vista" ? "bg-vista" : "bg-sole",
               )}
             />
+          ) : null}
+          {/* Assenza a giornata intera: etichetta su fondo pieno, leggibile sopra il tratteggio. */}
+          {leave && isFullDayLeave(leave) ? (
+            <span
+              data-leave=""
+              className="shrink-0 rounded-sm bg-background px-1 text-[0.6875rem] text-muted"
+            >
+              {leaveLabelAdmin(leave)}
+            </span>
           ) : null}
           <span className="truncate">{value}</span>
           {/* Nelle giornate miste il testo porta già "BO" sul pezzo in back office. */}
@@ -350,6 +361,42 @@ export function ShiftEditor(props: EditorProps) {
     [saveQueue],
   );
 
+  // Comando rapido: con una o più celle selezionate che hanno un'assenza compare «Togli
+  // l'assenza» sopra il foglio. Lo stato cambia solo se cambia l'insieme delle assenze
+  // selezionate, così spostare la selezione tra celle normali non rirenderizza il foglio.
+  const onSelectionChange = useCallback(
+    ({ rowIds, colIds }: { rowIds: string[]; colIds: string[] }) => {
+      const next = leaveKeys(leavesInSelection(leaves, rowIds, colIds));
+      setSelectedLeaveKeys((prev) => (prev === next ? prev : next));
+    },
+    [leaves],
+  );
+  // Riletta sui dati attuali: dopo una rimozione l'assenza non c'è più anche se la selezione
+  // non si è mossa.
+  const selectedLeaves = useMemo(
+    () =>
+      selectedLeaveKeys ? selectedLeaveKeys.split(",").flatMap((k) => leaveByDay.get(k) ?? []) : [],
+    [selectedLeaveKeys, leaveByDay],
+  );
+  const leaveToolbar = useMemo(
+    () =>
+      selectedLeaves.length > 0 ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setRemoving(selectedLeaves)}
+          title={selectedLeaves.map((l) => leaveTitle(l)).join(", ")}
+        >
+          <CalendarX aria-hidden />
+          {selectedLeaves.length === 1
+            ? "Togli l'assenza"
+            : `Togli ${selectedLeaves.length} assenze`}
+        </Button>
+      ) : undefined,
+    [selectedLeaves],
+  );
+
   // Smontando l'editor (cambio vista) la coda parte subito.
   useEffect(() => {
     saveQueue.revive();
@@ -362,6 +409,7 @@ export function ShiftEditor(props: EditorProps) {
     (ctx: MobileEditorContext) => {
       const person = peopleById.get(ctx.rowId);
       const dayShifts = byDay.get(key(ctx.rowId, ctx.colId)) ?? [];
+      const leave = leaveByDay.get(key(ctx.rowId, ctx.colId));
       const first = sortShifts(dayShifts)[0];
       const needsZone =
         person?.homeZone === "jolly" &&
@@ -406,13 +454,19 @@ export function ShiftEditor(props: EditorProps) {
               </Button>
             </div>
           ) : null}
-          <Button type="button" variant="ghost" onClick={openDetail}>
-            Dettaglio della giornata
+          {leave ? (
+            <p className="border-l-2 border-line-strong pl-3 text-sm text-muted">
+              {leaveTitle(leave)}: puoi scrivere il turno lo stesso. Per togliere l&apos;assenza
+              apri il dettaglio.
+            </p>
+          ) : null}
+          <Button type="button" variant={leave ? "secondary" : "ghost"} onClick={openDetail}>
+            {leave ? "Dettaglio della giornata · togli l'assenza" : "Dettaglio della giornata"}
           </Button>
         </div>
       );
     },
-    [peopleById, byDay, week.id, router],
+    [peopleById, byDay, leaveByDay, week.id, router],
   );
 
   // Foglio orario: ogni giornata dipinta sostituisce i turni del giorno, poi si ricaricano i dati.
@@ -594,6 +648,8 @@ export function ShiftEditor(props: EditorProps) {
               normalize={normalize}
               onChange={onChange}
               onCellActivate={(profileId, date) => setDialog({ profileId, date })}
+              onSelectionChange={onSelectionChange}
+              toolbar={leaveToolbar}
               renderMobileEditor={renderMobileEditor}
               footerRows={footerRows}
               rowHeaderLabel="Persona"
@@ -624,7 +680,9 @@ export function ShiftEditor(props: EditorProps) {
               .map((t) => t.code)
               .join(", ")}
             …) o un orario come <span className="nums">10-14 16-20</span>. Doppio clic o Alt+Invio
-            per il dettaglio (pausa, reparto, area, back office, nota).
+            per il dettaglio (pausa, reparto, area, back office, nota). Nei giorni di assenza
+            (tratteggio) si scrive lo stesso: dal dettaglio, o selezionando la cella, si toglie
+            l&apos;assenza.
           </p>
         </div>
 
@@ -665,6 +723,11 @@ export function ShiftEditor(props: EditorProps) {
           date={dialog.date}
           shifts={byDay.get(key(dialog.profileId, dialog.date)) ?? []}
           leave={leaveByDay.get(key(dialog.profileId, dialog.date))}
+          leaveRequest={
+            props.leaveRequests?.[
+              leaveByDay.get(key(dialog.profileId, dialog.date))?.requestId ?? ""
+            ]
+          }
           templates={templates}
           departments={departments}
           published={publishedByDay.get(key(dialog.profileId, dialog.date)) ?? []}
@@ -674,6 +737,17 @@ export function ShiftEditor(props: EditorProps) {
           }}
         />
       ) : null}
+      <RemoveLeavesDialog
+        weekId={week.id}
+        leaves={removing}
+        names={personNames}
+        onClose={() => setRemoving(null)}
+        onRemoved={(text) => {
+          setRemoving(null);
+          setNotice(text ?? null);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

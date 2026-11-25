@@ -27,7 +27,8 @@ export type TimesheetColumn = {
   zone: ZoneGroupId;
 };
 
-export type DayLeave = { fill: LeaveFill; label: string; locked: boolean } | null;
+/** Assenza (o richiesta in attesa) della persona nel giorno: colora la colonna, non la blocca. */
+export type DayLeave = { fill: LeaveFill; label: string } | null;
 
 export type DayData = {
   date: string;
@@ -243,7 +244,6 @@ export const TimesheetDay = memo(function TimesheetDay({
     if (!el) return;
     const col = Number(el.dataset.col);
     const slot = Number(el.dataset.slot);
-    if (day.leaves[col]?.locked) return;
     e.preventDefault();
     el.focus({ preventScroll: true });
     setActive({ col, slot });
@@ -286,7 +286,7 @@ export const TimesheetDay = memo(function TimesheetDay({
         e.preventDefault();
         return move(1, 0);
     }
-    if (readOnly || day.leaves[col]?.locked) return;
+    if (readOnly) return;
     const hourStart = slot - (slot % 2);
     const current = baseMarks[col];
     let next: SlotMark[] | null = null;
@@ -549,7 +549,6 @@ const HalfCell = memo(function HalfCell({
   onFocus,
 }: HalfCellProps) {
   const state = mark === "sale" ? "presente" : mark === "bo" ? "back office" : "vuoto";
-  const locked = Boolean(leave?.locked);
   return (
     <button
       type="button"
@@ -559,13 +558,12 @@ const HalfCell = memo(function HalfCell({
       data-slot={slot}
       tabIndex={tabbable ? 0 : -1}
       aria-label={`${label}: ${state}${leave ? ` (${leave.label})` : ""}`}
-      aria-disabled={locked || readOnly || undefined}
+      aria-disabled={readOnly || undefined}
       onFocus={() => onFocus({ col, slot })}
       className={cn(
         "relative block h-[11px] w-full focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground focus-visible:outline-solid",
         slot % 2 === 1 && "border-b border-dotted border-line",
-        !readOnly && !locked && "cursor-crosshair touch-none",
-        locked && "cursor-not-allowed",
+        !readOnly && "cursor-crosshair touch-none",
         mark === "sale" && "bg-foreground",
         mark === "bo" && "bg-background hatch text-foreground",
         !mark && outside && !leave && "bg-surface",

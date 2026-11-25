@@ -3,21 +3,22 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { CheckCheck, Trash2 } from "lucide-react";
 import {
   deleteAllNotifications,
   markAllNotificationsRead,
   markNotificationRead,
 } from "@/lib/notifications/actions";
 
-export function MarkAllRead() {
+export function MarkAllRead({ disabled = false }: { disabled?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   return (
     <Button
       variant="secondary"
       size="sm"
-      disabled={pending}
+      disabled={pending || disabled}
+      title={disabled ? "Le hai già lette tutte." : "Segna tutte le notifiche come lette"}
       onClick={() =>
         startTransition(async () => {
           await markAllNotificationsRead();
@@ -25,7 +26,7 @@ export function MarkAllRead() {
         })
       }
     >
-      Segna tutte come lette
+      <CheckCheck aria-hidden /> Leggi tutte
     </Button>
   );
 }

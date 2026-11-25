@@ -1803,6 +1803,10 @@ export type Database = {
           best_performer_confirmed: boolean;
           created_at: string;
           updated_at: string;
+          lac_avg_price: number | null;
+          lac_pieces: number | null;
+          lac_value_eur: number | null;
+          other_value_eur: number | null;
         };
         Insert: {
           id?: string;
@@ -1820,6 +1824,10 @@ export type Database = {
           best_performer_confirmed?: boolean;
           created_at?: string;
           updated_at?: string;
+          lac_avg_price?: number | null;
+          lac_pieces?: number | null;
+          lac_value_eur?: number | null;
+          other_value_eur?: number | null;
         };
         Update: {
           id?: string;
@@ -1837,6 +1845,10 @@ export type Database = {
           best_performer_confirmed?: boolean;
           created_at?: string;
           updated_at?: string;
+          lac_avg_price?: number | null;
+          lac_pieces?: number | null;
+          lac_value_eur?: number | null;
+          other_value_eur?: number | null;
         };
         Relationships: [
           {
@@ -2057,6 +2069,7 @@ export type Database = {
       is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
       login_attempt_begin: { Args: { p_code: string; p_ip: string; p_max_code: number; p_max_ip: number; p_minutes: number }; Returns: Json };
       remove_future_shifts: { Args: { p_profile_id: string; p_from: string }; Returns: Json };
+      remove_leave_days: { Args: { p_days: Json }; Returns: number };
       replace_shift_days: { Args: { p_week_id: string; p_days: Json; p_rows: Json }; Returns: number };
       respond_to_swap: { Args: { p_request_id: string; p_accept: boolean }; Returns: undefined };
       responsibility_week_team: { Args: { p_responsibility_id: string; p_date: string }; Returns: string[] };

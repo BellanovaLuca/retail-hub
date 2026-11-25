@@ -23,9 +23,6 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
   const weekStart = normalizeWeekParam(param, nowInRome());
   const data = await getAdminTargetsWeek(await createClient(), weekStart);
 
-  // In anteprima tutte le persone attive: chi ha ore in vendita riceve la proposta calcolata,
-  // gli altri (nessun turno o solo back office) restano in elenco per scrivere gli obiettivi a mano.
-  const withTargets = new Set(data.targets.map((t) => t.profileId));
   const people = data.people.map((p) => ({
     profileId: p.profileId,
     name: p.name,
@@ -33,11 +30,7 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
     zone: p.zone,
     plannedHours: p.plannedHours,
     hasShifts: p.hasShifts,
-    kpis: p.kpis.map((k) => ({ kpiId: k.kpiId, code: k.code, label: k.label })),
   }));
-  const withoutHours = data.people
-    .filter((p) => p.plannedHours === 0 && !withTargets.has(p.profileId))
-    .map((p) => p.name);
 
   return (
     <AssignmentEditor
@@ -51,11 +44,15 @@ export default async function AssegnazionePage({ params }: { params: Promise<{ w
       kpis={data.definitions
         .filter((d) => d.active)
         .map((d) => ({ kpiId: d.id, code: d.code, label: d.label, defaultTargetRule: d.rule }))}
-      savedTargets={data.targets}
+      sets={data.sets}
+      savedTargets={data.targets.map((t) => ({
+        profileId: t.profileId,
+        kpiId: t.kpiId,
+        target: t.target,
+      }))}
       comments={data.comments
         .filter((c) => c.kpiId === null)
         .map((c) => ({ profileId: c.profileId, body: c.body, published: c.published }))}
-      withoutHours={withoutHours}
     />
   );
 }

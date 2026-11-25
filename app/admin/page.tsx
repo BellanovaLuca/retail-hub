@@ -10,6 +10,7 @@ import { requireAdmin } from "@/lib/auth/session";
 import { getAdminAnnouncements } from "@/lib/data/announcements";
 import { namesById } from "@/lib/data/requests";
 import { evaluateWeek } from "@/lib/data/rules";
+import { dailyQuote } from "@/lib/daily-quote";
 import { formatLong, nowInRome, toISODate, weekNumber, weekStart } from "@/lib/dates";
 import { awaitsAdmin, type RequestStatus } from "@/lib/requests";
 import { leaveLabelAdmin } from "@/lib/schedule/view";
@@ -78,7 +79,11 @@ export default async function AdminDashboardPage() {
 
   return (
     <>
-      <PageHeader eyebrow={formatLong(now)} title="Cruscotto" />
+      <PageHeader eyebrow={formatLong(now)} title="Cruscotto">
+        <p className="max-w-2xl font-display text-lg leading-snug font-light text-foreground italic sm:text-xl">
+          «{dailyQuote(today)}»
+        </p>
+      </PageHeader>
       <div className="grid gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardTitle>

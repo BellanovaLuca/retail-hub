@@ -31,7 +31,7 @@ export const employeeTabs: NavItem[] = [
 /** Voci raccolte sotto "Altro" su mobile. */
 export const employeeMore: NavItem[] = [
   { href: "/ferie", label: "Ferie", icon: Palmtree },
-  { href: "/comunicazioni", label: "Comunicazioni", icon: Megaphone },
+  { href: "/comunicazioni", label: "Responsabilità e Comunicazioni", icon: Megaphone },
   { href: "/performance", label: "Performance", icon: BarChart3 },
   { href: "/profilo", label: "Profilo", icon: User },
 ];
@@ -51,7 +51,7 @@ export const adminSidebar: NavItem[] = [
   { href: "/admin/turni", label: "Turni", icon: CalendarDays },
   { href: "/admin/ferie", label: "Ferie", icon: Palmtree },
   { href: "/admin/richieste", label: "Richieste", icon: Inbox },
-  { href: "/admin/comunicazioni", label: "Comunicazioni", icon: Megaphone },
+  { href: "/admin/comunicazioni", label: "Responsabilità e Comunicazioni", icon: Megaphone },
   { href: "/admin/obiettivi", label: "Obiettivi", icon: Target },
   { href: "/admin/performance", label: "Performance", icon: BarChart3 },
   { href: "/admin/dipendenti", label: "Dipendenti", icon: Users },

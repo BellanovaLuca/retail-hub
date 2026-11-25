@@ -46,6 +46,8 @@ export type LeaveRecord = {
   hours: number | null;
   status: "tentative" | "confirmed";
   source: "planning" | "request";
+  /** Richiesta approvata che l'ha creata (null se inserita a mano o se la richiesta non c'è più). */
+  requestId?: string | null;
   /** Nata da un turno rapido di assenza scritto nel foglio (F, PE, MA…), non dal planning. */
   fromShift?: boolean;
 };

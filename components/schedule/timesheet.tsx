@@ -230,13 +230,12 @@ export function Timesheet({
         if (leave) {
           return {
             fill: leaveFill(leave),
+            // L'assenza colora la colonna ma non la blocca: ci si può dipingere sopra (il turno
+            // resta segnalato in conflitto; un turno rapido di assenza viene sostituito).
             label: `${leaveLabelAdmin(leave)}${leave.source === "request" ? " · richiesta approvata" : ""}`,
-            // Un turno rapido di assenza si può ridipingere: sostituisce la giornata.
-            locked: !leave.fromShift,
           };
         }
-        if (pendingSet.has(k(c.id, date)))
-          return { fill: "pending", label: "Richiesta in attesa", locked: false };
+        if (pendingSet.has(k(c.id, date))) return { fill: "pending", label: "Richiesta in attesa" };
         return null;
       });
       const value: DayData = {
