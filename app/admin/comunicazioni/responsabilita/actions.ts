@@ -18,6 +18,7 @@ import { getResponsibilities } from "@/lib/data/responsibilities";
 import { notify, notifyEach } from "@/lib/notifications";
 import {
   daysOfPerson,
+  gridState,
   isoWeekdayOf,
   mondayOf,
   normalizePersonDays,
@@ -56,24 +57,6 @@ const responsibilitySchema = z
 export type ResponsibilityInput = z.input<typeof responsibilitySchema>;
 
 type Assignee = { profile_id: string; role: "owner" | "support"; sort_order: number };
-
-/**
- * Stato delle assegnazioni settimanali di un'attività rispetto alla settimana corrente:
- * `any` = ha righe; `inForce` = ne vale una (di questa settimana o ripresa da una precedente);
- * `hasPast` = ne ha di settimane passate; `pastTeam` = quella che varrebbe, tolte le righe da
- * questa settimana in poi, ha delle persone.
- */
-function gridState(rows: { week_start: string; profile_ids: string[] }[], currentWeek: string) {
-  const past = rows
-    .filter((w) => w.week_start < currentWeek)
-    .sort((a, b) => (a.week_start < b.week_start ? 1 : -1))[0];
-  return {
-    any: rows.length > 0,
-    inForce: rows.some((w) => w.week_start <= currentWeek),
-    hasPast: !!past,
-    pastTeam: !!past && past.profile_ids.length > 0,
-  };
-}
 
 /**
  * Crea o modifica un'attività con le sue assegnazioni. Le assegnazioni cambiate si tolgono e si

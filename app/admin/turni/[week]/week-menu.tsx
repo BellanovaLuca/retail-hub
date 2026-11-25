@@ -142,7 +142,9 @@ export function WeekMenu({
                   const exists = weekTemplates.some((t) => t.name === name.trim());
                   if (
                     exists &&
-                    !confirm(`Esiste già un modello "${name.trim()}": sostituirlo con questa settimana?`)
+                    !confirm(
+                      `Esiste già un modello "${name.trim()}": sostituirlo con questa settimana?`,
+                    )
                   )
                     return;
                   run(() => saveWeekAsTemplate(weekId, name, exists));

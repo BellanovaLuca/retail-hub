@@ -133,7 +133,8 @@ function paintHourCell(cell: ExcelJS.Cell, value: 0 | 0.5 | 1, marks: [SlotMark,
   if (value === 0) return;
   const bo = marks.every((m) => m !== "sale");
   cell.value = value;
-  cell.numFmt = "0.#";
+  // Non "0.#": Excel lascerebbe il separatore decimale anche sulle ore piene ("1,").
+  cell.numFmt = value === 1 ? "0" : "0.0";
   if (bo) {
     // Back office: righe diagonali al posto del pieno.
     cell.fill = {

@@ -162,9 +162,7 @@ export function CheckMonitor({
             : missingToday.length === 0
               ? "tutte le attività previste sono spuntate"
               : `${missingToday.length} ${missingToday.length === 1 ? "attività non ancora spuntata" : "attività non ancora spuntate"}`}
-          {unassigned
-            ? ` · ${unassigned} senza nessuno assegnato (assegnale qui sopra)`
-            : ""}
+          {unassigned ? ` · ${unassigned} senza nessuno assegnato (assegnale qui sopra)` : ""}
           {shift === null && !isFuture ? " · turni del giorno non pubblicati" : ""}
         </span>
       </p>
@@ -352,7 +350,8 @@ export function CheckMonitor({
         Ogni casella è una responsabilità assegnata alla persona in questo giorno: nera con
         l&apos;ora = l&apos;ha spuntata lei; con il nome di un collega = l&apos;ha fatta
         l&apos;altro assegnato; rossa = non svolta a giornata finita. Le caselle vuote non sono
-        assegnate in questo giorno. Con un clic segni tu l&apos;attività come fatta dalla persona, o togli la spunta.
+        assegnate in questo giorno. Con un clic segni tu l&apos;attività come fatta dalla persona, o
+        togli la spunta.
       </p>
     </div>
   );

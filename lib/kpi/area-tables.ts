@@ -105,3 +105,29 @@ export function fillProposals(input: {
   }
   return { values, filled };
 }
+
+/**
+ * Voce che corrisponde a un nome scritto a mano (senza badare a maiuscole e spazi ai bordi): per
+ * etichetta propria o per l'etichetta che ha in un gruppo. Se più voci corrispondono vince, in
+ * ordine: quella con quel nome nel gruppo di destinazione, quella con quell'etichetta propria,
+ * quella che si chiama così in un altro gruppo.
+ */
+export function findKpiByName<K extends { id: string; label: string }>(
+  name: string,
+  kpis: K[],
+  items: { set_id: string; kpi_id: string; label_override: string | null }[],
+  targetSetId: string,
+): K | undefined {
+  const wanted = name.trim().toLowerCase();
+  const named = (i: { label_override: string | null }) =>
+    (i.label_override ?? "").trim().toLowerCase() === wanted;
+  const byId = new Map(kpis.map((k) => [k.id, k]));
+  const here = items.find((i) => i.set_id === targetSetId && named(i));
+  const elsewhere = items.find((i) => i.set_id !== targetSetId && named(i));
+  return (
+    (here && byId.get(here.kpi_id)) ||
+    kpis.find((k) => k.label.trim().toLowerCase() === wanted) ||
+    (elsewhere && byId.get(elsewhere.kpi_id)) ||
+    undefined
+  );
+}

@@ -279,7 +279,9 @@ function ViolationsPanel({
               <li key={o.id} className="flex items-start justify-between gap-2">
                 <span>
                   {ruleNames[o.ruleId] ?? "Regola"}
-                  {o.profileId ? ` · ${personNames[o.profileId] ?? "persona non più in elenco"}` : ""}
+                  {o.profileId
+                    ? ` · ${personNames[o.profileId] ?? "persona non più in elenco"}`
+                    : ""}
                   {o.date ? ` · ${o.date.slice(8)}/${o.date.slice(5, 7)}` : " · tutta la settimana"}
                   <span className="block text-muted">{o.note}</span>
                 </span>

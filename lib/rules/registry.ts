@@ -154,9 +154,7 @@ export function evaluateRules(
       out.push(configViolation(rule, reason));
     }
   }
-  return out
-    .filter((v) => !overrides.some((o) => overrideCovers(o, v)))
-    .sort(compareViolations);
+  return out.filter((v) => !overrides.some((o) => overrideCovers(o, v))).sort(compareViolations);
 }
 
 /** Frase leggibile della regola (es. "Sole: almeno 1 persona · lun–dom · 10:00–12:00"). */

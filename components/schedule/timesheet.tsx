@@ -142,14 +142,28 @@ export function Timesheet({
   }, [shifts]);
   const baseInputs = useMemo(() => toShiftInputs(shifts, peopleById), [shifts, peopleById]);
 
-  // Le modifiche ottimistiche restano finché il server non restituisce i dati aggiornati.
+  // Le modifiche ottimistiche restano finché il server non restituisce i dati aggiornati. Una
+  // giornata dipinta da tastiera aspetta qualche istante prima di salvare (timer): finché il
+  // timer è pendente, o il salvataggio è in corso, o si sta scegliendo l'area, i dati che
+  // arrivano dal server (il ricarico dopo un altro salvataggio, un collega che modifica) NON
+  // la cancellano, altrimenti le ore appena scritte sparirebbero senza essere mai salvate.
   const inflight = useRef(new Map<string, number>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const promptKey = useRef<string | null>(null);
+  promptKey.current = zonePrompt ? k(zonePrompt.profileId, zonePrompt.date) : null;
   const lastShifts = useRef(shifts);
   useEffect(() => {
     if (lastShifts.current === shifts) return;
     lastShifts.current = shifts;
     setOverrides((prev) => {
-      const next = new Map([...prev].filter(([key]) => (inflight.current.get(key) ?? 0) > 0));
+      const next = new Map(
+        [...prev].filter(
+          ([key]) =>
+            (inflight.current.get(key) ?? 0) > 0 ||
+            timers.current.has(key) ||
+            promptKey.current === key,
+        ),
+      );
       return next.size === prev.size ? prev : next;
     });
   }, [shifts]);
@@ -269,9 +283,12 @@ export function Timesheet({
   // --- Salvataggio ----------------------------------------------------------------------------
 
   const chains = useRef(new Map<string, Promise<unknown>>());
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const saveRef = useRef(onSaveDay);
   saveRef.current = onSaveDay;
+  // I turni «com'erano» si leggono al momento del salvataggio: tra la pittura e il salvataggio
+  // (attesa da tastiera, salvataggi in coda) i dati del server possono essere cambiati.
+  const metaRef = useRef(metaFor);
+  metaRef.current = metaFor;
 
   const dropOverride = useCallback((key: string) => {
     setOverrides((prev) => {
@@ -295,7 +312,7 @@ export function Timesheet({
         const o = overridesRef.current.get(key);
         if (!o) return;
         const person = peopleById.get(profileId);
-        const meta = metaFor(profileId, date);
+        const meta = metaRef.current(profileId, date);
         const defaultBo = person ? !person.countsForCoverage : false;
         const segments = repaintedSegments(meta.original, o.marks).map((s) => ({
           start: s.start,
@@ -330,7 +347,7 @@ export function Timesheet({
         setSaving((n) => n - 1);
       });
     },
-    [weekId, peopleById, metaFor, dropOverride],
+    [weekId, peopleById, dropOverride],
   );
 
   const applyAndSave = useCallback(
@@ -360,9 +377,30 @@ export function Timesheet({
     [runSave, metaFor],
   );
 
+  // Smontando il foglio (cambio vista, altra settimana) le giornate dipinte da tastiera e non
+  // ancora salvate partono subito: cancellare i timer le farebbe perdere in silenzio.
+  const runSaveRef = useRef(runSave);
+  runSaveRef.current = runSave;
   useEffect(() => {
     const t = timers.current;
-    return () => t.forEach((id) => clearTimeout(id));
+    return () => {
+      for (const [key, id] of [...t]) {
+        clearTimeout(id);
+        t.delete(key);
+        const [profileId, date] = key.split("|");
+        runSaveRef.current(profileId, date);
+      }
+    };
+  }, []);
+
+  // Chiudere la pagina con giornate in attesa o in salvataggio farebbe perdere le ultime ore.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const saving = [...inflight.current.values()].some((n) => n > 0);
+      if (timers.current.size > 0 || saving) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
   const onCommit = useCallback(

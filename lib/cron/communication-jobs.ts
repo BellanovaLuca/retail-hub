@@ -96,8 +96,7 @@ export const communicationJobs: CronJob[] = [
       // qualcuno assegnato; quelle senza nessuno assegnato si elencano a parte.
       const missing = uncheckedOn(responsibilities, today, (r) => !!checks[r.id]?.[today]);
       const unassigned = responsibilities.filter(
-        (r) =>
-          !hasAssignees(r) && isScheduledOn(r.scheduleDays, today) && !checks[r.id]?.[today],
+        (r) => !hasAssignees(r) && isScheduledOn(r.scheduleDays, today) && !checks[r.id]?.[today],
       );
       if (missing.length) {
         await notify(await adminIds(), {

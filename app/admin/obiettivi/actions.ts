@@ -12,10 +12,11 @@ import {
 } from "@/lib/auth/guards";
 import { setNameForZone } from "@/lib/data/targets";
 import { weekNumber } from "@/lib/dates";
+import { findKpiByName } from "@/lib/kpi/area-tables";
 import { createsCycle, parseRule, ruleSchema } from "@/lib/kpi/rules";
 import { notify, notifyEach } from "@/lib/notifications";
 import type { createClient } from "@/lib/supabase/server";
-import type { DefaultTargetRule } from "@/lib/targets";
+import type { DefaultTargetRule, TargetZone } from "@/lib/targets";
 
 type Db = Awaited<ReturnType<typeof createClient>>;
 
@@ -711,25 +712,22 @@ export async function quickAddKpi(
       supabase.from("kpi_sets").select("id").eq("name", setName).maybeSingle(),
     ]);
     if (!set) throw new ActionError(`Gruppo ${setName} non trovato.`);
-    const { data: items } = await supabase
+    const { data: allItems } = await supabase
       .from("kpi_set_items")
-      .select("kpi_id, label_override, sort_order")
-      .eq("set_id", set.id);
+      .select("set_id, kpi_id, label_override, sort_order");
+    const items = (allItems ?? []).filter((i) => i.set_id === set.id);
 
-    const wanted = parsed.data.toLowerCase();
-    let kpi = (all ?? []).find(
-      (k) =>
-        k.label.toLowerCase() === wanted ||
-        (items ?? []).some(
-          (i) => i.kpi_id === k.id && (i.label_override ?? "").toLowerCase() === wanted,
-        ),
-    );
-    if (kpi && kpi.active && (items ?? []).some((i) => i.kpi_id === kpi!.id))
+    // La voce si riconosce dal suo nome o dal nome che ha in una qualsiasi tabella (es. «META»
+    // nel Sole è «META RB & OO»): altrimenti scrivendo il nome visto nell'altra tabella nascerebbe
+    // un doppione.
+    const kpi = findKpiByName(parsed.data, all ?? [], allItems ?? [], set.id);
+    if (kpi && kpi.active && items.some((i) => i.kpi_id === kpi.id))
       return {
         ok: false,
         message: `La colonna «${parsed.data}» c'è già nella tabella ${setName}.`,
       };
 
+    let kpiId = kpi?.id;
     if (!kpi) {
       const code = kpiCodeFromLabel(parsed.data, new Set((all ?? []).map((k) => k.code)));
       const { data, error } = await supabase
@@ -740,10 +738,10 @@ export async function quickAddKpi(
           default_target_rule: null,
           sort_order: Math.max(0, ...(all ?? []).map((k) => k.sort_order)) + 1,
         })
-        .select("id, code, label, active, sort_order")
+        .select("id")
         .single();
       if (error || !data) return { ok: false, message: dbErrorMessage(error, "Voce non creata.") };
-      kpi = data;
+      kpiId = data.id;
     } else if (!kpi.active) {
       const { error } = await supabase
         .from("kpi_definitions")
@@ -752,11 +750,12 @@ export async function quickAddKpi(
       if (error) return { ok: false, message: dbErrorMessage(error, "Voce non riattivata.") };
     }
 
-    if (!(items ?? []).some((i) => i.kpi_id === kpi!.id)) {
+    if (!kpiId) return { ok: false, message: "Voce non creata." };
+    if (!items.some((i) => i.kpi_id === kpiId)) {
       const { error } = await supabase.from("kpi_set_items").insert({
         set_id: set.id,
-        kpi_id: kpi.id,
-        sort_order: Math.max(0, ...(items ?? []).map((i) => i.sort_order)) + 1,
+        kpi_id: kpiId,
+        sort_order: Math.max(0, ...items.map((i) => i.sort_order)) + 1,
       });
       if (error) return { ok: false, message: dbErrorMessage(error, "Colonna non aggiunta.") };
     }
@@ -764,7 +763,7 @@ export async function quickAddKpi(
     return {
       ok: true,
       message: `Colonna «${parsed.data}» aggiunta alla tabella ${setName}.`,
-      data: { id: kpi.id },
+      data: { id: kpiId },
     };
   });
 }
@@ -877,7 +876,7 @@ export async function removeGroupItem(
         .eq("id", set)
         .maybeSingle();
       // Solo per i gruppi di area: «Sole» → persone del Sole, «Vista» → Vista e jolly.
-      const zones =
+      const zones: TargetZone[] | null =
         group?.name === "Sole" ? ["sole"] : group?.name === "Vista" ? ["vista", "jolly"] : null;
       if (zones) {
         const { data: members, error: membersError } = await supabase

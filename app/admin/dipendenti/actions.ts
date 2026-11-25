@@ -12,6 +12,7 @@ import {
   type ActionResult,
 } from "@/lib/auth/guards";
 import { credentialsMessage, generatePin, syntheticEmail } from "@/lib/auth/pin";
+import { forgetLoginSessions } from "@/lib/auth/login-sessions";
 import { authPassword } from "@/lib/auth/secret";
 import { nowInRome, toISODate, weekStart } from "@/lib/dates";
 import { sameName } from "@/lib/employees/confirm";
@@ -314,6 +315,17 @@ export async function resetPin(id: string): Promise<ActionResult<Credentials>> {
       }
       return { ok: false, message: "PIN non aggiornato. Riprova." };
     }
+
+    // Con il nuovo PIN chi era collegato deve rientrare (le sessioni smettono subito di valere
+    // per il database) e un eventuale blocco per troppi tentativi viene tolto.
+    const admin = createAdminClient();
+    await forgetLoginSessions(admin, id);
+    const { error: unlockError } = await admin
+      .from("login_attempts")
+      .delete()
+      .eq("employee_code", person.employee_code)
+      .eq("success", false);
+    if (unlockError) console.error("reset PIN: tentativi non azzerati", unlockError);
 
     revalidatePath(`/admin/dipendenti/${id}`);
     return {

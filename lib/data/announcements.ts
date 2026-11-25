@@ -69,6 +69,8 @@ export type FeedEntry = {
   acknowledged: boolean;
   readAt: string | null;
   acknowledgedAt: string | null;
+  /** Scritta da chi legge: non è tra i destinatari, quindi niente «da leggere» né conferma. */
+  own: boolean;
 };
 
 /**
@@ -115,7 +117,11 @@ function toEntry(
   a: AnnouncementRow,
   read: { read_at: string; acknowledged_at: string | null } | undefined,
   authors: Map<string, string>,
+  readerId: string,
 ): FeedEntry {
+  // Stessa regola di `recipientsOf`: l'autore non è un destinatario. La sua comunicazione gli
+  // resta visibile, ma non gli chiede né lettura né conferma.
+  const own = a.author_id === readerId;
   return {
     id: a.id,
     title: a.title,
@@ -128,10 +134,11 @@ function toEntry(
     expiresAt: a.expires_at,
     authorName: a.author_id ? (authors.get(a.author_id) ?? null) : null,
     attachments: parseAttachments(a.attachments),
-    read: !!read,
-    acknowledged: !!read?.acknowledged_at,
+    read: own || !!read,
+    acknowledged: own || !!read?.acknowledged_at,
     readAt: read?.read_at ?? null,
     acknowledgedAt: read?.acknowledged_at ?? null,
+    own,
   };
 }
 
@@ -146,7 +153,7 @@ export async function getFeed(
     db,
     list.map((a) => a.author_id),
   );
-  let entries = list.map((a) => toEntry(a, readMap.get(a.id), authors));
+  let entries = list.map((a) => toEntry(a, readMap.get(a.id), authors, profileId));
   if (opts.category) entries = entries.filter((e) => e.category === opts.category);
   const q = opts.q?.trim().toLocaleLowerCase("it-IT");
   if (q) {
@@ -179,7 +186,7 @@ export async function getAnnouncementForReader(
   if (!isLive(a) || !isRecipient(a, { id: profileId, departmentIds: me?.department_ids ?? [] }))
     return null;
   const authors = await authorNames(db, [a.author_id]);
-  return toEntry(a, read ?? undefined, authors);
+  return toEntry(a, read ?? undefined, authors, profileId);
 }
 
 export type UnreadAnnouncement = {
@@ -204,6 +211,8 @@ export async function getUnreadAnnouncements(
 ): Promise<{ count: number; items: UnreadAnnouncement[] }> {
   const { list, readMap } = await visibleAnnouncements(db, profileId);
   const pending = list
+    // Le proprie non chiedono nulla a chi le ha scritte (l'autore non è tra i destinatari).
+    .filter((a) => a.author_id !== profileId)
     .map((a) => {
       const r = readMap.get(a.id);
       return { ...a, read: !!r, acknowledged: !!r?.acknowledged_at };

@@ -1466,6 +1466,7 @@ export type Database = {
           created_by: string | null;
           created_at: string;
           updated_at: string;
+          profile_id: string | null;
         };
         Insert: {
           id?: string;
@@ -1476,6 +1477,7 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          profile_id?: string | null;
         };
         Update: {
           id?: string;
@@ -1486,11 +1488,19 @@ export type Database = {
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
+          profile_id?: string | null;
         };
         Relationships: [
           {
             foreignKeyName: "rule_overrides_created_by_fkey";
             columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "rule_overrides_profile_id_fkey";
+            columns: ["profile_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
             referencedColumns: ["id"];
@@ -2101,6 +2111,7 @@ export type Database = {
       is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
       login_attempt_begin: { Args: { p_code: string; p_ip: string; p_max_code: number; p_max_ip: number; p_minutes: number }; Returns: Json };
       person_days_valid: { Args: { p_profile_ids: string[]; p_person_days: Json }; Returns: boolean };
+      refresh_shift_conflicts: { Args: { p_days: Json }; Returns: number };
       remove_from_responsibilities: { Args: { p_profile_id: string; p_week: string }; Returns: Json };
       remove_future_shifts: { Args: { p_profile_id: string; p_from: string }; Returns: Json };
       remove_leave_days: { Args: { p_days: Json }; Returns: number };

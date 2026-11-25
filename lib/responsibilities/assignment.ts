@@ -392,3 +392,24 @@ export function dutyLabel(duty: Duty, name: (id: string) => string): string | nu
       return null;
   }
 }
+
+/**
+ * Stato delle assegnazioni settimanali di un'attività rispetto alla settimana corrente:
+ * `any` = ha righe; `inForce` = ne vale una (di questa settimana o ripresa da una precedente);
+ * `hasPast` = ne ha di settimane passate; `pastTeam` = quella che varrebbe, tolte le righe da
+ * questa settimana in poi, ha delle persone.
+ */
+export function gridState(
+  rows: { week_start: string; profile_ids: string[] }[],
+  currentWeek: string,
+) {
+  const past = rows
+    .filter((w) => w.week_start < currentWeek)
+    .sort((a, b) => (a.week_start < b.week_start ? 1 : -1))[0];
+  return {
+    any: rows.length > 0,
+    inForce: rows.some((w) => w.week_start <= currentWeek),
+    hasPast: !!past,
+    pastTeam: !!past && past.profile_ids.length > 0,
+  };
+}

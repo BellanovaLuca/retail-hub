@@ -61,7 +61,10 @@ export default async function AdminResponsabilitaPage({
   // assegnato (le altre vanno prima assegnate, e sono segnalate a parte).
   const missing = days
     .filter((d) => d < today)
-    .reduce((sum, d) => sum + uncheckedOn(board.items, d, (r) => !!board.checks[r.id]?.[d]).length, 0);
+    .reduce(
+      (sum, d) => sum + uncheckedOn(board.items, d, (r) => !!board.checks[r.id]?.[d]).length,
+      0,
+    );
   const uncoveredToday = board.items.filter(
     (r) => board.todayDuty?.[r.id]?.kind === "uncovered" && hasAssignees(r),
   ).length;

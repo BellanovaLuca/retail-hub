@@ -56,11 +56,14 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
     requestCoverageImpact(supabase, r),
     r.type === "scambio_turno" ? swapContext(supabase, r, names) : null,
   ]);
-  const othersByPerson = new Map<string, { days: string[]; label: string }>();
+  // Per persona, un gruppo per tipo di assenza: chi ha ferie lunedì e malattia martedì non
+  // risulta «in ferie» in entrambi i giorni.
+  const othersByPerson = new Map<string, Map<string, string[]>>();
   for (const l of others ?? []) {
-    const cur = othersByPerson.get(l.profile_id) ?? { days: [], label: leaveLabelAdmin(l) };
-    cur.days.push(l.date);
-    othersByPerson.set(l.profile_id, cur);
+    const groups = othersByPerson.get(l.profile_id) ?? new Map<string, string[]>();
+    const label = leaveLabelAdmin(l);
+    groups.set(label, [...(groups.get(label) ?? []), l.date]);
+    othersByPerson.set(l.profile_id, groups);
   }
   const fmt = (d: string) => format(parseISO(d), "EEE d", { locale: it });
   const fmtLong = (d: string) => format(parseISO(d), "EEE d MMM", { locale: it });
@@ -174,10 +177,16 @@ export default async function AdminRichiestaPage({ params }: { params: Promise<{
             <h3 className="mb-2 eyebrow">Chi altro è assente</h3>
             {othersByPerson.size ? (
               <ul className="mb-6 text-sm">
-                {[...othersByPerson].map(([pid, v]) => (
+                {[...othersByPerson].map(([pid, groups]) => (
                   <li key={pid}>
-                    {names.get(pid)} · {v.label} ·{" "}
-                    <span className="text-muted nums">{v.days.map(fmt).join(", ")}</span>
+                    {names.get(pid)}
+                    {[...groups].map(([label, days]) => (
+                      <span key={label}>
+                        {" "}
+                        · {label} ·{" "}
+                        <span className="text-muted nums">{days.map(fmt).join(", ")}</span>
+                      </span>
+                    ))}
                   </li>
                 ))}
               </ul>

@@ -97,7 +97,7 @@ export function LeaveDayDialog({
     if (entry.source === "request") {
       setMessage({
         ok: false,
-        text: `L'assenza di ${peopleById.get(entry.profileId)?.displayName ?? ""} nasce da una richiesta approvata.`,
+        text: `L'assenza di ${peopleById.get(entry.profileId)?.displayName ?? ""} nasce da una richiesta approvata: togliendola riceve un avviso e, se la richiesta resta senza giorni, torna «rifiutata».`,
       });
       setRetry({
         label: "Togli comunque",

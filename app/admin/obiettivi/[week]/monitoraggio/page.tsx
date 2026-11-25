@@ -195,7 +195,7 @@ export default async function MonitoraggioPage({ params }: { params: Promise<{ w
                         {label} <span className="text-muted">· {day}</span>
                       </>
                     ) : (
-                      <span className="first-letter:uppercase">{day}</span>
+                      <span className="inline-block first-letter:uppercase">{day}</span>
                     )}
                   </h3>
                   {/* Oltre 7 giorni i numeri non si possono più inserire: niente sollecito. */}
